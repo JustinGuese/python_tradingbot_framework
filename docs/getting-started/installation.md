@@ -3,8 +3,8 @@
 ## System Requirements
 
 - Python 3.12 or higher
-- PostgreSQL database
-- Kubernetes cluster (for production deployment)
+- PostgreSQL database (see [Quick Start](quick-start.md) for local setup)
+- Kubernetes cluster (for production deployment - see [Deployment Guide](../deployment/overview.md))
 
 ## Install Dependencies
 
@@ -34,17 +34,11 @@ uv sync --extra docs
 
 ## Database Setup
 
-1. Create a PostgreSQL database:
+For local development, see the [Quick Start Guide](quick-start.md) which covers:
+- Running PostgreSQL with Docker
+- Setting the `POSTGRES_URI` environment variable
 
-```sql
-CREATE DATABASE tradingbot;
-```
-
-2. Set the connection string:
-
-```bash
-export POSTGRES_URI="postgresql://user:password@host:5432/tradingbot"
-```
+For production deployment with Kubernetes, see the [Deployment Guide](../deployment/overview.md).
 
 The database tables will be created automatically on first run using SQLAlchemy.
 
@@ -75,5 +69,6 @@ docker build -t tradingbot:latest .
 
 ## Next Steps
 
-- [Quick Start Guide](quick-start.md)
-- [Creating a Bot](creating-a-bot.md)
+- [Quick Start Guide](quick-start.md) - Get your first bot running locally
+- [Creating a Bot](creating-a-bot.md) - Learn how to create custom bots
+- [Deployment Guide](../deployment/overview.md) - Deploy to Kubernetes

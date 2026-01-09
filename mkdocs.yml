@@ -87,9 +87,9 @@ nav:
       - Database: api/database.md
   - Deployment:
     - Overview: deployment/overview.md
-    - Deployment Guide: DEPLOYMENT.md
     - Helm Charts: deployment/helm.md
     - Kubernetes: deployment/kubernetes.md
+    - Documentation Deployment: DEPLOYMENT.md
   - Guides:
     - Technical Analysis: guides/technical-analysis.md
     - Portfolio Management: guides/portfolio-management.md
