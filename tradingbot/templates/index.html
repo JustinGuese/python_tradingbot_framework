@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Portfolio Overview</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.3.5/css/dataTables.dataTables.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            cursor: pointer;
+        }
+        th:hover {
+            background-color: #45a049;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .bot-link {
+            color: #2196F3;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .bot-link:hover {
+            text-decoration: underline;
+        }
+        .positive {
+            color: #4CAF50;
+        }
+        .negative {
+            color: #f44336;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trading Bot Portfolio Performance</h1>
+        <div id="loading" class="loading">Loading bot data...</div>
+        <table id="botsTable" class="display" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Bot Name</th>
+                    <th>Current Worth</th>
+                    <th>Total Return %</th>
+                    <th>Annualized Return %</th>
+                    <th>Sharpe Ratio</th>
+                    <th>Sortino Ratio</th>
+                    <th>Max Drawdown %</th>
+                    <th>Volatility %</th>
+                    <th>Total Trades</th>
+                    <th>Start Date</th>
+                </tr>
+            </thead>
+            <tbody id="botsTableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/2.3.5/js/dataTables.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            // Fetch bot data from API
+            fetch('/api/bots')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('botsTableBody');
+                    const loading = document.getElementById('loading');
+                    
+                    data.bots.forEach(bot => {
+                        const row = document.createElement('tr');
+                        
+                        const formatNumber = (num, decimals = 2) => {
+                            if (num === null || num === undefined) return 'N/A';
+                            return parseFloat(num).toFixed(decimals);
+                        };
+                        
+                        const formatCurrency = (num) => {
+                            if (num === null || num === undefined) return 'N/A';
+                            return '$' + parseFloat(num).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        };
+                        
+                        const getClass = (num) => {
+                            if (num === null || num === undefined) return '';
+                            return parseFloat(num) >= 0 ? 'positive' : 'negative';
+                        };
+                        
+                        const startDate = bot.start_date ? new Date(bot.start_date).toLocaleDateString() : 'N/A';
+                        
+                        // Store raw numeric values for proper sorting
+                        const currentWorthValue = bot.current_worth || 0;
+                        const totalReturnValue = bot.total_return || 0;
+                        const annualizedReturnValue = bot.annualized_return || 0;
+                        const sharpeValue = bot.sharpe_ratio || 0;
+                        const sortinoValue = bot.sortino_ratio || 0;
+                        const maxDrawdownValue = bot.max_drawdown || 0;
+                        const volatilityValue = bot.volatility || 0;
+                        const tradesValue = bot.total_trades || 0;
+                        
+                        row.innerHTML = `
+                            <td><a href="/bot/${bot.name}" class="bot-link">${bot.name}</a></td>
+                            <td data-order="${currentWorthValue}">${formatCurrency(bot.current_worth)}</td>
+                            <td class="${getClass(bot.total_return)}" data-order="${totalReturnValue}">${formatNumber(bot.total_return)}%</td>
+                            <td class="${getClass(bot.annualized_return)}" data-order="${annualizedReturnValue}">${formatNumber(bot.annualized_return)}%</td>
+                            <td data-order="${sharpeValue}">${formatNumber(bot.sharpe_ratio, 3)}</td>
+                            <td data-order="${sortinoValue}">${formatNumber(bot.sortino_ratio, 3)}</td>
+                            <td class="${getClass(-bot.max_drawdown)}" data-order="${maxDrawdownValue}">${formatNumber(bot.max_drawdown)}%</td>
+                            <td data-order="${volatilityValue}">${formatNumber(bot.volatility)}%</td>
+                            <td data-order="${tradesValue}">${bot.total_trades}</td>
+                            <td data-order="${bot.start_date || ''}">${startDate}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                    
+                    // Hide loading, show table
+                    loading.style.display = 'none';
+                    document.getElementById('botsTable').style.display = 'table';
+                    
+                    // Initialize DataTables
+                    $('#botsTable').DataTable({
+                        order: [[3, 'desc']], // Sort by Annualized Return % descending by default
+                        pageLength: 25,
+                        lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
+                        columnDefs: [
+                            { type: 'num', targets: [1, 2, 3, 4, 5, 6, 7, 8] }, // Enable numeric sorting for numeric columns
+                            { type: 'date', targets: [9] } // Enable date sorting for start date
+                        ]
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching bot data:', error);
+                    document.getElementById('loading').textContent = 'Error loading bot data. Please refresh the page.';
+                });
+        });
+    </script>
+</body>
+</html>
+

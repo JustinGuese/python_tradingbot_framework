@@ -1,0 +1,40 @@
+variables:
+  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_BRANCH
+  DOCKER_TLS_CERTDIR: "/certs"
+
+default:
+  services:
+  - docker:25.0.5-dind
+
+stages:
+- build
+- deploy
+
+build-docker:
+  stage: build
+  image: docker:25.0.5-git
+  # tags:
+  #   - dfserver
+  script:
+  - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+  - docker build --pull -t $IMAGE .
+  - docker push $IMAGE
+
+helm-kubectl-deploy:
+  stage: deploy
+  tags:
+  - dfserver
+  image:
+    name: dtzar/helm-kubectl
+    entrypoint: [ '' ]
+  dependencies:
+  - build-docker
+  script:
+  # Deploy trading bots and PostgreSQL using Helm
+  - |
+    helm upgrade --install tradingbots \
+      ./helm/tradingbots \
+      --create-namespace \
+      --namespace tradingbots-2025
+
+  environment: production

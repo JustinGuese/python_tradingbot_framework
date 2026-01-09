@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ai-hedge-fund
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  schedule: "0 22 * * 3"
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: ai-hedge-fund
+            image: guestros/ai-hedge-fund:latest
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            command: ["python", "src/main.py"]
+            args:
+            - "--ticker"
+            - "AAPL,MSFT,NVDA,AAPL,GOOGL,MSFT,NVDA,TSLA"
+            - "--analysts-all"
+            - "--model"
+            - "deepseek/deepseek-v3.2"
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            env:
+            - name: POSTGRES_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: POSTGRES_URI_AI_HEDGE_FUND
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: OPENROUTER_API_KEY
+          restartPolicy: OnFailure
+

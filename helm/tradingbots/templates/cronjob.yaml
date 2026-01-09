@@ -1,0 +1,71 @@
+{{- /*
+  This template generates Kubernetes CronJobs for each trading bot defined in values.yaml.
+  It loops through the bots list and creates a CronJob for each one with the specified schedule.
+  
+  Key features:
+  - Auto-generates container names from bot names (removes "bot" suffix)
+  - Uses bot name to determine Python script filename ({name}.py)
+  - Applies resource limits and environment variables from values.yaml
+  - Configures job cleanup and concurrency policies
+*/ -}}
+{{- range .Values.bots }}
+{{- /* Generate container name: tradingbot-{name} (removes "bot" suffix if present) */}}
+{{- $containerName := printf "tradingbot-%s" (.name | replace "bot" "" | lower) }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  # Cron schedule for this bot (e.g., "*/5 * * * 1-5" = every 5 min, Mon-Fri)
+  schedule: {{ .schedule | quote }}
+  # Number of successful job runs to keep in history
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  # Number of failed job runs to keep in history (for debugging)
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  # Prevent overlapping runs - skip if previous job still running
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      # Maximum time a job can run before being terminated (seconds)
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      # Automatically delete completed jobs after this time (seconds)
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: {{ $containerName }}
+            # Docker image containing all bot scripts
+            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+            command:
+            - "python"
+            # Script filename is auto-generated from bot name: {name}.py
+            args:
+            - {{ printf "%s.py" .name | quote }}
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            # CPU and memory limits from values.yaml
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            # Environment variables (e.g., POSTGRES_URI) from Kubernetes secrets
+            env:
+            {{- range $.Values.env }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+            {{- end }}
+          # Restart container if it fails (but not if job completes successfully)
+          restartPolicy: OnFailure
+---
+{{- end }}
+

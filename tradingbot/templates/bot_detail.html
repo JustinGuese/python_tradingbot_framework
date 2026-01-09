@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ bot_name }} - Portfolio Details</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.3.5/css/dataTables.dataTables.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .back-link {
+            color: #2196F3;
+            text-decoration: none;
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .positive {
+            color: #4CAF50;
+        }
+        .negative {
+            color: #f44336;
+        }
+        .chart-container {
+            margin: 30px 0;
+        }
+        .holdings-section {
+            margin: 30px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Back to Overview</a>
+        <h1>{{ bot_name }} - Portfolio Performance</h1>
+        <div id="loading" class="loading">Loading performance data...</div>
+        
+        <div id="content" style="display: none;">
+            <!-- Performance Metrics -->
+            <div class="metrics-grid" id="metricsGrid">
+            </div>
+            
+            <!-- Portfolio Value Chart -->
+            <div class="chart-container">
+                <h2>Portfolio Value Over Time</h2>
+                <div id="portfolioChart"></div>
+            </div>
+            
+            <!-- Returns Distribution -->
+            <div class="chart-container">
+                <h2>Returns Distribution</h2>
+                <div id="returnsChart"></div>
+            </div>
+            
+            <!-- Monthly Returns Heatmap -->
+            <div class="chart-container">
+                <h2>Monthly Returns Heatmap</h2>
+                <div id="heatmapChart"></div>
+            </div>
+            
+            <!-- Drawdown Chart -->
+            <div class="chart-container">
+                <h2>Drawdown</h2>
+                <div id="drawdownChart"></div>
+            </div>
+            
+            <!-- Current Holdings -->
+            <div class="holdings-section">
+                <h2>Current Holdings</h2>
+                <table id="holdingsTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Quantity</th>
+                            <th>Current Price</th>
+                            <th>Value</th>
+                            <th>% of Portfolio</th>
+                        </tr>
+                    </thead>
+                    <tbody id="holdingsTableBody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Trade History -->
+            <div class="holdings-section">
+                <h2>Trade History</h2>
+                <table id="tradesTable" class="display">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Symbol</th>
+                            <th>Type</th>
+                            <th>Quantity</th>
+                            <th>Price</th>
+                            <th>Profit</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradesTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/2.3.5/js/dataTables.min.js"></script>
+    <script>
+        const botName = '{{ bot_name }}';
+        
+        $(document).ready(function() {
+            fetch(`/api/bot/${botName}/performance`)
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loading, show content
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('content').style.display = 'block';
+                    
+                    // Display metrics
+                    const metrics = data.metrics;
+                    const metricsGrid = document.getElementById('metricsGrid');
+                    
+                    const formatMetric = (value, suffix = '') => {
+                        if (value === null || value === undefined) return 'N/A';
+                        return parseFloat(value).toFixed(2) + suffix;
+                    };
+                    
+                    const getClass = (num) => {
+                        if (num === null || num === undefined) return '';
+                        return parseFloat(num) >= 0 ? 'positive' : 'negative';
+                    };
+                    
+                    const metricsToShow = [
+                        { label: 'Total Return', value: formatMetric(metrics.total_return, '%'), class: getClass(metrics.total_return) },
+                        { label: 'Annualized Return', value: formatMetric(metrics.annualized_return, '%'), class: getClass(metrics.annualized_return) },
+                        { label: 'Sharpe Ratio', value: formatMetric(metrics.sharpe_ratio, '') },
+                        { label: 'Sortino Ratio', value: formatMetric(metrics.sortino_ratio, '') },
+                        { label: 'Calmar Ratio', value: formatMetric(metrics.calmar_ratio, '') },
+                        { label: 'Max Drawdown', value: formatMetric(metrics.max_drawdown, '%'), class: getClass(-metrics.max_drawdown) },
+                        { label: 'Volatility', value: formatMetric(metrics.volatility, '%') },
+                    ];
+                    
+                    metricsToShow.forEach(metric => {
+                        const card = document.createElement('div');
+                        card.className = 'metric-card';
+                        card.innerHTML = `
+                            <div class="metric-label">${metric.label}</div>
+                            <div class="metric-value ${metric.class || ''}">${metric.value}</div>
+                        `;
+                        metricsGrid.appendChild(card);
+                    });
+                    
+                    // Portfolio value chart
+                    const portfolioData = data.portfolio_worth_history;
+                    const portfolioDates = portfolioData.map(d => d.date);
+                    const portfolioWorth = portfolioData.map(d => d.portfolio_worth);
+                    
+                    Plotly.newPlot('portfolioChart', [{
+                        x: portfolioDates,
+                        y: portfolioWorth,
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Portfolio Value',
+                        line: { color: '#4CAF50', width: 2 }
+                    }], {
+                        title: 'Portfolio Value Over Time',
+                        xaxis: { title: 'Date' },
+                        yaxis: { title: 'Portfolio Value (USD)' },
+                        hovermode: 'x unified'
+                    });
+                    
+                    // Returns distribution
+                    if (data.returns && data.returns.length > 0) {
+                        Plotly.newPlot('returnsChart', [{
+                            x: data.returns,
+                            type: 'histogram',
+                            name: 'Returns',
+                            marker: { color: '#2196F3' }
+                        }], {
+                            title: 'Daily Returns Distribution',
+                            xaxis: { title: 'Daily Return' },
+                            yaxis: { title: 'Frequency' }
+                        });
+                    }
+                    
+                    // Monthly returns heatmap (simplified - using quantstats would be better)
+                    // For now, we'll create a simple monthly aggregation
+                    const monthlyReturns = calculateMonthlyReturns(portfolioData);
+                    if (monthlyReturns.length > 0) {
+                        const heatmapData = prepareHeatmapData(monthlyReturns);
+                        Plotly.newPlot('heatmapChart', [heatmapData], {
+                            title: 'Monthly Returns Heatmap',
+                            xaxis: { title: 'Month' },
+                            yaxis: { title: 'Year' },
+                            colorscale: [[0, '#f44336'], [0.5, '#fff'], [1, '#4CAF50']]
+                        });
+                    }
+                    
+                    // Drawdown chart
+                    const drawdown = calculateDrawdown(portfolioWorth);
+                    Plotly.newPlot('drawdownChart', [{
+                        x: portfolioDates,
+                        y: drawdown,
+                        type: 'scatter',
+                        mode: 'lines',
+                        fill: 'tozeroy',
+                        name: 'Drawdown',
+                        line: { color: '#f44336' },
+                        fillcolor: 'rgba(244, 67, 54, 0.3)'
+                    }], {
+                        title: 'Drawdown Over Time',
+                        xaxis: { title: 'Date' },
+                        yaxis: { title: 'Drawdown (%)' },
+                        hovermode: 'x unified'
+                    });
+                    
+                    // Current holdings
+                    const holdings = data.current_holdings;
+                    const holdingsTbody = document.getElementById('holdingsTableBody');
+                    const totalWorth = portfolioWorth[portfolioWorth.length - 1];
+                    
+                    Object.entries(holdings).forEach(([symbol, quantity]) => {
+                        if (symbol === 'USD') {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${symbol}</td>
+                                <td>${parseFloat(quantity).toFixed(2)}</td>
+                                <td>$1.00</td>
+                                <td>$${parseFloat(quantity).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                <td>${((parseFloat(quantity) / totalWorth) * 100).toFixed(2)}%</td>
+                            `;
+                            holdingsTbody.appendChild(row);
+                        } else if (parseFloat(quantity) > 0) {
+                            // For non-USD holdings, we'd need to fetch current prices
+                            // For now, show quantity
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${symbol}</td>
+                                <td>${parseFloat(quantity).toFixed(4)}</td>
+                                <td>N/A</td>
+                                <td>N/A</td>
+                                <td>N/A</td>
+                            `;
+                            holdingsTbody.appendChild(row);
+                        }
+                    });
+                    
+                    // Trade history
+                    const trades = data.trades;
+                    const tradesTbody = document.getElementById('tradesTableBody');
+                    
+                    trades.forEach(trade => {
+                        const row = document.createElement('tr');
+                        const date = new Date(trade.timestamp).toLocaleString();
+                        const profitClass = trade.profit ? (trade.profit >= 0 ? 'positive' : 'negative') : '';
+                        const profitText = trade.profit ? '$' + parseFloat(trade.profit).toFixed(2) : 'N/A';
+                        
+                        row.innerHTML = `
+                            <td>${date}</td>
+                            <td>${trade.symbol}</td>
+                            <td>${trade.is_buy ? 'BUY' : 'SELL'}</td>
+                            <td>${parseFloat(trade.quantity).toFixed(4)}</td>
+                            <td>$${parseFloat(trade.price).toFixed(2)}</td>
+                            <td class="${profitClass}">${profitText}</td>
+                        `;
+                        tradesTbody.appendChild(row);
+                    });
+                    
+                    // Initialize DataTables for trades
+                    $('#tradesTable').DataTable({
+                        order: [[0, 'desc']], // Sort by timestamp descending
+                        pageLength: 25
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching performance data:', error);
+                    document.getElementById('loading').textContent = 'Error loading performance data. Please try again.';
+                });
+        });
+        
+        function calculateDrawdown(values) {
+            let peak = values[0];
+            const drawdown = [];
+            
+            values.forEach(value => {
+                if (value > peak) peak = value;
+                drawdown.push(((value - peak) / peak) * 100);
+            });
+            
+            return drawdown;
+        }
+        
+        function calculateMonthlyReturns(portfolioData) {
+            // Group by year-month and calculate returns
+            const monthly = {};
+            
+            portfolioData.forEach((d, i) => {
+                const date = new Date(d.date);
+                const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                
+                if (!monthly[key]) {
+                    monthly[key] = [];
+                }
+                monthly[key].push({ date: d.date, worth: d.portfolio_worth });
+            });
+            
+            const monthlyReturns = [];
+            Object.keys(monthly).sort().forEach(key => {
+                const monthData = monthly[key];
+                if (monthData.length > 1) {
+                    const first = monthData[0].worth;
+                    const last = monthData[monthData.length - 1].worth;
+                    const return_pct = ((last / first) - 1) * 100;
+                    monthlyReturns.push({ month: key, return: return_pct });
+                }
+            });
+            
+            return monthlyReturns;
+        }
+        
+        function prepareHeatmapData(monthlyReturns) {
+            // Simplified heatmap - in production, use quantstats for proper heatmap
+            const years = [...new Set(monthlyReturns.map(m => m.month.split('-')[0]))];
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            
+            const z = [];
+            const y = [];
+            const x = months;
+            
+            years.forEach(year => {
+                y.push(year);
+                const row = [];
+                months.forEach((month, idx) => {
+                    const monthKey = `${year}-${String(idx + 1).padStart(2, '0')}`;
+                    const monthData = monthlyReturns.find(m => m.month === monthKey);
+                    row.push(monthData ? monthData.return : null);
+                });
+                z.push(row);
+            });
+            
+            return {
+                x: x,
+                y: y,
+                z: z,
+                type: 'heatmap',
+                colorscale: [[0, '#f44336'], [0.5, '#fff'], [1, '#4CAF50']],
+                zmid: 0
+            };
+        }
+    </script>
+</body>
+</html>
+

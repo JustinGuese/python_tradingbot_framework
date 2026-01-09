@@ -1,0 +1,143 @@
+# Default values for tradingbots Helm chart
+# This file configures all trading bots, their schedules, and deployment settings.
+
+# Docker image configuration
+# All bots run from the same container image
+image:
+  repository: registry.gitlab.com/datafortress/tradingbot25
+  tag: main  # Image tag (typically branch name or version)
+  pullPolicy: Always  # Always pull latest image (use IfNotPresent for production)
+
+# Kubernetes namespace for all resources
+namespace: tradingbots-2025
+
+# Kubernetes secret name
+# This secret must be created manually before deploying (see README.md)
+# All secrets (database, API keys, passwords) are stored in this single secret
+secretName: tradingbot-secrets  # Secret name created from .env file
+
+# Image pull secrets for private Docker registry authentication
+imagePullSecrets:
+  - name: regcred
+
+# Resource limits for trading bot containers
+# These apply to all bot CronJobs
+resources:
+  # Minimum resources requested (for scheduling)
+  requests:
+    cpu: 10m      # 0.01 CPU cores
+    memory: 25Mi  # 25 megabytes
+  # Maximum resources allowed (container will be throttled/killed if exceeded)
+  limits:
+    cpu: 1000m    # 1 CPU core
+    memory: 1Gi   # 1 gigabyte
+
+# CronJob cleanup and concurrency settings
+# These settings apply to all bot CronJobs
+cronjob:
+  # Number of successful job runs to keep in history (for monitoring/debugging)
+  # Older successful jobs are automatically cleaned up
+  successfulJobsHistoryLimit: 3
+  # Number of failed job runs to keep in history (for debugging failures)
+  # Failed jobs are kept longer to help diagnose issues
+  failedJobsHistoryLimit: 1
+  # Concurrency policy: Forbid = skip new run if previous is still running
+  # Other options: Allow (run concurrently), Replace (cancel old, start new)
+  concurrencyPolicy: Forbid
+  # Maximum time a job can run before being terminated (in seconds)
+  # Prevents jobs from hanging indefinitely (30 minutes = 1800 seconds)
+  activeDeadlineSeconds: 1800
+  # Automatically delete completed jobs after this time (in seconds)
+  # Reduces cluster resource usage by cleaning up old job pods
+  # 1 hour = 3600 seconds
+  ttlSecondsAfterFinished: 3600
+
+# Environment variables injected into all bot containers
+# Values are read from Kubernetes secrets (secret name is defined in .Values.secretName)
+env:
+  - name: POSTGRES_URI
+    valueFrom:
+      secretKeyRef:
+        key: POSTGRES_URI  # Key in secret containing connection string
+
+# Web visualization dashboard settings
+visualization:
+  enabled: true  # Enable/disable the web dashboard
+  basicAuth:
+    username: admin
+    # Password is stored in Kubernetes secret 'app-secrets' with key 'BASIC_AUTH_PASSWORD'
+    # Create secret using: kubectl create secret generic app-secrets --from-env-file=.env
+
+# Kubernetes Ingress configuration for web dashboard
+ingress:
+  enabled: true  # Enable external access to visualization dashboard
+
+# PostgreSQL database configuration
+# If enabled, deploys a PostgreSQL instance in the cluster
+postgresql:
+  enabled: true  # Set to false if using external PostgreSQL
+  image:
+    repository: postgres
+    tag: 17-alpine  # PostgreSQL version
+  # Password is stored in Kubernetes secret 'psqlcreds' with key 'POSTGRES_PASSWORD'
+  # Create secret using: kubectl create secret generic psqlcreds --from-env-file=.env
+  database: postgres  # Database name
+  service:
+    name: psql-service  # Kubernetes service name
+    port: 5432  # PostgreSQL port
+  storage:
+    hostPath: /mnt/hdd/tradingbot_2025/psql/  # Persistent storage path on node
+    type: DirectoryOrCreate  # Create directory if it doesn't exist
+  deployment:
+    name: psql-deployment
+    replicas: 1  # Number of PostgreSQL instances (1 for single-node)
+
+# List of trading bots to deploy
+# Each bot will be deployed as a Kubernetes CronJob
+#
+# Bot naming convention:
+# - name: lowercase bot name (e.g., "eurusdtreebot")
+# - Script filename: automatically derived as {name}.py (e.g., "eurusdtreebot.py")
+# - Container name: automatically generated as "tradingbot-{name}" (removes "bot" suffix)
+#
+# Schedule format (cron syntax):
+#   * * * * *
+#   | | | | |
+#   | | | | +-- Day of week (0-7, where 0 and 7 are Sunday)
+#   | | | +---- Month (1-12)
+#   | | +------ Day of month (1-31)
+#   | +-------- Hour (0-23)
+#   +---------- Minute (0-59)
+#
+# Common schedule examples:
+#   "*/5 * * * 1-5"    - Every 5 minutes, Monday-Friday
+#   "0 17 * * 1-5"      - Daily at 5:00 PM, Monday-Friday
+#   "0 17 * * 2"        - Weekly on Tuesday at 5:00 PM
+#   "0 */4 * * 1-5"     - Every 4 hours, Monday-Friday
+#   "30 17 * * 1-5"     - Daily at 5:30 PM, Monday-Friday
+bots:
+  - name: eurusdtreebot
+    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+
+  - name: feargreedbot
+    schedule: "3 17 * * 1-5"  # Daily at 5:03 PM, Mon-Fri
+
+  - name: swingtitaniumbot
+    schedule: "0 */4 * * 1-5"  # Every 4 hours, Mon-Fri
+
+  - name: xauzenbot
+    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+
+  - name: xauaisyntheticmetalbot
+    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+
+  - name: sharpeportfoliooptweekly
+    schedule: "0 17 * * 2"  # Weekly on Tuesday at 5:00 PM
+
+  - name: gptbasedstrategytabased
+    schedule: "30 17 * * 1-5"  # Daily at 5:30 PM, Mon-Fri
+
+  - name: aihedgefundbot
+    # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
+    schedule: "10 22 * * 3"  # Weekly on Wednesday at 10:10 PM
+

@@ -1,0 +1,97 @@
+site_name: Trading Bot System Documentation
+site_description: Automated trading bot system with technical analysis and portfolio management
+site_author: Trading Bot Team
+
+# Update these with your actual repository details
+# repo_name: tradingbot25
+# repo_url: https://github.com/yourusername/tradingbot25
+# edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [tradingbot]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: true
+            merge_init_into_class: true
+            show_signature_annotations: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quick Start: getting-started/quick-start.md
+    - Installation: getting-started/installation.md
+    - Creating a Bot: getting-started/creating-a-bot.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Bot Class System: architecture/bot-class-system.md
+    - Database Models: architecture/database-models.md
+  - API Reference:
+    - Core Classes:
+      - Bot: api/bot.md
+      - DataService: api/data-service.md
+      - PortfolioManager: api/portfolio-manager.md
+      - BotRepository: api/bot-repository.md
+    - Utilities:
+      - Backtesting: api/backtest.md
+      - Hyperparameter Tuning: api/hyperparameter-tuning.md
+      - Helpers: api/helpers.md
+      - Database: api/database.md
+  - Deployment:
+    - Overview: deployment/overview.md
+    - Helm Charts: deployment/helm.md
+    - Kubernetes: deployment/kubernetes.md
+  - Guides:
+    - Technical Analysis: guides/technical-analysis.md
+    - Portfolio Management: guides/portfolio-management.md
+    - Local Development: guides/local-development.md
+  - Examples:
+    - Example Bots: examples/example-bots.md

@@ -1,0 +1,99 @@
+{{- if .Values.visualization.enabled }}
+{{- $name := "visualization" -}}
+{{- $resources := .Values.resources -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+      - name: {{ .name }}
+      {{- end }}
+      containers:
+      - name: {{ $name }}
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["python"]
+        args: ["visualization.py"]
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          {{- toYaml $resources | nindent 10 }}
+        env:
+        {{- range .Values.env }}
+        - name: {{ .name }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secretName }}
+              key: {{ .valueFrom.secretKeyRef.key }}
+        {{- end }}
+        - name: BASIC_AUTH_USERNAME
+          value: {{ .Values.visualization.basicAuth.username | default "admin" | quote }}
+        - name: BASIC_AUTH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secretName }}
+              key: BASIC_AUTH_PASSWORD
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $name }}
+  ports:
+  - port: 8000
+    targetPort: http
+    protocol: TCP
+    name: http
+
+{{ if .Values.ingress.enabled }}
+{{ $host := printf "%s-visualization.datafortress.cloud" .Release.Namespace }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ $name }}
+    app.kubernetes.io/managed-by: Helm
+spec:
+  ingressClassName: cloudflare-tunnel
+  rules:
+    - host: {{ $host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: 8000
+{{ end }}
+{{ end }}

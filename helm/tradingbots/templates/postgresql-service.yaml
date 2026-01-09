@@ -1,0 +1,22 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.postgresql.service.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: psql
+  ports:
+  - protocol: TCP
+    port: {{ .Values.postgresql.service.port }}
+    targetPort: {{ .Values.postgresql.service.port }}
+  type: ClusterIP
+---
+{{- end }}
+

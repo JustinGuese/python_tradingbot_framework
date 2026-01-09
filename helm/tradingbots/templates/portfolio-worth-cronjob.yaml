@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: portfolio-worth-calculator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  schedule: "0 22 * * *"
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: portfolio-worth-calculator
+            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+            command:
+            - "python"
+            args:
+            - "-m"
+            - "calculate_portfolio_worth"
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            env:
+            {{- range $.Values.env }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+            {{- end }}
+          restartPolicy: OnFailure
+

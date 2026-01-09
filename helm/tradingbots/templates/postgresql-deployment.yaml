@@ -1,0 +1,43 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.postgresql.deployment.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.postgresql.deployment.replicas }}
+  selector:
+    matchLabels:
+      app: psql
+  template:
+    metadata:
+      labels:
+        app: psql
+    spec:
+      containers:
+      - name: postgres
+        image: {{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secretName }}
+              key: POSTGRES_PASSWORD
+        ports:
+        - containerPort: {{ .Values.postgresql.service.port }}
+        volumeMounts:
+        - name: tradingbot-psql-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: tradingbot-psql-storage
+        hostPath:
+          path: {{ .Values.postgresql.storage.hostPath }}
+          type: {{ .Values.postgresql.storage.type }}
+---
+{{- end }}
+
