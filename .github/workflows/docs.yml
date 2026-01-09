@@ -8,7 +8,9 @@ on:
   workflow_dispatch:  # Allow manual triggering
 
 permissions:
-  contents: write  # Required for gh-pages branch
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   deploy:
