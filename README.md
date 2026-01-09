@@ -2,6 +2,8 @@
 
 An automated trading bot system that fetches market data, executes trading strategies based on technical analysis, manages portfolios, and tracks trades in PostgreSQL. Bots run as Kubernetes CronJobs on configurable schedules.
 
+![Portfolio Overview](docs/overview.png)
+
 ## Table of Contents
 
 - [Overview](#overview)
