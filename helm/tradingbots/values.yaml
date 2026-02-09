@@ -39,18 +39,16 @@ cronjob:
   # Older successful jobs are automatically cleaned up
   successfulJobsHistoryLimit: 3
   # Number of failed job runs to keep in history (for debugging failures)
-  # Failed jobs are kept longer to help diagnose issues
-  failedJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
   # Concurrency policy: Forbid = skip new run if previous is still running
   # Other options: Allow (run concurrently), Replace (cancel old, start new)
   concurrencyPolicy: Forbid
   # Maximum time a job can run before being terminated (in seconds)
   # Prevents jobs from hanging indefinitely (30 minutes = 1800 seconds)
   activeDeadlineSeconds: 1800
-  # Automatically delete completed jobs after this time (in seconds)
-  # Reduces cluster resource usage by cleaning up old job pods
-  # 1 hour = 3600 seconds
-  ttlSecondsAfterFinished: 3600
+  # Automatically delete completed jobs after this time (in seconds).
+  # 1 week so logs of the last 3 runs (retained by history limits) stay viewable.
+  ttlSecondsAfterFinished: 604800
 
 # Environment variables injected into all bot containers
 # When postgresql.clusterConnection is set, POSTGRES_HOST/PORT/USER/DATABASE come from values
