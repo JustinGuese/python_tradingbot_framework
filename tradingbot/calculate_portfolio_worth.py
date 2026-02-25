@@ -62,14 +62,19 @@ def main():
                 # Continue with next bot
                 continue
 
-        # Load news, earnings, and insider trades for all portfolio symbols
+        # Commit portfolio worth first so it is persisted even if fundamentals load times out
+        session.commit()
+        logger.info("Stored portfolio worth for all bots")
+
+    # Load news, earnings, and insider trades (best-effort; can be slow and is after persist)
+    with get_db_session() as session:
         symbols = get_portfolio_symbols(session)
         if symbols:
             logger.info(f"Loading stock fundamentals for {len(symbols)} symbols")
-            load_stock_news_earnings_insider(symbols)
-        
-        # Commit all changes
-        session.commit()
+            try:
+                load_stock_news_earnings_insider(symbols)
+            except Exception as e:
+                logger.warning(f"Stock fundamentals load failed (portfolio worth already saved): {e}")
         logger.info("Completed portfolio worth calculation for all bots")
 
 

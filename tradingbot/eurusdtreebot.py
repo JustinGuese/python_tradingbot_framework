@@ -13,11 +13,11 @@ class EURUSDTreeBot(Bot):
     
     def __init__(
         self,
-         sma_slow_threshold: 1.16,
-        macd_signal_threshold: -0.01,
-        bbh_threshold: 1.15,
-        ichimoku_b_threshold: 1.15,
-        dcl_threshold: 1.15,
+        sma_slow_threshold=1.16,
+        macd_signal_threshold=-0.01,
+        bbh_threshold=1.15,
+        ichimoku_b_threshold=1.15,
+        dcl_threshold=1.15,
         **kwargs
     ):
         """
