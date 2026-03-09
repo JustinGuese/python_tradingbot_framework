@@ -255,6 +255,16 @@ class DataService:
             DataFrame with market data and technical analysis features
         """
         data = self.get_yf_data(symbol, interval, period, save_to_db)
+
+        # Defensive check: TA library's ADX requires at least 15 rows of data
+        MIN_ROWS_FOR_TA = 15
+        if len(data) < MIN_ROWS_FOR_TA:
+            logger.warning(
+                "Insufficient data for TA (%d rows, need %d). Skipping TA features.",
+                len(data), MIN_ROWS_FOR_TA
+            )
+            return data
+
         data = add_all_ta_features(
             data, open="open", high="high", low="low", close="close", volume="volume"
         )

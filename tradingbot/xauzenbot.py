@@ -4,20 +4,20 @@ from utils.core import Bot
 class XAUZenbotTreeBot(Bot):
     # Define the hyperparameter search space for this bot
     param_grid = {
-        "ichimoku_b_threshold": [200, 204.56, 210],
+        "ichimoku_b_threshold": [310, 325, 345],
         "atr_threshold": [0.06, 0.08, 0.10],
         "roc_threshold": [0.25, 0.29, 0.33],
         "adx_threshold": [10, 11.80, 15],
-        "dcl_threshold": [200, 203.66, 210],
+        "dcl_threshold": [310, 325, 345],
     }
-    
+
     def __init__(
         self,
-        ichimoku_b_threshold: float = 204.56,
+        ichimoku_b_threshold: float = 325,
         atr_threshold: float = 0.08,
         roc_threshold: float = 0.29,
         adx_threshold: float = 11.80,
-        dcl_threshold: float = 203.66,
+        dcl_threshold: float = 325,
         **kwargs
     ):
         """

@@ -4,20 +4,20 @@ from utils.core import Bot
 class XAUSyntheticMetalTreeBot(Bot):
     # Define the hyperparameter search space for this bot
     param_grid = {
-        "dch_threshold": [205, 207.61, 210],
-        "dcl_threshold": [202, 204.44, 207],
+        "dch_threshold": [315, 330, 350],
+        "dcl_threshold": [310, 325, 345],
         "atr_threshold": [0.12, 0.14, 0.16],
-        "ichimoku_base_threshold": [202, 204.64, 207],
-        "kch_threshold": [205, 207.33, 210],
+        "ichimoku_base_threshold": [310, 325, 345],
+        "kch_threshold": [315, 330, 350],
     }
-    
+
     def __init__(
         self,
-        dch_threshold: float = 207.61,
-        dcl_threshold: float = 204.44,
+        dch_threshold: float = 330,
+        dcl_threshold: float = 325,
         atr_threshold: float = 0.14,
-        ichimoku_base_threshold: float = 204.64,
-        kch_threshold: float = 207.33,
+        ichimoku_base_threshold: float = 325,
+        kch_threshold: float = 330,
         **kwargs
     ):
         """

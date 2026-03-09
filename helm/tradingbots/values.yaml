@@ -75,6 +75,12 @@ env:
   - name: LANGSMITH_ENDPOINT
     value: "https://eu.api.smith.langchain.com"
 
+  # OpenRouter API key for AI-based bots (DeepSeekToolBot, etc.)
+  - name: OPENROUTER_API_KEY
+    valueFrom:
+      secretKeyRef:
+        key: OPENROUTER_API_KEY
+
 # Web visualization dashboard settings
 visualization:
   enabled: true  # Enable/disable the web dashboard

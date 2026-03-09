@@ -37,6 +37,8 @@ class SwingTitaniumBot(Bot):
         super().__init__(
             "SwingTitaniumBot",
             "600456.SS",
+            interval="1d",
+            period="1y",
             order=order,
             prominence=prominence,
             rebalance_bars=rebalance_bars,
