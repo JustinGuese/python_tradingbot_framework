@@ -98,6 +98,11 @@ def _create_llm(model: str, api_key: str) -> ChatOpenAI:
         model=model,
         base_url=OPENROUTER_BASE_URL,
         api_key=api_key,
+        default_headers={
+            "X-Title": "python_tradingbot_framework",
+            'HTTP-Referer': 'https://github.com/JustinGuese/python_tradingbot_framework',
+            "X-OpenRouter-Categories" : "personal-agent,cloud-agent"
+        },
     )
 
 
