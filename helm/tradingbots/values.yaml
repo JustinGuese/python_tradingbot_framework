@@ -190,6 +190,6 @@ telegramMonitor:
   schedule: "*/5 * * * *"  # Every 5 minutes
   # Comma-separated Telegram channel usernames or IDs to monitor
   # Examples: "durov", "some_news_channel", "-1001234567890"
-  channels: ""
+  channels: "-1002202241417,-1001998690333"
   # Number of recent messages to fetch per channel per run
   fetchLimit: "50"
