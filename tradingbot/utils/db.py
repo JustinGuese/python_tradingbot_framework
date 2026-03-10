@@ -300,6 +300,7 @@ class TelegramMessage(Base):
     text = Column(String, nullable=True)
     summary = Column(String, nullable=True)
     symbol = Column(String, nullable=True, index=True)
+    acted_on = Column(Boolean, nullable=False, default=False)
     published_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

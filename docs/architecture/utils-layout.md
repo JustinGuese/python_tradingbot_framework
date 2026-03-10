@@ -20,6 +20,10 @@ retaining backwards-compatible imports:
   - sentiment adapters and the canonical `TRADEABLE` universe
 - `utils.ai`: AI helpers
   - thin wrappers around the LangChain/OpenRouter tooling used by `Bot.run_ai*`
+- `utils.telegram_monitor`: Telegram integration (optional)
+  - Telegram channel monitoring and message summarization
+  - Uses Telethon for Telegram API access
+  - AI-powered extraction of trading symbols from messages
 
 ### Import guidelines
 

@@ -86,6 +86,8 @@ nav:
       - Hyperparameter Tuning: api/hyperparameter-tuning.md
       - Helpers: api/helpers.md
       - Database: api/database.md
+    - Integrations:
+      - Telegram Monitor: api/telegram-monitor.md
   - Deployment:
     - Overview: deployment/overview.md
     - Helm Charts: deployment/helm.md
@@ -96,5 +98,6 @@ nav:
     - Portfolio Management: guides/portfolio-management.md
     - AI Tools: guides/ai-tools.md
     - Local Development: guides/local-development.md
+    - Telegram Monitor: guides/telegram-monitor.md
   - Examples:
     - Example Bots: examples/example-bots.md

@@ -3,7 +3,11 @@
     "allow": [
       "Bash(kubectl get:*)",
       "Bash(powershell.exe:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find /c/code/python_tradingbot_framework/tradingbot/utils/ -name \"*.py\" | xargs ls 2>&1)",
+      "Bash(helm lint:*)",
+      "Bash(helm template:*)",
+      "Bash(psql:*)"
     ]
   }
 }

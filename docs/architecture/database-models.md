@@ -141,6 +141,7 @@ class TelegramMessage(Base):
     text: str                # Original message text (nullable, max 4000 chars)
     summary: str             # AI-generated 1-3 sentence summary (nullable)
     symbol: str              # Primary ticker extracted by AI e.g. "AAPL" (nullable, indexed)
+    acted_on: bool           # True once the signals bot has evaluated this message (default False)
     published_at: datetime   # When the message was posted in Telegram (UTC)
     created_at: datetime
 ```
@@ -148,7 +149,9 @@ class TelegramMessage(Base):
 **Unique constraint**: `(channel, message_id)` — same message never stored twice.
 **Indexes**: `(channel, published_at)`, `symbol` — efficient queries by symbol or channel timeline.
 
-See [Telegram Monitor Guide](../guides/telegram-monitor.md) for setup and usage.
+`acted_on` is set to `True` by `telegram_signalsbankbot` **before** the AI classification call — crash-safe deduplication without a separate tracking table.
+
+See [Telegram Monitor Guide](../guides/telegram-monitor.md) and [Telegram Signals Bot Guide](../guides/telegram-signals-bot.md) for setup and usage.
 
 ## Session Management
 

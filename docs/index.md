@@ -16,6 +16,7 @@ This system provides a framework for building and deploying automated trading bo
 - [Creating a Bot](getting-started/creating-a-bot.md) - Learn how to build your first bot
 - [Bot Class System](architecture/bot-class-system.md) - Understand the core architecture
 - [AI Tools Guide](guides/ai-tools.md) - LangChain + OpenRouter tools (market data, portfolio, recent trades)
+- [Telegram Monitor](guides/telegram-monitor.md) - Monitor Telegram channels for trading signals
 - [API Reference](api/bot.md) - Complete API documentation
 - [AITools API](api/aitools.md) - run_ai_with_tools, run_ai_simple, run_ai_simple_with_fallback
 
@@ -98,9 +99,17 @@ helm upgrade --install tradingbots ./helm/tradingbots \
 
 - **Getting Started**: Installation and quick start guides
 - **Architecture**: System design and core concepts
-- **API Reference**: Complete API documentation with examples (including [AITools API](api/aitools.md))
+- **API Reference**: Complete API documentation with examples
+  - Core classes (Bot, DataService, PortfolioManager, etc.)
+  - Utilities (Database, Backtesting, Hyperparameter Tuning)
+  - Integrations (Telegram Monitor)
 - **Deployment**: Kubernetes and Helm deployment guides
-- **Guides**: In-depth tutorials and best practices (including [AI Tools](guides/ai-tools.md))
+- **Guides**: In-depth tutorials and best practices
+  - [Technical Analysis](guides/technical-analysis.md)
+  - [Portfolio Management](guides/portfolio-management.md)
+  - [AI Tools](guides/ai-tools.md)
+  - [Telegram Monitor](guides/telegram-monitor.md)
+  - [Local Development](guides/local-development.md)
 - **Examples**: Real-world bot implementations
 
 ## Need Help?

@@ -66,9 +66,10 @@ The `Bot` class (`tradingbot/utils/botclass.py`) is the foundation. All trading 
 #### 3. **Complex**: Override `makeOneIteration()` for portfolio optimization or multi-symbol strategies
    - **When to use**: Portfolio rebalancing, multiple symbols, complex optimization algorithms, external data sources
    - **How it works**: Full control over data fetching, decision logic, and trade execution
-   - **Examples**: 
+   - **Examples**:
      - `sharpePortfoliooptWeekly.py` (portfolio optimization with multiple assets)
      - `aihedgefundbot.py` (reads trading decisions from external database and rebalances)
+     - `telegram_signalsbankbot.py` (reads `telegram_messages` table, classifies signals via AI, partial buys at 20% of cash per signal; uses `acted_on` column for crash-safe deduplication)
 
 ### Bot Class Lifecycle
 
@@ -186,8 +187,7 @@ A standalone channel monitor that is **not** a `Bot` subclass — it uses Teleth
 
 ### Architecture
 
-- **`tradingbot/telegram_monitor.py`**: `TelegramChannelMonitor` class
-- **`tradingbot/telegrammonitorbot.py`**: entry point (follows `{name}.py` convention)
+- **`tradingbot/telegram_monitor.py`**: entry point — parses env vars, connects via Telethon, calls module-level functions
 - **`helm/tradingbots/templates/cronjob-telegram-monitor.yaml`**: optional Helm CronJob, gated on `telegramMonitor.enabled`
 
 ### How it runs
@@ -208,7 +208,7 @@ Session is stored as a Telethon `StringSession` in the `TELEGRAM_SESSION_STRING`
 
 ### AI summarization
 
-`_summarize(text)` calls `run_ai_simple` (cheap LLM) with a prompt that returns JSON:
+`summarize_message(text)` calls `run_ai_simple` (cheap LLM) with a prompt that returns JSON:
 ```json
 {"summary": "1-3 sentence summary...", "symbol": "AAPL"}
 ```
@@ -224,6 +224,7 @@ class TelegramMessage(Base):
     text: str                # Original text (nullable, max 4000 chars)
     summary: str             # AI summary (nullable)
     symbol: str              # Primary ticker extracted by AI (nullable, indexed)
+    acted_on: bool           # Set True before any trade action — prevents duplicate processing
     published_at: datetime   # UTC posting time
     created_at: datetime
     # Unique constraint: (channel, message_id)
@@ -473,6 +474,65 @@ one_day_ago = now_utc - timedelta(days=1)
 if db_datetime.tzinfo is None:
     db_datetime = db_datetime.replace(tzinfo=timezone.utc)  # Assume UTC
 ```
+
+### 8. Wrapper vs Implementation Pattern
+
+**Principle**: Keep "wrappers" (entry points) in `tradingbot/` and application logic in `tradingbot/utils/`.
+
+**Purpose**: Separation of concerns - wrappers handle orchestration (env vars, logging setup) while utils contain reusable logic.
+
+**Pattern**:
+
+```
+tradingbot/telegram_monitor.py         # Wrapper: entry point, env var parsing
+tradingbot/utils/telegram_monitor.py   # Implementation: core logic, reusable functions
+```
+
+**Wrapper responsibility** (`tradingbot/telegram_monitor.py`):
+- Parse environment variables
+- Set up logging
+- Call utils functions with parsed parameters
+- Handle script execution (`if __name__ == "__main__"`)
+
+```python
+import os
+from telethon.sessions import StringSession
+from utils.telegram_monitor import monitor_channels
+
+def main():
+    api_id = int(os.environ["TELEGRAM_API_ID"])
+    api_hash = os.environ["TELEGRAM_API_HASH"]
+    session_string = os.environ["TELEGRAM_SESSION_STRING"]
+    channels = [c.strip() for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",") if c.strip()]
+
+    monitor_channels(api_id, api_hash, StringSession(session_string), channels)
+
+if __name__ == "__main__":
+    main()
+```
+
+**Implementation responsibility** (`tradingbot/utils/telegram_monitor.py`):
+- Core business logic (functions: `get_existing_message_ids()`, `summarize_message()`, `process_channel()`)
+- Database operations
+- External API calls
+- Returns data, doesn't know about env vars or logging setup
+
+```python
+def monitor_channels(api_id: int, api_hash: str, session_string, channels: list[str]):
+    """Core implementation - no env vars, no logging setup."""
+    # Connect to Telegram
+    # Process channels
+    # Store results
+```
+
+**Examples in codebase**:
+- `calculate_portfolio_worth.py` (wrapper) → imports `utils.portfolio_worth_calculator` (impl)
+- `aitools.py` (in utils) → provides `run_ai_simple()`, `run_ai_with_tools()` — reusable functions
+
+**When to apply this pattern**:
+- Creating a new script/cronjob
+- Extracting reusable logic that other modules might use
+- Simplifying complex entrypoints
 
 ## Common Pitfalls
 
