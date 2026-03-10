@@ -296,7 +296,7 @@ tradingbot/utils/telegram_monitor.py   (implementation)
 └── get_existing_message_ids()      → Deduplication
 ```
 
-Runs as a stateless CronJob — no persistent connection. Downstream, `telegram_signalsbankbot` reads the stored messages and acts on signals. See [Telegram Signals Bot Guide](telegram-signals-bot.md).
+Runs as a stateless CronJob — no persistent connection. Downstream, `telegramsignalsbankbot` reads the stored messages and acts on signals. See [Telegram Signals Bot Guide](telegram-signals-bot.md).
 
 ---
 

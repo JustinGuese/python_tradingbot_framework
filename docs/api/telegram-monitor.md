@@ -43,7 +43,7 @@ class TelegramMessage(Base):
 
 **Constraints**:
 - Unique on `(channel, message_id)` — prevents duplicate storage
-- `acted_on` set atomically before AI classification in `telegram_signalsbankbot` — crash-safe
+- `acted_on` set atomically before AI classification in `telegramsignalsbankbot` — crash-safe
 
 **Indexes**: `(channel, published_at)`, `symbol`
 

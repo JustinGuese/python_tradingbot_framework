@@ -69,7 +69,7 @@ The `Bot` class (`tradingbot/utils/botclass.py`) is the foundation. All trading 
    - **Examples**:
      - `sharpePortfoliooptWeekly.py` (portfolio optimization with multiple assets)
      - `aihedgefundbot.py` (reads trading decisions from external database and rebalances)
-     - `telegram_signalsbankbot.py` (reads `telegram_messages` table, classifies signals via AI, partial buys at 20% of cash per signal; uses `acted_on` column for crash-safe deduplication)
+     - `telegramsignalsbankbot.py` (reads `telegram_messages` table, classifies signals via AI, partial buys at 20% of cash per signal; uses `acted_on` column for crash-safe deduplication)
 
 ### Bot Class Lifecycle
 

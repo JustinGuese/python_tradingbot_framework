@@ -1,6 +1,6 @@
 # Telegram Signals Bot Guide
 
-`telegram_signalsbankbot` is a trading bot that reads AI-summarized Telegram messages from the database, classifies them as BUY/SELL entry signals, and executes trades automatically.
+`telegramsignalsbankbot` is a trading bot that reads AI-summarized Telegram messages from the database, classifies them as BUY/SELL entry signals, and executes trades automatically.
 
 It is the **downstream consumer** of the `telegram-monitor` CronJob — the monitor fills the `telegram_messages` table, the signals bot acts on it.
 
@@ -62,7 +62,7 @@ The AI resolves broker-specific CFD names (US500, DJ30.c, XAUUSD) to Yahoo Finan
 ## Configuration
 
 ```python
-# telegram_signalsbankbot.py
+# telegramsignalsbankbot.py
 CHANNEL_ID = "-1001998690333"   # The Signals Bank - FREE
 LOOKBACK_DAYS = 3               # Only look at messages from last N days
 POSITION_SIZE_PCT = 0.2         # 20% of cash per signal
@@ -77,7 +77,7 @@ To monitor a different channel, change `CHANNEL_ID` to the numeric Telegram chan
 In `helm/tradingbots/values.yaml`:
 
 ```yaml
-- name: telegram_signalsbankbot
+- name: telegramsignalsbankbot
   schedule: "*/5 * * * *"  # Every 5 minutes — matches telegram-monitor cadence
 ```
 
@@ -91,7 +91,7 @@ No special env vars beyond the standard set — it reads from the same `postgres
 
 | File | Purpose |
 |---|---|
-| `tradingbot/telegram_signalsbankbot.py` | Bot implementation |
+| `tradingbot/telegramsignalsbankbot.py` | Bot implementation |
 | `tradingbot/utils/db.py` | `TelegramMessage` model (incl. `acted_on`) |
 | `helm/tradingbots/values.yaml` | Schedule configuration |
 

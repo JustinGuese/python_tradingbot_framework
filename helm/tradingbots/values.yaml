@@ -181,7 +181,7 @@ bots:
   - name: taregimebot
     schedule: "20 17 * * 4"  # weekly 5:20 PM, Thursday
 
-  - name: telegram_signalsbankbot
+  - name: telegramsignalsbankbot
     schedule: "*/5 * * * *"  # Every 5 minutes (matches telegram-monitor cadence)
 
 # telegram monitor

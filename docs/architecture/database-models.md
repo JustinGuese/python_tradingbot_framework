@@ -149,7 +149,7 @@ class TelegramMessage(Base):
 **Unique constraint**: `(channel, message_id)` — same message never stored twice.
 **Indexes**: `(channel, published_at)`, `symbol` — efficient queries by symbol or channel timeline.
 
-`acted_on` is set to `True` by `telegram_signalsbankbot` **before** the AI classification call — crash-safe deduplication without a separate tracking table.
+`acted_on` is set to `True` by `telegramsignalsbankbot` **before** the AI classification call — crash-safe deduplication without a separate tracking table.
 
 See [Telegram Monitor Guide](../guides/telegram-monitor.md) and [Telegram Signals Bot Guide](../guides/telegram-signals-bot.md) for setup and usage.
 
