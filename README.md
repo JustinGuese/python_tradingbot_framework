@@ -319,12 +319,32 @@ See [Technical Analysis Guide](docs/guides/technical-analysis.md) for complete l
 * [Portfolio Management](docs/guides/portfolio-management.md) - Advanced portfolio operations
 * [Local Development](docs/guides/local-development.md) - Development workflows
 * [AI Tools](docs/guides/ai-tools.md) - LangChain + OpenRouter tools; cheap-first with fallback and sanity checks
+* [Telegram Monitor](docs/guides/telegram-monitor.md) - Channel monitoring, AI summarization, ticker extraction
 
 ### API Reference
 * [Bot API](docs/api/bot.md) - Complete Bot class documentation
 * [Data Service](docs/api/data-service.md) - Data fetching and caching
 * [Portfolio Manager](docs/api/portfolio-manager.md) - Trading operations
 * [AITools API](docs/api/aitools.md) - `run_ai_with_tools`, `run_ai_simple`, `run_ai_simple_with_fallback`
+
+## 📡 Telegram Channel Monitor
+
+The framework includes an optional **Telegram channel monitor** that polls channels for new messages, summarizes them with AI, extracts the primary asset ticker, and writes results to the database.
+
+```yaml
+# helm/tradingbots/values.yaml
+telegramMonitor:
+  enabled: true
+  schedule: "*/30 * * * *"          # Every 30 minutes
+  channels: "some_news_channel,-1001234567890"
+  fetchLimit: "50"
+```
+
+**How it works**: Runs as a CronJob — connects via a Telethon StringSession (no persistent process), fetches recent messages, skips already-stored ones, summarizes each with the cheap LLM, and persists to `telegram_messages` table with `channel`, `text`, `summary`, `symbol`, and `published_at`.
+
+**Required secrets**: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING` (from [my.telegram.org](https://my.telegram.org/apps)).
+
+See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
 ## 🎯 Example Bots
 

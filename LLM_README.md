@@ -180,6 +180,64 @@ price = bot.getLatestPrice(symbol="QQQ")
 
 **Note**: If `self.datasettings == ("1m", "1d")` and data is loaded, uses cached data. Otherwise fetches fresh from yfinance.
 
+## Telegram Channel Monitor
+
+A standalone channel monitor that is **not** a `Bot` subclass — it uses Telethon directly.
+
+### Architecture
+
+- **`tradingbot/telegram_monitor.py`**: `TelegramChannelMonitor` class
+- **`tradingbot/telegrammonitorbot.py`**: entry point (follows `{name}.py` convention)
+- **`helm/tradingbots/templates/cronjob-telegram-monitor.yaml`**: optional Helm CronJob, gated on `telegramMonitor.enabled`
+
+### How it runs
+
+Stateless CronJob pattern: connect → fetch last N messages per channel → skip known IDs → summarize new ones with AI → disconnect. No persistent process.
+
+Session is stored as a Telethon `StringSession` in the `TELEGRAM_SESSION_STRING` K8s secret.
+
+### Key env vars
+
+| Variable | Purpose |
+|---|---|
+| `TELEGRAM_API_ID` | From my.telegram.org |
+| `TELEGRAM_API_HASH` | From my.telegram.org |
+| `TELEGRAM_SESSION_STRING` | Telethon StringSession |
+| `TELEGRAM_CHANNELS` | Comma-separated channel usernames or IDs |
+| `TELEGRAM_FETCH_LIMIT` | Messages to check per channel per run (default: 50) |
+
+### AI summarization
+
+`_summarize(text)` calls `run_ai_simple` (cheap LLM) with a prompt that returns JSON:
+```json
+{"summary": "1-3 sentence summary...", "symbol": "AAPL"}
+```
+Falls back to raw response as summary if JSON parsing fails. `symbol` is `null` when no specific asset is mentioned.
+
+### Database model: `TelegramMessage`
+
+```python
+class TelegramMessage(Base):
+    id: int                  # Auto-increment primary key
+    channel: str             # Channel username or numeric ID (indexed)
+    message_id: int          # Telegram message ID — unique per channel
+    text: str                # Original text (nullable, max 4000 chars)
+    summary: str             # AI summary (nullable)
+    symbol: str              # Primary ticker extracted by AI (nullable, indexed)
+    published_at: datetime   # UTC posting time
+    created_at: datetime
+    # Unique constraint: (channel, message_id)
+```
+
+Enabling in `values.yaml`:
+```yaml
+telegramMonitor:
+  enabled: true
+  schedule: "*/30 * * * *"
+  channels: "some_channel,-1001234567890"
+  fetchLimit: "50"
+```
+
 ### Database Models (tradingbot/utils/db.py)
 
 #### Bot Model

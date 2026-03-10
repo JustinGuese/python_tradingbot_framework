@@ -1,0 +1,89 @@
+{{- if .Values.telegramMonitor.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: telegram-monitor
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  schedule: {{ $.Values.telegramMonitor.schedule | quote }}
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: telegram-monitor
+            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+            command:
+            - "python"
+            args:
+            - "-m"
+            - "telegram_monitor"
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            env:
+            {{- if $.Values.postgresql.clusterConnection }}
+            - name: POSTGRES_HOST
+              value: {{ $.Values.postgresql.clusterConnection.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ $.Values.postgresql.clusterConnection.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ $.Values.postgresql.clusterConnection.user | quote }}
+            - name: POSTGRES_DATABASE
+              value: {{ $.Values.postgresql.clusterConnection.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- range $.Values.env }}
+            {{- if and $.Values.postgresql.clusterConnection (or (eq .name "POSTGRES_URI") (eq .name "POSTGRES_PASSWORD")) }}
+            {{- else }}
+            - name: {{ .name }}
+            {{- if .value }}
+              value: {{ .value | quote }}
+            {{- else if .valueFrom }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            # Telegram-specific config
+            - name: TELEGRAM_API_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: TELEGRAM_API_ID
+            - name: TELEGRAM_API_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: TELEGRAM_API_HASH
+            - name: TELEGRAM_SESSION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: TELEGRAM_SESSION_STRING
+            - name: TELEGRAM_CHANNELS
+              value: {{ $.Values.telegramMonitor.channels | quote }}
+            - name: TELEGRAM_FETCH_LIMIT
+              value: {{ $.Values.telegramMonitor.fetchLimit | quote }}
+          restartPolicy: OnFailure
+{{- end }}

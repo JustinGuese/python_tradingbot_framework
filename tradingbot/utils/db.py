@@ -274,6 +274,36 @@ class StockInsiderTrade(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TelegramMessage(Base):
+    """
+    Telegram channel message model for storing monitored channel messages and AI summaries.
+
+    Attributes:
+        id: Auto-incrementing primary key
+        channel: Telegram channel username or ID (e.g. "mychannel" or "-1001234567890")
+        message_id: Telegram message ID (unique per channel)
+        text: Original message text (nullable for media-only messages)
+        summary: AI-generated summary of the message (nullable)
+        symbol: Primary stock/asset ticker extracted by AI (e.g. "AAPL", "BTC", nullable)
+        published_at: When the message was posted in Telegram (UTC)
+        created_at: When this record was created
+    """
+    __tablename__ = "telegram_messages"
+    __table_args__ = (
+        UniqueConstraint("channel", "message_id", name="uq_telegram_messages_channel_message_id"),
+        Index("ix_telegram_messages_channel_published_at", "channel", "published_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    channel = Column(String, nullable=False, index=True)
+    message_id = Column(Integer, nullable=False)
+    text = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+    symbol = Column(String, nullable=True, index=True)
+    published_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(engine)
 
 

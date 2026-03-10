@@ -180,3 +180,13 @@ bots:
 
   - name: taregimebot
     schedule: "20 17 * * 4"  # weekly 5:20 PM, Thursday
+
+# telegram monitor
+telegramMonitor:
+  enabled: true  # Set to true to deploy the Telegram monitor CronJob
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  # Comma-separated Telegram channel usernames or IDs to monitor
+  # Examples: "durov", "some_news_channel", "-1001234567890"
+  channels: ""
+  # Number of recent messages to fetch per channel per run
+  fetchLimit: "50"
