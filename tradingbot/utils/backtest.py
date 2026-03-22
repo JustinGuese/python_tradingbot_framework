@@ -78,6 +78,9 @@ def backtest_bot(
     initial_capital: float = 10000.0,
     save_to_db: bool = True,
     data: Optional[pd.DataFrame] = None,
+    slippage_pct: float = 0.0005,
+    commission_pct: float = 0.0,
+    risk_free_rate: float = 0.0,
 ) -> dict:
     """
     Backtest a trading bot over the last year's data.
@@ -90,6 +93,9 @@ def backtest_bot(
         data: Optional pre-fetched DataFrame with technical indicators.
               If provided, skips data fetching and uses this data directly.
               Must have columns: timestamp, close, and all required TA indicators.
+        slippage_pct: One-way slippage as a fraction of price (default: 0.0005 = 0.05%).
+        commission_pct: Commission as a fraction of trade value (default: 0.0).
+        risk_free_rate: Annualized risk-free rate for Sharpe calculation (default: 0.0).
     
     Returns:
         Dictionary with keys:
@@ -155,7 +161,11 @@ def backtest_bot(
     bot.data = data
     if backtest_period:
         bot.datasettings = (bot.interval, backtest_period)
-    
+
+    # trend_adx has ~26-bar warmup; after ffill().fillna(0), warmup rows have trend_adx == 0.0.
+    # Skip these rows to avoid decisions on synthetic zero-filled TA values.
+    has_ta_columns = "trend_adx" in data.columns
+
     # Initialize simulation state
     portfolio = {"USD": initial_capital}
     symbol = bot.symbol
@@ -175,6 +185,10 @@ def backtest_bot(
             # Skip rows without valid price data
             continue
         
+        # Skip warmup rows (trend_adx == 0.0 indicates TA warmup period)
+        if has_ta_columns and row["trend_adx"] == 0.0:
+            continue
+
         # Get trading decision
         try:
             decision = bot.decisionFunction(row)
@@ -189,17 +203,21 @@ def backtest_bot(
         
         if decision == 1:  # Buy signal
             if cash > 0:
-                # Buy with all available cash
-                quantity = cash / current_price
+                execution_price = current_price * (1 + slippage_pct)
+                commission_cost = cash * commission_pct
+                available = cash - commission_cost
+                quantity = available / execution_price
                 portfolio["USD"] = 0.0
                 portfolio[symbol] = holdings + quantity
                 nrtrades += 1
-        
+
         elif decision == -1:  # Sell signal
             if holdings > 0:
-                # Sell all holdings
-                cash_proceeds = holdings * current_price
-                portfolio["USD"] = cash + cash_proceeds
+                execution_price = current_price * (1 - slippage_pct)
+                cash_proceeds = holdings * execution_price
+                commission_cost = cash_proceeds * commission_pct
+                net_proceeds = cash_proceeds - commission_cost
+                portfolio["USD"] = cash + net_proceeds
                 portfolio[symbol] = 0.0
                 nrtrades += 1
         
@@ -217,7 +235,11 @@ def backtest_bot(
     
     # Validate we have enough data points for calculations
     if len(portfolio_values) < 2:
-        raise ValueError("Insufficient portfolio value data for metrics calculation")
+        raise ValueError(
+            "Insufficient post-warmup portfolio value data for metrics calculation. "
+            "The dataset may be too short (most rows are in the TA warmup period). "
+            "Use a longer period or a shorter interval."
+        )
     
     # Calculate metrics
     final_value = portfolio_values[-1]
@@ -256,9 +278,7 @@ def backtest_bot(
             if annualized_vol == 0:
                 sharpe_ratio = 0.0
             else:
-                # Sharpe ratio = annualized return / annualized volatility
-                # Assuming risk-free rate is 0 for simplicity
-                sharpe_ratio = annualized_return / annualized_vol
+                sharpe_ratio = (annualized_return - risk_free_rate) / annualized_vol
     
     # Max Drawdown
     if len(portfolio_values) < 2:

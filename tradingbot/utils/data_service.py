@@ -268,7 +268,10 @@ class DataService:
         data = add_all_ta_features(
             data, open="open", high="high", low="low", close="close", volume="volume"
         )
-        data = data.ffill().bfill().fillna(0)
+        # ffill() only — backward-looking, no future leakage.
+        # bfill() removed: it filled warmup NaNs with future values (look-ahead bias).
+        # fillna(0) converts remaining warmup NaNs to 0.0 (detectable as warmup sentinel in backtest).
+        data = data.ffill().fillna(0)
         return data
     
     def get_yf_data_multiple(
