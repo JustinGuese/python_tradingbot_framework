@@ -196,6 +196,9 @@ bots:
   - name: synthesizedhyperconvexitybot
     schedule: "30 21 * * 1-5"  # Daily 9:30 PM UTC (30 min after US close), Mon-Fri
 
+  - name: recursivedecayharvestbot
+    schedule: "45 21 * * 1-5"  # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
+
 # telegram monitor
 telegramMonitor:
   enabled: true  # Set to true to deploy the Telegram monitor CronJob

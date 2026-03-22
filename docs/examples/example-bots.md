@@ -202,6 +202,52 @@ class SynthesizedHyperConvexityBot(Bot):
 
 **Research basis**: [Synthesized Hyper-Convexity Engine](synthesized-hyper-convexity-engine.md.md) — covers leveraged ETF volatility drag, Weinstein Stage Analysis, BB/KC squeeze mechanics, gamma squeeze dynamics, and Vol-of-Vol Kelly sizing.
 
+## recursivedecayharvestbot.py (RecursiveDecayHarvestBot)
+
+TQQQ regime-switching strategy with dual crash filter. Holds 3x Nasdaq-100 (TQQQ) during
+QQQ uptrends with calm volatility; exits to cash on UVXY RSI spike or QQQ SMA200 breakdown.
+Captures leveraged (3×) upside in bull markets while avoiding the beta-slippage decay spiral
+that destroys leveraged ETF holders in bear/volatile regimes.
+
+**Pattern**: `decisionFunction()` with overridden `getYFDataWithTA()` to inject multi-symbol
+derived columns (QQQ SMA200 + close, UVXY RSI). Backtestable. `getYFDataMultiple` fetches
+raw OHLCV for QQQ and UVXY; RSI and SMA are computed in `_enrich()` and date-merged onto
+TQQQ rows.
+
+```python
+class RecursiveDecayHarvestBot(Bot):
+    param_grid = {
+        "uvxy_rsi_exit": [55, 60, 65, 70],
+        "sell_buffer": [0.02, 0.05, 0.08, 0.12],
+    }
+
+    def decisionFunction(self, row):
+        # SELL: UVXY RSI spike — volatility panic, decay accelerates
+        if uvxy_rsi > self.uvxy_rsi_exit:
+            return -1
+        # SELL: QQQ trend broken with sell_buffer gap
+        if qqq_close < qqq_sma200 * (1 - self.sell_buffer):
+            return -1
+        # BUY: QQQ uptrend + calm UVXY → hold TQQQ
+        if qqq_close > qqq_sma200 and uvxy_rsi <= self.uvxy_rsi_exit:
+            return 1
+        return 0
+```
+
+**Instruments:** TQQQ (primary), QQQ (trend filter), UVXY (crash filter)
+
+**Hyperparameters** (`param_grid`):
+| Parameter | Grid | Effect |
+|---|---|---|
+| `uvxy_rsi_exit` | 55, 60, 65, 70 | UVXY RSI threshold: lower = exit sooner on fear spikes |
+| `sell_buffer` | 0.02, 0.05, 0.08, 0.12 | QQQ SMA breakdown buffer: wider = fewer SMA exits |
+
+Run `RecursiveDecayHarvestBot().local_optimize()` to find the best combination on recent data.
+
+**Research basis**: [Recursive Adversarial Arbitrage](Recursive-Adversarial-Arbitrage.md) — covers
+volatility decay theory, beta slippage mathematics, dark pool footprints, and multi-agent AI
+consensus frameworks for leveraged ETF strategies.
+
 ## Learning from Examples
 
 Each example demonstrates:
