@@ -62,18 +62,19 @@ def process_channel(client: TelegramClient, channel: str, fetch_limit: int) -> i
     """
     # Resolve entity without loading all dialogs.
     # Bot API IDs (-100XXXXXXXXXX) → PeerChannel(XXXXXXXXXX) for direct lookup.
-    print(f"  >> Resolving entity for {channel}...", flush=True)
+    logger.info(f"  >> Resolving entity for {channel}...")
     if channel.lstrip("-").isdigit():
         cid = int(channel)
         real_id = int(str(abs(cid))[3:])  # strip leading '100' from -100XXXXXXXXXX
         entity = client.get_entity(PeerChannel(real_id))
     else:
         entity = channel  # public username, resolved by Telethon directly
-    print(f"  >> Entity resolved: {entity}", flush=True)
+    logger.info(f"  >> Entity resolved: {entity}")
 
-    print(f"  >> Fetching messages (limit={fetch_limit})...", flush=True)
+    logger.info(f"  >> Fetching messages (limit={fetch_limit})...")
     messages = client.get_messages(entity, limit=fetch_limit)
-    print(f"  >> Got {len(messages)} messages.", flush=True)
+    logger.info(f"  >> Got {len(messages)} messages.")
+
 
     with get_db_session() as session:
         existing_ids = get_existing_message_ids(session, channel)
@@ -143,16 +144,16 @@ def monitor_channels(
         return
 
     logger.info("Starting Telegram monitor for channels: %s", channels)
-    print(">> Connecting to Telegram...", flush=True)
+    logger.info(">> Connecting to Telegram...")
     with TelegramClient(session_string, api_id, api_hash) as client:
-        print(">> Connected.", flush=True)
+        logger.info(">> Connected.")
         for channel in tqdm(channels, desc="Channels", unit="ch"):
-            print(f">> Processing channel: {channel}", flush=True)
+            logger.info(f">> Processing channel: {channel}")
             logger.info("Processing channel: %s", channel)
             try:
                 process_channel(client, channel, fetch_limit)
             except Exception as e:
                 logger.error("Error processing channel %s: %s", channel, e)
 
-    print(">> Done.", flush=True)
+    logger.info(">> Done.")
     logger.info("Telegram monitor run complete.")

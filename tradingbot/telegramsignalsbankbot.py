@@ -94,7 +94,7 @@ class TelegramSignalsBankBot(Bot):
                 for m in messages
             ]
 
-        print(f">> {len(pending)} unacted message(s) to evaluate.")
+        logger.info(f">> {len(pending)} unacted message(s) to evaluate.")
         if not pending:
             return 0
 
@@ -106,16 +106,16 @@ class TelegramSignalsBankBot(Bot):
 
             result = _classify_signal(text, summary)
             if not result or not result.get("is_signal"):
-                print(f"  Msg {message_id} ({channel_symbol}): not a signal — skip")
+                logger.info(f"  Msg {message_id} ({channel_symbol}): not a signal — skip")
                 continue
 
             direction = result.get("direction")
             yf_symbol = result.get("yf_ticker")
             if not yf_symbol:
-                print(f"  Msg {message_id} ({channel_symbol}): AI returned no yf_ticker — skip")
+                logger.info(f"  Msg {message_id} ({channel_symbol}): AI returned no yf_ticker — skip")
                 continue
 
-            print(f"  Msg {message_id}: {channel_symbol} → {yf_symbol} | {direction}")
+            logger.info(f"  Msg {message_id}: {channel_symbol} → {yf_symbol} | {direction}")
 
             self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
             cash = self.dbBot.portfolio.get("USD", 0)
@@ -123,14 +123,15 @@ class TelegramSignalsBankBot(Bot):
             position_usd = round(cash * POSITION_SIZE_PCT, 2)
 
             if direction == "BUY" and position_usd > 10:
-                print(f"    >> BUY {yf_symbol} ${position_usd:.2f} ({POSITION_SIZE_PCT:.0%} of ${cash:.2f})")
-                self.buy(yf_symbol, quantityUSD=position_usd)
+                logger.info(f"    >> BUY {yf_symbol} ${position_usd:.2f} ({POSITION_SIZE_PCT:.0%} of ${cash:.2f})")
+                self.buy(yf_symbol, quantity_usd=position_usd)
             elif direction == "SELL" and holding > 0:
-                print(f"    >> SELL {yf_symbol} (holding: {holding})")
+                logger.info(f"    >> SELL {yf_symbol} (holding: {holding})")
                 self.sell(yf_symbol)
             else:
-                print(f"    >> {direction} {yf_symbol}: nothing to act on "
+                logger.info(f"    >> {direction} {yf_symbol}: nothing to act on "
                       f"(cash={cash:.2f}, holding={holding})")
+
 
         return 0
 

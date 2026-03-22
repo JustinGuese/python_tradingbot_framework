@@ -34,7 +34,8 @@ import pandas as pd
 
 from .bot_repository import BotRepository
 from .data_service import DataService
-from .db import RunLog, get_db_session
+from .db import RunLog, get_db_session, init_db
+from .logging_config import setup_logging
 from .portfolio_manager import PortfolioManager
 
 
@@ -77,7 +78,9 @@ class Bot:
             **kwargs: Arbitrary hyperparameters that will be stored in self.params
                      and can be accessed by subclasses for flexible parameterization
         """
+        setup_logging()
         self.bot_name = name  # Store name separately to avoid DetachedInstanceError
+        init_db()  # Ensure database is initialized before first access
         self.dbBot = BotRepository.create_or_get_bot(name)
         self.symbol = symbol
         self.interval = interval
@@ -178,6 +181,7 @@ class Bot:
         interval: str = "1m",
         period: str = "1d",
         saveToDB: bool = False,
+        features: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         """
         Fetch market data with technical analysis indicators.
@@ -196,6 +200,8 @@ class Bot:
             period: Data period (e.g., "1d", "5d", "1mo", "1y")
             saveToDB: Whether to save fetched data to database. Set to True for
                      historical backtests to enable data reuse.
+            features: Optional list of specific TA indicator column names to keep.
+                      If provided, drops other TA columns to save memory.
             
         Returns:
             DataFrame with market data and technical analysis features
@@ -210,6 +216,7 @@ class Bot:
             interval=interval,
             period=period,
             save_to_db=saveToDB,
+            features=features,
         )
         
         # Update cache for backward compatibility
@@ -440,7 +447,7 @@ class Bot:
                 run = RunLog(
                     bot_name=bot_name,
                     success=True,
-                    result=f"Decision: {decision}, Cash: {cash}, {holding_info}, portfolio: {str(self.dbBot.portfolio)}",
+                    result=f"Decision: {decision}, Cash: {cash}, {holding_info}",
                 )
                 session.add(run)
                 # Context manager will commit automatically
@@ -612,9 +619,9 @@ class Bot:
                 f"Either define param_grid as a class attribute or pass it to local_optimize()."
             )
         
-        print("=" * 60)
-        print(f"Hyperparameter optimization for {self.__class__.__name__}")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"Hyperparameter optimization for {self.__class__.__name__}")
+        logger.info("=" * 60)
         
         results = tune_hyperparameters(
             self.__class__,
@@ -626,12 +633,11 @@ class Bot:
             param_sample_ratio=param_sample_ratio,
         )
         
-        print("\n" + "=" * 60)
-        print("Best parameters (paste into __init__ defaults):")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("Best parameters (paste into __init__ defaults):")
+        logger.info("=" * 60)
         for key, value in results["best_params"].items():
-            print(f"    {key}: {value},")
-        print()
+            logger.info(f"    {key}: {value},")
         
         return results
     
@@ -648,13 +654,13 @@ class Bot:
         from .backtest import backtest_bot
         
         results = backtest_bot(self, initial_capital=initial_capital)
-        print(f"\n--- Backtest Results: {self.bot_name} ---")
-        print(f"Yearly Return: {results['yearly_return']:.2%}")
-        print(f"Buy & Hold Return: {results['buy_hold_return']:.2%}")
-        print(f"Outperformance vs B&H: {(results['yearly_return'] - results['buy_hold_return']):+.2%}")
-        print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
-        print(f"Number of Trades: {results['nrtrades']}")
-        print(f"Max Drawdown: {results['maxdrawdown']:.2%}")
+        logger.info(f"\n--- Backtest Results: {self.bot_name} ---")
+        logger.info(f"Yearly Return: {results['yearly_return']:.2%}")
+        logger.info(f"Buy & Hold Return: {results['buy_hold_return']:.2%}")
+        logger.info(f"Outperformance vs B&H: {(results['yearly_return'] - results['buy_hold_return']):+.2%}")
+        logger.info(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+        logger.info(f"Number of Trades: {results['nrtrades']}")
+        logger.info(f"Max Drawdown: {results['maxdrawdown']:.2%}")
         return results
     
     def local_development(
@@ -701,13 +707,12 @@ class Bot:
         )
         
         # Step 2: Backtest with best parameters
-        print("\n" + "=" * 60)
-        print("Backtesting with best parameters...")
-        print("=" * 60)
+        logger.info("\n" + "=" * 60)
+        logger.info("Backtesting with best parameters...")
+        logger.info("=" * 60)
         best_params = opt_results["best_params"]
         for key, value in best_params.items():
-            print(f"  {key}: {value}")
-        print()
+            logger.info(f"  {key}: {value}")
         best_bot = self.__class__(**best_params)
         best_bot.local_backtest(initial_capital=initial_capital)
         

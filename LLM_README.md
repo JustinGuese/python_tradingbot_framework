@@ -1,5 +1,167 @@
 # Trading Bot System - LLM Guide
 
+Trading Bot Framework — Research Briefing    
+This is a Python-based automated trading framework running on Kubernetes. Bots run as CronJobs, fetch market data, make decisions, and execute
+   paper/live trades stored in PostgreSQL.                                                                                                      
+
+  ---
+  Bot Interface — Two Patterns
+
+  Pattern A: decisionFunction(row) -> int (simple, backtestable)
+  - Override this method; the base class handles data fetching, looping, and execution
+  - Called once per OHLCV row. Return 1 (buy), -1 (sell), 0 (hold)
+  - The framework buys/sells self.symbol automatically
+  - Supports local_backtest(), local_optimize(), hyperparameter tuning
+  - Single-asset only — self.symbol must be set in __init__
+
+  class MyBot(Bot):
+      def __init__(self):
+          super().__init__("MyBot", symbol="QQQ", interval="1d", period="1y")
+
+      def decisionFunction(self, row) -> int:
+          if row["momentum_rsi"] < 30:
+              return 1
+          elif row["momentum_rsi"] > 70:
+              return -1
+          return 0
+
+  Pattern B: makeOneIteration() -> int (complex, not backtestable)
+  - Override this method directly for multi-asset bots or external data sources
+  - Manually call self.buy(symbol), self.sell(symbol), self.rebalancePortfolio(weights)
+  - Use when: portfolio rebalancing across N symbols, signals come from a DB table, external API (Fear & Greed), AI agent flows
+
+  ---
+  Data Available
+
+  1. Yahoo Finance OHLCV — via self.getYFDataWithTA(interval, period)
+  - Returns a DataFrame with timestamp, open, high, low, close, volume + ~150 TA indicators
+  - Intervals: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1wk, 1mo
+  - Periods: 1d, 5d, 7d, 1mo, 3mo, 6mo, 1y, 2y, max (minute data capped at 60 days by Yahoo)
+  - Multi-symbol: self.getYFDataMultiple(symbols, interval, period) — returns long-format DataFrame
+
+  2. Technical Indicators — via ta library (add_all_ta_features)
+  All ~150 indicators are pre-computed and available as columns. Key ones:
+  - Momentum: momentum_rsi, momentum_stoch, momentum_stoch_signal, momentum_macd, momentum_macd_signal, momentum_cci, momentum_williams_r       
+  - Trend: trend_macd, trend_macd_signal, trend_macd_diff, trend_sma_fast, trend_sma_slow, trend_ema_fast, trend_ema_slow, trend_adx,
+  trend_adx_pos, trend_adx_neg, trend_ichimoku_*, trend_aroon_up/down
+  - Volatility: volatility_bbm, volatility_bbh, volatility_bbl, volatility_bbw, volatility_atr, volatility_kcp, volatility_dcp
+  - Volume: volume_obv, volume_adi, volume_cmf, volume_fi, volume_mfi, volume_em, volume_vpt
+
+  3. PostgreSQL Tables
+
+  ┌──────────────────────┬───────────────────────────────────────────────────┬────────────────────────┐
+  │        Table         │                     Contents                      │        Used by         │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ bots                 │ Portfolio state JSON per bot                      │ All bots               │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ trades               │ Trade history (symbol, price, qty, isBuy)         │ All bots               │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ run_logs             │ Execution history, success/error                  │ All bots               │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ portfolio_worth      │ Daily portfolio value snapshots                   │ Dashboard              │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ historic_data        │ Cached OHLCV (avoids re-fetching)                 │ All bots               │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ stock_news           │ Recent news headlines per symbol from yfinance    │ StockNewsSentimentBot  │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ stock_earnings       │ Earnings dates, EPS estimate vs actual, surprise% │ EarningsInsiderTiltBot │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ stock_insider_trades │ Insider buy/sell transactions                     │ EarningsInsiderTiltBot │
+  ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+  │ telegram_messages    │ Telegram channel messages + AI summaries + symbol │ TelegramSignalsBankBot │
+  └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
+
+  4. AI — via OpenRouter
+  - Cheap model (default openai/gpt-oss-120b): self.run_ai_simple(system, user) — classification, extraction, single-turn
+  - Main model (default deepseek/deepseek-v3.2): self.run_ai(system, user) — multi-turn with tools (portfolio lookup, market data, trade        
+  history, news lookup)
+  - Fallback wrapper: self.run_ai_simple_with_fallback(system, user, sanity_check) — cheap first, retries with main if output fails sanity check
+
+  5. Regime / Sentiment Utilities
+  - utils.regime — detects bull/bear/sideways regime from price data
+  - utils.ta_regime — TA-based regime via ADX + trend filters
+  - utils.sentiment — fear/greed or other sentiment adapters
+
+  6. Tradeable Universe — utils.portfolio.TRADEABLE
+  - Pre-defined list of liquid ETFs/stocks suitable for the portfolio rebalancing bots
+
+  ---
+  Portfolio Operations
+
+  self.buy(symbol, quantityUSD=-1)        # -1 = all cash
+  self.sell(symbol, quantityUSD=-1)       # -1 = all holdings
+  self.rebalancePortfolio({"QQQ": 0.6, "GLD": 0.3, "USD": 0.1})
+  self.getLatestPrice(symbol)             # float
+  self.getLatestPricesBatch(symbols)      # dict[str, float]
+
+  Portfolio state is a JSON dict in PostgreSQL: {"USD": 8432.10, "QQQ": 12.5, "GC=F": 0.03}.
+
+  ---
+  Guardrails & Limitations
+
+  Hard limitations:
+  1. Single-asset decisionFunction only — local_backtest() requires symbol != None. Multi-asset bots (makeOneIteration) cannot be backtested    
+  with the built-in engine.
+  2. No short selling — sell() only sells existing holdings; going short is not supported.
+  3. No leverage — position sizing is bounded by available cash.
+  4. No fractional lot enforcement — the framework buys fractional quantities; fine for crypto/forex, may not reflect reality for equities.     
+  5. Minute data capped at 60 days — Yahoo Finance hard limit for intervals ≤ 90m.
+  6. Backtest warmup skip — first ~26 bars are skipped when trend_adx == 0.0 (TA warmup period); strategies that need very few bars may lose    
+  meaningful data.
+
+  Backtest realism (recently fixed):
+  - Slippage: 0.05% per side (configurable via slippage_pct)
+  - Commission: 0% default (configurable via commission_pct)
+  - Risk-free rate: 0% default for Sharpe (configurable via risk_free_rate)
+  - No look-ahead bias — bfill() removed from TA computation
+
+  Practical constraints:
+  - Bots run as Kubernetes CronJobs — no real-time streaming, no intra-bar execution
+  - Minimum meaningful trade: quantityUSD > $10 (enforced in signal bots)
+  - All times are UTC; market hours not enforced (strategy must handle weekends/holidays if needed)
+  - acted_on flag pattern is used for event-driven bots (Telegram signals, stock news) to prevent double-execution on crash
+
+  ---
+  Existing Strategies (don't duplicate)
+
+  ┌────────────────────────┬──────────────┬────────────────────────────────────────────────┐
+  │          Bot           │    Asset     │                    Strategy                    │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ EURUSDTreeBot          │ EURUSD       │ Decision tree on TA indicators                 │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ XAUZenBot              │ Gold (GC=F)  │ Multi-indicator TA threshold rules             │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ XAUAISyntheticMetalBot │ Gold         │ AI agent with TA + market data tools           │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ SwingTitaniumBot       │ configurable │ Swing highs/lows detection on close            │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ TARegimeBot            │ configurable │ TA regime (ADX + trend) → buy/sell             │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ FearGreedBot           │ QQQ          │ CNN Fear & Greed Index thresholds              │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ RegimeAdaptiveBot      │ multi        │ AI decides allocation by market regime         │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ AIHedgeFundBot         │ multi        │ Full AI hedge fund analysis → rebalance        │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ AIDeepSeekToolBot      │ configurable │ AI agent with full tool suite                  │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ EarningsInsiderTiltBot │ multi        │ Equal-weight + tilt by earnings/insider scores │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ TelegramSignalsBankBot │ multi        │ AI classifies Telegram signals → trade         │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ StockNewsSentimentBot  │ multi        │ AI classifies news headlines → trade           │
+  └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
+
+  ---
+  What a New Strategy Should Specify
+
+  1. Pattern: A (decisionFunction) or B (makeOneIteration)?
+  2. Symbol(s): single ticker or portfolio?
+  3. Interval + period: what data granularity?
+  4. Signal logic: what columns/data drive the decision?
+  5. Hyperparameter grid (optional): dict of lists for local_optimize() to tune
+  6. Schedule: how often to run (cron string)?
+
 This document provides essential information for LLMs working with this trading bot codebase. It explains the architecture, the Bot class system, and how to effectively work with the code.
 
 ## Repository Overview

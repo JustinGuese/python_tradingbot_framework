@@ -37,7 +37,9 @@ from ..db import (
     Trade,
     engine,
     get_db_session,
+    init_db,
 )
+from ..logging_config import setup_logging
 from ..helpers import (
     ensure_utc_series,
     ensure_utc_timestamp,
@@ -70,6 +72,8 @@ __all__ = [
     "Trade",
     "engine",
     "get_db_session",
+    "init_db",
+    "setup_logging",
     # Infra constants & helpers
     "FRESHNESS_TOLERANCE_MINUTES",
     "MIN_ASSET_VALUE_USD",

@@ -241,6 +241,7 @@ class DataService:
         interval: str = "1m",
         period: str = "1d",
         save_to_db: bool = False,
+        features: Optional[list[str]] = None,
     ) -> pd.DataFrame:
         """
         Fetch market data with technical analysis indicators.
@@ -250,6 +251,8 @@ class DataService:
             interval: Data interval (e.g., "1m", "5m", "1h", "1d")
             period: Data period (e.g., "1d", "5d", "1mo", "1y")
             save_to_db: Whether to save fetched data to database
+            features: Optional list of specific TA indicator column names to keep.
+                      If provided, drops other TA columns to save memory.
             
         Returns:
             DataFrame with market data and technical analysis features
@@ -268,6 +271,13 @@ class DataService:
         data = add_all_ta_features(
             data, open="open", high="high", low="low", close="close", volume="volume"
         )
+        
+        if features is not None:
+            base_cols = ["symbol", "timestamp", "open", "high", "low", "close", "volume"]
+            cols_to_keep = base_cols + [f for f in features if f not in base_cols]
+            available_cols = [c for c in cols_to_keep if c in data.columns]
+            data = data[available_cols]
+
         # ffill() only — backward-looking, no future leakage.
         # bfill() removed: it filled warmup NaNs with future values (look-ahead bias).
         # fillna(0) converts remaining warmup NaNs to 0.0 (detectable as warmup sentinel in backtest).
@@ -555,7 +565,7 @@ class DataService:
             df: DataFrame with columns: symbol, timestamp, open, high, low, close, volume
         """
         validate_dataframe_columns(df)
-        print("Adding only missing DataFrame rows to DB")
+        logger.info("Adding only missing DataFrame rows to DB")
         symbol = df["symbol"].iloc[0]
 
         # Ensure timestamps are timezone-aware (UTC)
@@ -572,27 +582,23 @@ class DataService:
             df_new = df
 
         if df_new.empty:
-            print("Rows to insert: 0")
+            logger.info("Rows to insert: 0")
             return
 
         # Drop any duplicate timestamps within this batch
         df_new = df_new.drop_duplicates(subset=["symbol", "timestamp"], keep="last")
 
-        print(f"Rows to insert: {len(df_new)}")
+        logger.info(f"Rows to insert: {len(df_new)}")
 
         # Step 3: Insert with ON CONFLICT DO NOTHING via repository
-        rows = [
-            {
-                "symbol": row["symbol"],
-                "timestamp": row["timestamp"],
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row["volume"]),
-            }
-            for _, row in df_new.iterrows()
-        ]
+        columns = ["symbol", "timestamp", "open", "high", "low", "close", "volume"]
+        
+        # Ensure correct types before conversion
+        df_new = df_new.copy()
+        for col in ["open", "high", "low", "close", "volume"]:
+            df_new[col] = df_new[col].astype(float)
+            
+        rows = df_new[columns].to_dict(orient="records")
         self._repo.bulk_insert_ohlcv(rows)
     
     def get_latest_price(self, symbol: str, cached_data: Optional[pd.DataFrame] = None) -> float:
@@ -729,7 +735,7 @@ class DataService:
                 try:
                     prices[symbol] = self.get_latest_price(symbol)
                 except Exception as e:
-                    print(f"Warning: Could not get price for {symbol}: {e}")
+                    logger.warning(f"Could not get price for {symbol}: {e}")
                     # Leave it out of the dict
         
         return prices

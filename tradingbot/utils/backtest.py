@@ -1,11 +1,15 @@
 """Backtesting functionality for trading bots."""
 
+import logging
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from .botclass import Bot
+
+logger = logging.getLogger(__name__)
+
 
 
 def _get_periods_per_year(interval: str) -> float:
@@ -194,7 +198,7 @@ def backtest_bot(
             decision = bot.decisionFunction(row)
         except Exception as e:
             # Skip rows that cause errors in decision function
-            print(f"Warning: Error in decisionFunction at row {idx}: {e}")
+            logger.warning(f"Error in decisionFunction at row {idx}: {e}")
             decision = 0
         
         # Execute simulated buy/sell

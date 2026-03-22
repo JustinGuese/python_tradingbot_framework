@@ -184,6 +184,18 @@ bots:
   - name: telegramsignalsbankbot
     schedule: "*/5 * * * *"  # Every 5 minutes (matches telegram-monitor cadence)
 
+  - name: stocknewssentimentbot
+    schedule: "30 22 * * 1-5"  # Daily at 10:30 PM UTC Mon-Fri, after portfolio-worth-calculator (0 22) refreshes news
+
+  - name: adaptivemeanreversionbot
+    schedule: "0 21 * * 1-5"  # Daily 9 PM UTC (4 PM ET), near NYSE close for fresh daily OHLCV
+
+  - name: goldenbutterflymombot
+    schedule: "0 14 * * 1"  # Weekly Monday 2 PM UTC, before US market open
+
+  - name: synthesizedhyperconvexitybot
+    schedule: "30 21 * * 1-5"  # Daily 9:30 PM UTC (30 min after US close), Mon-Fri
+
 # telegram monitor
 telegramMonitor:
   enabled: true  # Set to true to deploy the Telegram monitor CronJob

@@ -146,17 +146,12 @@ def _build_tools(bot: "Bot") -> list:
                     return f"No market data found for {sym} over period {period}."
             actual_symbols = data["symbol"].unique().tolist() if "symbol" in data.columns else []
             logger.debug("get_market_data: sym=%r rows=%s actual_symbols=%s", sym, len(data), actual_symbols)
-            n = min(14, len(data))
-            tail = data.tail(n)
             summary = (
-                f"Symbol {sym}, period {period}: {len(data)} rows. "
-                f"Close range: {tail['close'].min():.2f} - {tail['close'].max():.2f} "
-                f"last close: {tail['close'].iloc[-1]:.2f}."
+                f"Symbol {sym}, period {period}: {len(data)} trading intervals. "
+                f"Min Close: {data['close'].min():.2f}, Max Close: {data['close'].max():.2f}, "
+                f"Avg Close: {data['close'].mean():.2f}, Latest Close: {data['close'].iloc[-1]:.2f}. "
+                f"Avg Volume: {data['volume'].mean():.0f}."
             )
-            cols = ["timestamp", "open", "high", "low", "close", "volume"]
-            available = [c for c in cols if c in tail.columns]
-            if available:
-                summary += "\nLast {} rows:\n".format(n) + tail[available].to_csv(index=False)
             return summary
         except Exception as e:
             logger.exception("get_market_data failed: symbol=%r period=%s", symbol, period)

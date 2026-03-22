@@ -1,5 +1,6 @@
 """Helper functions for calculating and retrieving portfolio worth."""
 
+import logging
 import math
 from datetime import datetime
 from typing import Optional
@@ -11,6 +12,8 @@ from .data_service import DataService
 from .db import Bot as BotModel
 from .db import PortfolioWorth, get_db_session
 from .helpers import ensure_utc_series, ensure_utc_timestamp
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_portfolio_worth(
@@ -55,7 +58,7 @@ def calculate_portfolio_worth(
                 total_value += quantity * price
             else:
                 # If no historic data, skip this holding (or use 0)
-                print(f"Warning: No historic data for {symbol} at {date}")
+                logger.warning(f"No historic data for {symbol} at {date}")
         return total_value
     else:
         # Use latest prices
@@ -67,9 +70,10 @@ def calculate_portfolio_worth(
             if symbol in prices:
                 total_value += quantity * prices[symbol]
             else:
-                print(f"Warning: Could not get price for {symbol}")
+                logger.warning(f"Could not get price for {symbol}")
         
         return total_value
+
 
 
 def get_portfolio_worth_history(bot_name: str) -> pd.DataFrame:

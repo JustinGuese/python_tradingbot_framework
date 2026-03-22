@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     create_engine,
+    text,
 )
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.declarative import declarative_base
@@ -42,7 +43,6 @@ def _database_url() -> str:
         user_esc = quote_plus(user)
         password_esc = quote_plus(password)
         uri = f"{user_esc}:{password_esc}@{host}:{port}/{database}"
-        environ["POSTGRES_URI"] = uri  # So aihedgefundbot etc. can use it
         return "postgresql+psycopg2://" + uri
     raise KeyError(
         "Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection"
@@ -207,6 +207,7 @@ class StockNews(Base):
     publisher_url = Column(String, nullable=True)
     published_at = Column(DateTime, nullable=False)
     related_tickers = Column(JSON, nullable=True)
+    acted_on = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -305,7 +306,23 @@ class TelegramMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-Base.metadata.create_all(engine)
+def _migrate_schema() -> None:
+    """
+    Apply incremental column additions that create_all cannot handle on existing tables.
+    Each statement is idempotent (IF NOT EXISTS), safe to run on every startup.
+    """
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE stock_news "
+            "ADD COLUMN IF NOT EXISTS acted_on BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        conn.commit()
+
+
+def init_db() -> None:
+    """Initialize database tables and run schema migrations."""
+    Base.metadata.create_all(engine)
+    _migrate_schema()
 
 
 @contextmanager

@@ -1,11 +1,14 @@
 """DeepSeek Tool Bot: AI-driven portfolio research and rebalancing via tools."""
 
 import json
+import logging
 from typing import Optional
 
 from langchain_core.tools import tool
 from utils.core import Bot
 from utils.portfolio import TRADEABLE
+
+logger = logging.getLogger(__name__)
 
 
 def _sanity_check_weights_cheap_llm(bot: "Bot", weights: dict) -> bool:
@@ -32,8 +35,9 @@ def _sanity_check_weights_cheap_llm(bot: "Bot", weights: dict) -> bool:
         # Unparseable: default to reject so we can fall back to main retry
         return False
     except Exception as e:
-        print(f"Sanity check failed with error: {e}")
+        logger.error(f"Sanity check failed with error: {e}")
         return False
+
 
 
 class DeepSeekToolBot(Bot):
@@ -88,11 +92,11 @@ class DeepSeekToolBot(Bot):
             user_message=user_message,
             max_tool_rounds=50,
         )
-        print(f"AI response: {response}")
+        logger.info(f"AI response: {response}")
 
         weights = self._submitted_weights
         if weights is None:
-            print("Warning: AI did not submit portfolio weights; requesting submission (submit-only tools).")
+            logger.warning("Warning: AI did not submit portfolio weights; requesting submission (submit-only tools).")
             # Restrict to submit tools only; include symbol list so model can submit without calling get_tradeable_symbols
             symbols_list = ", ".join(self.tradeable_symbols)
             submit_only_prompt = (
@@ -108,15 +112,15 @@ class DeepSeekToolBot(Bot):
                 max_tool_rounds=5,
                 tool_names=[],  # No base tools: only get_tradeable_symbols + submit_portfolio_weights
             )
-            print(f"Follow-up AI response: {response}")
+            logger.info(f"Follow-up AI response: {response}")
             weights = self._submitted_weights
         if weights is None:
-            print("Warning: AI did not submit portfolio weights")
+            logger.warning("Warning: AI did not submit portfolio weights")
             return 0
 
         # Sanity-check weights with cheap LLM; if rejected, retry once with main LLM
         if not _sanity_check_weights_cheap_llm(self, weights):
-            print("Cheap LLM sanity check rejected weights; retrying with main LLM once.")
+            logger.warning("Cheap LLM sanity check rejected weights; retrying with main LLM once.")
             self._submitted_weights = None
             retry_message = (
                 "Your previous portfolio submission was rejected as unreasonable. "
@@ -129,13 +133,13 @@ class DeepSeekToolBot(Bot):
             )
             weights = self._submitted_weights
             if weights is None:
-                print("Warning: AI did not submit portfolio weights after retry")
+                logger.warning("Warning: AI did not submit portfolio weights after retry")
                 return 0
             if not _sanity_check_weights_cheap_llm(self, weights):
-                print("Warning: Sanity check rejected weights again; skipping rebalance")
+                logger.warning("Warning: Sanity check rejected weights again; skipping rebalance")
                 return 0
 
-        print(f"Submitted weights: {weights}")
+        logger.info(f"Submitted weights: {weights}")
 
         # Normalize if needed
         total = sum(w for w in weights.values() if w > 0)
@@ -143,7 +147,7 @@ class DeepSeekToolBot(Bot):
             weights = {k: v / total for k, v in weights.items()}
 
         self.rebalancePortfolio(weights, onlyOver50USD=True)
-        print("Rebalancing completed")
+        logger.info("Rebalancing completed")
         return 0
 
 if __name__ == "__main__":

@@ -1,11 +1,14 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
-from os import environ
 from typing import Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from utils.core import Bot
+from utils.db import _database_url
+
+logger = logging.getLogger(__name__)
 
 
 class AIHedgeFundBot(Bot):
@@ -14,10 +17,14 @@ class AIHedgeFundBot(Bot):
     Reads decisions from ai_hedge_fund database and rebalances accordingly.
     """
     
+    _ai_hedge_fund_engine = None
+    _SessionLocal = None
+    
     def __init__(self):
         super().__init__("AIHedgeFundBot", symbol=None)
     
-    def _get_ai_hedge_fund_session(self) -> Session:
+    @classmethod
+    def _get_ai_hedge_fund_session(cls) -> Session:
         """
         Create a database session for the ai_hedge_fund database.
         
@@ -28,38 +35,31 @@ class AIHedgeFundBot(Bot):
         Returns:
             SQLAlchemy Session connected to ai_hedge_fund database
         """
-        # Get the base POSTGRES_URI (points to main postgres database)
-        # We read it but don't modify the environment variable
-        # Format: postgres:password@host:port/database
-        base_uri = environ.get("POSTGRES_URI", "")
-        if not base_uri:
-            raise ValueError("POSTGRES_URI environment variable not set")
-        
-        # Create a modified URI that points to ai_hedge_fund database instead
-        # This is only used locally for this connection, doesn't affect the environment variable
-        if "/" in base_uri:
-            parts = base_uri.rsplit("/", 1)
-            ai_hedge_fund_uri = parts[0] + "/ai_hedge_fund"
-        else:
-            # Fallback if URI format is unexpected - append database name
-            ai_hedge_fund_uri = base_uri + "/ai_hedge_fund"
-        
-        # Create a separate engine for ai_hedge_fund database
-        # This doesn't affect the base Bot class's connection to main postgres database
-        database_url = "postgresql+psycopg2://" + ai_hedge_fund_uri
-        engine = create_engine(
-            database_url,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-            connect_args={
-                "keepalives": 1,
-                "keepalives_idle": 30,
-                "keepalives_interval": 10,
-                "keepalives_count": 5,
-            },
-        )
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        return SessionLocal()
+        if cls._ai_hedge_fund_engine is None:
+            # Get the base database URL (points to main postgres database)
+            base_url = _database_url()
+            
+            # Create a modified URL that points to ai_hedge_fund database instead
+            if "/" in base_url:
+                parts = base_url.rsplit("/", 1)
+                ai_hedge_fund_url = parts[0] + "/ai_hedge_fund"
+            else:
+                ai_hedge_fund_url = base_url + "/ai_hedge_fund"
+            
+            cls._ai_hedge_fund_engine = create_engine(
+                ai_hedge_fund_url,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+                connect_args={
+                    "keepalives": 1,
+                    "keepalives_idle": 30,
+                    "keepalives_interval": 10,
+                    "keepalives_count": 5,
+                },
+            )
+            cls._SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=cls._ai_hedge_fund_engine)
+            
+        return cls._SessionLocal()
     
     def _get_latest_trading_decisions(self) -> Optional[dict]:
         """
@@ -82,7 +82,7 @@ class AIHedgeFundBot(Bot):
                 ).fetchone()
                 
                 if not result:
-                    print("No trading decisions found in database")
+                    logger.info("No trading decisions found in database")
                     return None
                 
                 trading_decisions_json, created_at = result
@@ -98,7 +98,7 @@ class AIHedgeFundBot(Bot):
                         created_at = created_at.replace(tzinfo=timezone.utc)
                     
                     if created_at < one_day_ago:
-                        print(f"Latest trading decisions are too old (created_at: {created_at})")
+                        logger.warning(f"Latest trading decisions are too old (created_at: {created_at})")
                         return None
                 
                 # Parse JSON if it's a string
@@ -107,14 +107,14 @@ class AIHedgeFundBot(Bot):
                 else:
                     trading_decisions = trading_decisions_json
                 
-                print(f"Found recent trading decisions from {created_at}")
+                logger.info(f"Found recent trading decisions from {created_at}")
                 return trading_decisions
                 
             finally:
                 session.close()
                 
         except Exception as e:
-            print(f"Error querying ai_hedge_fund database: {e}")
+            logger.error(f"Error querying ai_hedge_fund database: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -142,7 +142,7 @@ class AIHedgeFundBot(Bot):
                 short_symbols.append(symbol)
         
         if not buy_symbols:
-            print("Warning: No buy symbols found in trading decisions")
+            logger.warning("No buy symbols found in trading decisions")
             return {}
         
         # Calculate equal weight for all buy symbols
@@ -157,7 +157,7 @@ class AIHedgeFundBot(Bot):
         for symbol in short_symbols:
             weights[symbol] = 0.0
         
-        print(f"Portfolio weights: {len(buy_symbols)} buy symbols (each {weight_per_buy:.2%}), "
+        logger.info(f"Portfolio weights: {len(buy_symbols)} buy symbols (each {weight_per_buy:.2%}), "
               f"{len(short_symbols)} short symbols (0%)")
         
         return weights
@@ -169,47 +169,47 @@ class AIHedgeFundBot(Bot):
         Returns:
             0: Rebalancing completed (no traditional buy/sell signal)
         """
-        print("Fetching trading decisions from AI hedge fund database...")
+        logger.info("Fetching trading decisions from AI hedge fund database...")
         
         try:
             # Get latest trading decisions
             trading_decisions = self._get_latest_trading_decisions()
             
             if not trading_decisions:
-                print("No valid trading decisions found, skipping rebalancing")
+                logger.info("No valid trading decisions found, skipping rebalancing")
                 return 0
             
             # Convert decisions to portfolio weights
             weights = self._convert_decisions_to_weights(trading_decisions)
             
             if not weights:
-                print("Warning: Could not convert decisions to weights")
+                logger.warning("Could not convert decisions to weights")
                 return 0
             
             # Verify weights sum to 1.0 (only buy symbols should have positive weight)
             total_weight = sum(w for w in weights.values() if w > 0)
             if abs(total_weight - 1.0) > 0.001:
-                print(f"Warning: Buy symbol weights sum to {total_weight:.4f}, expected 1.0")
+                logger.warning(f"Buy symbol weights sum to {total_weight:.4f}, expected 1.0")
                 # Normalize if needed
                 if total_weight > 0:
                     weights = {k: (v / total_weight if v > 0 else 0.0) for k, v in weights.items()}
                 else:
-                    print("Error: No positive weights to normalize")
+                    logger.error("No positive weights to normalize")
                     return 0
             
-            print("Rebalancing portfolio based on AI hedge fund decisions...")
-            print(f"Buy symbols: {[s for s, w in weights.items() if w > 0]}")
-            print(f"Short symbols (to sell): {[s for s, w in weights.items() if w == 0 and s in trading_decisions]}")
+            logger.info("Rebalancing portfolio based on AI hedge fund decisions...")
+            logger.info(f"Buy symbols: {[s for s, w in weights.items() if w > 0]}")
+            logger.info(f"Short symbols (to sell): {[s for s, w in weights.items() if w == 0 and s in trading_decisions]}")
 
             # Rebalance portfolio using base class method with onlyOver50USD=True
             # This will filter out assets with target value <= $50 and redistribute weights
             self.rebalancePortfolio(weights, onlyOver50USD=True)
             
-            print("Portfolio rebalancing completed successfully")
+            logger.info("Portfolio rebalancing completed successfully")
             return 0
         
         except Exception as e:
-            print(f"Error during portfolio rebalancing: {e}")
+            logger.error(f"Error during portfolio rebalancing: {e}")
             import traceback
             traceback.print_exc()
             raise

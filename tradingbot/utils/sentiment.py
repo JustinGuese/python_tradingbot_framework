@@ -4,9 +4,12 @@ Sentiment adapters (e.g. Fear & Greed index) behind a stable utils API.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import fear_and_greed
+
+logger = logging.getLogger(__name__)
 
 
 def get_fear_greed_index() -> Optional[int]:
@@ -19,8 +22,9 @@ def get_fear_greed_index() -> Optional[int]:
     try:
         value = fear_and_greed.get().value
     except Exception as exc:  # pragma: no cover - defensive
-        print(f"Failed to fetch Fear & Greed index: {exc}")
+        logger.error(f"Failed to fetch Fear & Greed index: {exc}")
         return None
+
     try:
         # Some implementations may return float; normalize to int for consistency
         return int(value)

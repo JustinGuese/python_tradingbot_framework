@@ -1,5 +1,6 @@
 """Hyperparameter tuning functionality for trading bots."""
 
+import logging
 import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,6 +25,8 @@ except ImportError:
 
 from .backtest import _get_backtest_period, backtest_bot
 from .botclass import Bot
+
+logger = logging.getLogger(__name__)
 
 
 def _evaluate_params(
@@ -55,7 +58,7 @@ def _evaluate_params(
     """
     try:
         if verbose:
-            print(f"[{idx}/{total}] Testing params: {params}")
+            logger.info(f"[{idx}/{total}] Testing params: {params}")
         
         # Create bot instance with these parameters
         bot = bot_class(**params)
@@ -79,7 +82,7 @@ def _evaluate_params(
         }
         
         if verbose:
-            print(f"[{idx}/{total}] Score ({objective}): {score:.4f}, "
+            logger.info(f"[{idx}/{total}] Score ({objective}): {score:.4f}, "
                   f"Return: {results['yearly_return']:.2%}, "
                   f"Trades: {results['nrtrades']}, "
                   f"Drawdown: {results['maxdrawdown']:.2%}")
@@ -88,8 +91,9 @@ def _evaluate_params(
     
     except Exception as e:
         if verbose:
-            print(f"[{idx}/{total}] Error: {e}")
+            logger.error(f"[{idx}/{total}] Error: {e}")
         return None
+
 
 
 def tune_hyperparameters(
@@ -173,11 +177,10 @@ def tune_hyperparameters(
         combinations = random.sample(combinations, sample_size)
         total_combinations = len(combinations)
         if verbose:
-            print(
+            logger.info(
                 f"Warning: Only testing a random subset: {total_combinations} of "
                 f"{original_total} parameter combinations ({param_sample_ratio:.0%})."
             )
-            print()
 
     # Determine number of parallel jobs
     if n_jobs is None:
@@ -185,16 +188,15 @@ def tune_hyperparameters(
     n_jobs = max(1, int(n_jobs))  # Ensure at least 1
     
     if verbose:
-        print(f"Testing {total_combinations} parameter combinations...")
-        print(f"Objective: {objective}")
-        print(f"Parameter grid: {param_grid}")
-        print(f"Parallel jobs: {n_jobs}")
-        print()
+        logger.info(f"Testing {total_combinations} parameter combinations...")
+        logger.info(f"Objective: {objective}")
+        logger.info(f"Parameter grid: {param_grid}")
+        logger.info(f"Parallel jobs: {n_jobs}")
     
     # Pre-fetch historical data once to avoid repeated yfinance downloads
     # Create a temporary bot instance with default parameters to fetch data
     if verbose:
-        print("Pre-fetching historical data (this will be reused for all parameter combinations)...")
+        logger.info("Pre-fetching historical data (this will be reused for all parameter combinations)...")
     
     try:
         # Create a temporary bot with default parameters to get symbol/interval/period
@@ -212,13 +214,12 @@ def tune_hyperparameters(
         )
         
         if verbose:
-            print(f"Loaded {len(shared_data)} data points for {temp_bot.symbol} "
+            logger.info(f"Loaded {len(shared_data)} data points for {temp_bot.symbol} "
                   f"(interval={temp_bot.interval}, period={backtest_period})")
-            print()
     except Exception as e:
         if verbose:
-            print(f"Warning: Could not pre-fetch data: {e}")
-            print("Will fetch data individually for each parameter combination (slower)")
+            logger.warning(f"Could not pre-fetch data: {e}")
+            logger.info("Will fetch data individually for each parameter combination (slower)")
         shared_data = None
     
     best_score = float('-inf')
@@ -235,8 +236,7 @@ def tune_hyperparameters(
     if n_jobs > 1:
         # Parallel execution
         if verbose:
-            print(f"Running {total_combinations} backtests in parallel ({n_jobs} workers)...")
-            print()
+            logger.info(f"Running {total_combinations} backtests in parallel ({n_jobs} workers)...")
         
         # Create progress bar
         progress_bar = tqdm(
@@ -323,9 +323,6 @@ def tune_hyperparameters(
             
             progress_bar.update(1)
             
-            if verbose and not TQDM_AVAILABLE:
-                print()
-        
         progress_bar.close()
     
     if best_params is None:
@@ -335,10 +332,10 @@ def tune_hyperparameters(
         )
     
     if verbose:
-        print("=" * 60)
-        print(f"Best parameters: {best_params}")
-        print(f"Best {objective}: {best_score:.4f}")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"Best parameters: {best_params}")
+        logger.info(f"Best {objective}: {best_score:.4f}")
+        logger.info("=" * 60)
     
     return {
         "best_params": best_params,
