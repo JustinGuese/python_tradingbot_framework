@@ -79,26 +79,6 @@ class TARegimeAdaptiveBot(Bot):
     def decisionFunction(self, row):
         return ta_regime_decision(row, self.data, **self._ta_params)
 
-    def makeOneIteration(self) -> int:
-        """Fetch data, set self.data for decisionFunction, then run default buy/sell logic."""
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-        data = self.getYFDataWithTA(
-            saveToDB=True, interval=self.interval, period=self.period
-        )
-        self.data = data
-        self.datasettings = (self.interval, self.period)
-        decision = self.getLatestDecision(data)
-        cash = self.dbBot.portfolio.get("USD", 0)
-        holding = self.dbBot.portfolio.get(self.symbol, 0)
-        if decision == 1 and cash > 0:
-            self.buy(self.symbol)
-            return 1
-        if decision == -1 and holding > 0:
-            self.sell(self.symbol)
-            return -1
-        return 0
-
-
 if __name__ == "__main__":
     bot = TARegimeAdaptiveBot()
 

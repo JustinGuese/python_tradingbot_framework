@@ -166,18 +166,41 @@ def _compute_backtest_metrics(
 
     portfolio_series = pd.Series(portfolio_values)
     period_returns = portfolio_series.pct_change().dropna()
+    periods_per_year = _get_periods_per_year(interval)
 
     if len(period_returns) == 0:
         sharpe_ratio = 0.0
+        sortino_ratio = 0.0
+        win_rate = 0.0
+        volatility = 0.0
     else:
         std_return = period_returns.std()
         if std_return == 0 or not np.isfinite(std_return):
             sharpe_ratio = 0.0
         else:
-            periods_per_year = _get_periods_per_year(interval)
             annualized_return = period_returns.mean() * periods_per_year
             annualized_vol = std_return * np.sqrt(periods_per_year)
             sharpe_ratio = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol > 0 else 0.0
+
+        # Sortino — penalises downside returns only
+        downside = period_returns[period_returns < 0]
+        downside_std = downside.std() if len(downside) > 0 else 0.0
+        if downside_std > 0 and np.isfinite(downside_std):
+            annualized_return = period_returns.mean() * periods_per_year
+            annualized_downside = downside_std * np.sqrt(periods_per_year)
+            sortino_ratio = (annualized_return - risk_free_rate) / annualized_downside
+        else:
+            sortino_ratio = 0.0
+        if not np.isfinite(sortino_ratio):
+            sortino_ratio = 0.0
+
+        # Win rate — fraction of bars with positive return
+        win_rate = float((period_returns > 0).mean()) if len(period_returns) > 0 else 0.0
+
+        # Annualised volatility
+        volatility = float(period_returns.std() * np.sqrt(periods_per_year)) if len(period_returns) > 0 else 0.0
+        if not np.isfinite(volatility):
+            volatility = 0.0
 
     portfolio_array = np.array(portfolio_values)
     running_max = np.maximum.accumulate(portfolio_array)
@@ -186,10 +209,19 @@ def _compute_backtest_metrics(
     if not np.isfinite(maxdrawdown):
         maxdrawdown = 0.0
 
+    # Calmar — return per unit of max drawdown
+    calmar_ratio = float(yearly_return / maxdrawdown) if maxdrawdown > 0 else 0.0
+    if not np.isfinite(calmar_ratio):
+        calmar_ratio = 0.0
+
     return {
         "yearly_return": float(yearly_return),
         "sharpe_ratio": float(sharpe_ratio),
         "maxdrawdown": float(maxdrawdown),
+        "sortino_ratio": float(sortino_ratio),
+        "calmar_ratio": float(calmar_ratio),
+        "win_rate": float(win_rate),
+        "volatility": float(volatility),
     }
 
 
@@ -248,6 +280,10 @@ def _save_backtest_to_db(
                         nrtrades=result["nrtrades"],
                         maxdrawdown=result["maxdrawdown"],
                         buy_hold_return=result["buy_hold_return"],
+                        sortino_ratio=result.get("sortino_ratio"),
+                        calmar_ratio=result.get("calmar_ratio"),
+                        win_rate=result.get("win_rate"),
+                        volatility=result.get("volatility"),
                     ))
                     updated_metrics.append(metric)
     except Exception as e:
@@ -408,6 +444,7 @@ def backtest_bot(
 
             for ticker in tickers:
                 try:
+                    bot._current_ticker = ticker
                     decision = bot.decisionFunction(rows[ticker])
                 except Exception as e:
                     logger.warning(f"Error in decisionFunction for {ticker} at {ts}: {e}")

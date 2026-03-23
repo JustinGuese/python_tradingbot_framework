@@ -184,8 +184,12 @@ helm upgrade --install tradingbots \
 
 ### Bot Implementation Levels
 
+See the comprehensive [**Bot Implementation Levels guide**](docs/guides/bot-implementation-levels.md) for detailed explanations, examples, trade-offs, and pitfalls for each pattern.
+
+**Quick summary:**
+
 **1. Simple (Recommended)**: `decisionFunction(row)`
-For strategies based on single-row technical indicators:
+For single-row TA signals. The base class handles data fetching, `self.data` (full history slice), and buy/sell execution automatically — no `makeOneIteration` needed:
 
 ```python
 def decisionFunction(self, row):
@@ -194,26 +198,50 @@ def decisionFunction(self, row):
     return 0
 ```
 
-**2. Medium Complexity**: Override `makeOneIteration()`
-For external APIs or custom data processing:
+If your signal needs the full historical DataFrame (e.g. Hurst exponent, rolling z-scores), use `self.data` — the base class sets it automatically before calling `decisionFunction`:
+
+```python
+def decisionFunction(self, row):
+    lookback = self.data.tail(50)  # self.data is always the slice up to current bar
+    zscore = (row["close"] - lookback["close"].mean()) / lookback["close"].std()
+    return 1 if zscore < -2 else (-1 if zscore > 2 else 0)
+```
+
+**1b. Multi-Asset**: `tickers=[...]` + `decisionFunction(row)`
+For strategies that trade multiple instruments. The framework calls `decisionFunction` once per ticker per bar, sets `self._current_ticker` and populates `self.datas` with all tickers' history up to the current bar:
+
+```python
+def __init__(self):
+    super().__init__("MyBot", tickers=["QQQ", "GLD", "TLT"], interval="1d", period="1y")
+
+def decisionFunction(self, row):
+    ticker = self._current_ticker
+    # self.datas[ticker] has history up to current bar for all tickers
+    ...
+    return 1  # -1 or 0
+```
+
+**2. Override `makeOneIteration()`** — only when you need external APIs or portfolio-weight rebalancing that can't map to -1/0/1 signals:
 
 ```python
 def makeOneIteration(self):
-    fear_greed = get_fear_greed_index()  # External API
+    fear_greed = get_fear_greed_index()  # External API — not backtestable
     if fear_greed >= 70: self.buy("QQQ")
     return 1
 ```
 
-**3. Complex**: Portfolio Optimization
-For multi-asset strategies and rebalancing:
-
 ```python
 def makeOneIteration(self):
     data = self.getYFDataMultiple(["QQQ", "GLD", "TLT"])
-    weights = optimize_portfolio(data)  # Your optimization
+    weights = optimize_portfolio(data)  # Portfolio optimizer — outputs weights, not signals
     self.rebalancePortfolio(weights)
     return 0
 ```
+
+> **Backtesting**: Only bots using `decisionFunction()` (Levels 1 and 1b) are backtestable
+> via `local_backtest()`. Bots that override `makeOneIteration()` with external API calls,
+> AI models, or portfolio-weight optimizers cannot be replayed on historical data and must
+> be validated via live runs. If your strategy is yfinance-only, prefer `decisionFunction`.
 
 ### Key Methods
 

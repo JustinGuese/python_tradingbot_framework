@@ -12,6 +12,7 @@ This system provides a framework for building and deploying automated trading bo
 
 ## Quick Links
 
+- **[Bot Implementation Levels](guides/bot-implementation-levels.md)** ← Start here! Learn the three bot patterns (Level 1/1b simple, Level 2 advanced)
 - [Quick Start Guide](getting-started/quick-start.md) - Get up and running in minutes
 - [Creating a Bot](getting-started/creating-a-bot.md) - Learn how to build your first bot
 - [Bot Class System](architecture/bot-class-system.md) - Understand the core architecture
@@ -105,6 +106,7 @@ helm upgrade --install tradingbots ./helm/tradingbots \
   - Integrations (Telegram Monitor)
 - **Deployment**: Kubernetes and Helm deployment guides
 - **Guides**: In-depth tutorials and best practices
+  - **[Bot Implementation Levels](guides/bot-implementation-levels.md)** - When to use decisionFunction vs makeOneIteration, backtestability, trade-offs
   - [Technical Analysis](guides/technical-analysis.md)
   - [Portfolio Management](guides/portfolio-management.md)
   - [AI Tools](guides/ai-tools.md)

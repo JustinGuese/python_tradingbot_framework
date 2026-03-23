@@ -35,7 +35,7 @@ import pandas as pd
 from .bot_repository import BotRepository
 from .data_service import DataService
 from .db import RunLog, get_db_session, init_db
-from .logging_config import setup_logging
+from .config import setup_logging
 from .portfolio_manager import PortfolioManager
 
 
@@ -645,10 +645,14 @@ class Bot:
         if len(self.tickers) > 1:
             return self._run_multi_ticker_iteration()
 
-        # Single-asset path (unchanged)
+        # Single-asset path
         # Refresh dbBot to ensure it's attached to a session
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         data = self.getYFDataWithTA(saveToDB=True, interval=self.interval, period=self.period)
+        # Make full dataset available so decisionFunction can access history
+        # (e.g. Hurst exponent, rolling z-scores) without overriding makeOneIteration.
+        self.data = data
+        self.datasettings = (self.interval, self.period)
         decision = self.getLatestDecision(data)
         cash = self.dbBot.portfolio.get("USD", 0)
         holding = self.dbBot.portfolio.get(self.symbol, 0)
@@ -676,6 +680,9 @@ class Bot:
         N = len(self.tickers)
         decisions: Dict[str, int] = {}
 
+        # Phase 1: load all data so self.datas is fully populated before
+        # any decisionFunction call (needed for cross-ticker strategies like
+        # GoldenButterflyMomBot that read self.datas inside decisionFunction)
         for ticker in self.tickers:
             data = self.getYFDataWithTA(
                 symbol=ticker,
@@ -684,7 +691,11 @@ class Bot:
                 period=self.period,
             )
             self.datas[ticker] = data
-            decisions[ticker] = self.getLatestDecision(data)
+
+        # Phase 2: compute decisions (self.datas is now complete)
+        for ticker in self.tickers:
+            self._current_ticker = ticker
+            decisions[ticker] = self.getLatestDecision(self.datas[ticker])
 
         prices = self.getLatestPricesBatch(self.tickers)
         portfolio = self.dbBot.portfolio

@@ -34,6 +34,18 @@ print(f"Sharpe: {results['sharpe_ratio']:.2f}")
 
 ## Backtesting
 
+> **Requirements**: `local_backtest()` works for `decisionFunction`-based bots (single-asset
+> and multi-asset with `tickers=[...]`). Bots that override `makeOneIteration()` to call
+> external APIs, AI models, or portfolio-weight optimizers are not automatically backtestable —
+> refactor to `decisionFunction` if historical replay is needed.
+>
+> **`self.data` is available inside `decisionFunction`**: the base class sets it to the
+> historical slice up to the current bar before each call, so you can access full history
+> (e.g. `self.data.tail(50)`) without overriding `makeOneIteration()`.
+>
+> **Bots that only need yfinance data should always use `decisionFunction`** — `makeOneIteration`
+> override is only warranted for external APIs or portfolio-weight rebalancing strategies.
+
 ### Simple Backtest
 
 ```python

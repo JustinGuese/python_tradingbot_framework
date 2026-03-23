@@ -124,28 +124,6 @@ class AdaptiveMeanReversionBot(Bot):
         return data
 
     # ------------------------------------------------------------------
-    # Live execution
-    # ------------------------------------------------------------------
-
-    def makeOneIteration(self) -> int:
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-        data = self.getYFDataWithTA(interval=self.interval, period=self.period, saveToDB=True)
-        self.data = data
-        self.datasettings = (self.interval, self.period)
-
-        decision = self.getLatestDecision(data)
-        cash = self.dbBot.portfolio.get("USD", 0)
-        holding = self.dbBot.portfolio.get(self.symbol, 0)
-
-        if decision == 1 and cash > 0:
-            self.buy(self.symbol)
-            return 1
-        if decision == -1 and holding > 0:
-            self.sell(self.symbol)
-            return -1
-        return 0
-
-    # ------------------------------------------------------------------
     # Signal (backtestable)
     # ------------------------------------------------------------------
 
@@ -191,8 +169,8 @@ class AdaptiveMeanReversionBot(Bot):
 
 
 bot = AdaptiveMeanReversionBot()
-bot.local_development()
-# bot.run()
+# bot.local_development()
+bot.run()
 # ============================================================
 # 2026-03-22 11:51:07 - utils.botclass - INFO - Backtesting with best parameters...
 # 2026-03-22 11:51:07 - utils.botclass - INFO - ============================================================

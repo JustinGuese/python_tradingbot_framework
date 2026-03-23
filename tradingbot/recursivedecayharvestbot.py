@@ -128,9 +128,10 @@ class RecursiveDecayHarvestBot(Bot):
         interval: str = "1d",
         period: str = "2y",
         saveToDB: bool = True,
+        **kwargs,
     ) -> pd.DataFrame:
         """Fetch TQQQ OHLCV+TA, then overlay QQQ SMA200 and UVXY RSI columns."""
-        tqqq_data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB)
+        tqqq_data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB, **kwargs)
 
         aux = self.getYFDataMultiple(
             symbols=["QQQ", "UVXY"],
@@ -184,28 +185,6 @@ class RecursiveDecayHarvestBot(Bot):
             result["uvxy_rsi"] = 50.0
 
         return result.drop(columns=["_date"], errors="ignore")
-
-    # ------------------------------------------------------------------
-    # Live execution
-    # ------------------------------------------------------------------
-
-    def makeOneIteration(self) -> int:
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-        data = self.getYFDataWithTA(interval=self.interval, period=self.period, saveToDB=True)
-        self.data = data
-        self.datasettings = (self.interval, self.period)
-
-        decision = self.getLatestDecision(data)
-        cash = self.dbBot.portfolio.get("USD", 0)
-        holding = self.dbBot.portfolio.get(self.symbol, 0)
-
-        if decision == 1 and cash > 0:
-            self.buy(self.symbol)
-            return 1
-        if decision == -1 and holding > 0:
-            self.sell(self.symbol)
-            return -1
-        return 0
 
     # ------------------------------------------------------------------
     # Signal (backtestable)
