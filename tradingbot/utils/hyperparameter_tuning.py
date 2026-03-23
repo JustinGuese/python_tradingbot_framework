@@ -67,8 +67,9 @@ def _evaluate_params(
         results = backtest_bot(
             bot,
             initial_capital=initial_capital,
-            save_to_db=False,  # Data already saved, no need to save again
-            data=shared_data  # Reuse pre-fetched data
+            save_to_db=False,
+            save_results_to_db=False,
+            data=shared_data,
         )
         score = results[objective]
         
@@ -199,23 +200,43 @@ def tune_hyperparameters(
         logger.info("Pre-fetching historical data (this will be reused for all parameter combinations)...")
     
     try:
-        # Create a temporary bot with default parameters to get symbol/interval/period
+        # Create a temporary bot with default parameters to get tickers/interval/period
         temp_bot = bot_class()
-        
+        is_multi = len(getattr(temp_bot, "tickers", [])) > 1
+
         # Determine appropriate period based on interval (respects Yahoo Finance limits)
         backtest_period = _get_backtest_period(temp_bot.interval)
-        
-        # Fetch data with TA indicators once and save to DB
-        # This ensures subsequent backtests can reuse DB data
-        shared_data = temp_bot.getYFDataWithTA(
-            interval=temp_bot.interval,
-            period=backtest_period,
-            saveToDB=True  # Save to DB so future runs can reuse it
-        )
-        
-        if verbose:
-            logger.info(f"Loaded {len(shared_data)} data points for {temp_bot.symbol} "
-                  f"(interval={temp_bot.interval}, period={backtest_period})")
+
+        if is_multi:
+            # Multi-ticker: pre-fetch a dict of DataFrames, one per ticker
+            shared_data = {}
+            for ticker in temp_bot.tickers:
+                shared_data[ticker] = temp_bot.getYFDataWithTA(
+                    symbol=ticker,
+                    interval=temp_bot.interval,
+                    period=backtest_period,
+                    saveToDB=True,
+                )
+            if verbose:
+                total_rows = sum(len(df) for df in shared_data.values())
+                logger.info(
+                    f"Loaded {total_rows} total data points across {len(temp_bot.tickers)} "
+                    f"tickers {temp_bot.tickers} "
+                    f"(interval={temp_bot.interval}, period={backtest_period})"
+                )
+        else:
+            # Single-ticker: fetch one DataFrame
+            shared_data = temp_bot.getYFDataWithTA(
+                interval=temp_bot.interval,
+                period=backtest_period,
+                saveToDB=True,
+            )
+            if verbose:
+                logger.info(
+                    f"Loaded {len(shared_data)} data points for "
+                    f"{getattr(temp_bot, 'symbol', temp_bot.tickers)} "
+                    f"(interval={temp_bot.interval}, period={backtest_period})"
+                )
     except Exception as e:
         if verbose:
             logger.warning(f"Could not pre-fetch data: {e}")

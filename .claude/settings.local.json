@@ -7,7 +7,15 @@
       "Bash(find /c/code/python_tradingbot_framework/tradingbot/utils/ -name \"*.py\" | xargs ls 2>&1)",
       "Bash(helm lint:*)",
       "Bash(helm template:*)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(cd /c/code/python_tradingbot_framework && python -c \"from tradingbot.utils.botclass import Bot; from tradingbot.utils.backtest import backtest_bot; print\\('imports OK'\\)\" 2>&1)",
+      "Bash(source:*)",
+      "Bash(cd /c/code/python_tradingbot_framework && source .venv/Scripts/activate && python -c \"from tradingbot.utils.botclass import Bot; from tradingbot.utils.backtest import backtest_bot; print\\('imports OK'\\)\" 2>&1)",
+      "Bash(cd /c/code/python_tradingbot_framework && uv run python -c \"from tradingbot.utils.botclass import Bot; from tradingbot.utils.backtest import backtest_bot; print\\('imports OK'\\)\" 2>&1)",
+      "Bash(cd /c/code/python_tradingbot_framework && uv run python -m py_compile tradingbot/utils/botclass.py tradingbot/utils/backtest.py tradingbot/utils/hyperparameter_tuning.py && echo \"syntax OK\" 2>&1)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(*)"
     ]
   }
 }

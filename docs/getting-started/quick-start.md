@@ -135,8 +135,12 @@ from tradingbot.utils.botclass import Bot
 
 class PortfolioBot(Bot):
     def __init__(self):
-        super().__init__("PortfolioBot", symbol=None)  # Multi-asset bot
-        self.symbols = ["QQQ", "GLD", "TLT", "AAPL"]
+        super().__init__(
+            "PortfolioBot", 
+            tickers=["QQQ", "GLD", "TLT", "AAPL"],
+            interval="1d",
+            period="3mo"
+        )
     
     def makeOneIteration(self):
         """
@@ -147,7 +151,7 @@ class PortfolioBot(Bot):
         """
         # Fetch data for multiple symbols
         data = self.getYFDataMultiple(
-            self.symbols, 
+            self.tickers, 
             interval="1d", 
             period="3mo", 
             saveToDB=True

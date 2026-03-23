@@ -4,25 +4,56 @@ The `Bot` class is the foundation of the trading bot system. All bots inherit fr
 
 ## Implementation Approaches
 
-### 1. Simple (Recommended): Implement `decisionFunction(row)`
+### 1a. Simple (Recommended): Single-ticker `decisionFunction(row)`
 
-**When to use**: Your strategy can be expressed as logic on a single data row with technical indicators.
+**When to use**: Your strategy can be expressed as logic on a single data row with technical indicators, for one symbol.
 
-**How it works**: 
-- Base class fetches data
+**How it works**:
+- Base class fetches data for `self.symbol` (or `self.tickers` for multi-asset bots)
 - Applies your function to each row
 - Averages the last N decisions
 - Executes trades automatically
+- Fully backtestable via `local_backtest()` / `local_optimize()`
 
 **Example**:
 ```python
 class MyBot(Bot):
+    def __init__(self):
+        super().__init__("MyBot", symbol="QQQ", interval="1d", period="1y")
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < 30:
             return 1  # Buy
         elif row["momentum_rsi"] > 70:
             return -1  # Sell
         return 0  # Hold
+```
+
+### 1b. Multi-ticker `decisionFunction(row)` — equal-weight
+
+**When to use**: Same row-by-row logic applied across a basket of tickers with equal-weight sizing.
+
+**How it works**:
+- Pass `tickers=["SPY", "QQQ", "GLD"]` to `__init__` instead of `symbol=`
+- `decisionFunction` is called once per ticker per bar (unchanged signature)
+- Buy signal: top up that ticker toward `total_value / N`
+- Sell signal: liquidate that ticker's position
+- Live trading: `makeOneIteration()` routes to `_run_multi_ticker_iteration()` automatically
+- Backtesting: `backtest_bot()` inner-joins all ticker DataFrames on timestamp and simulates equal-weight
+
+**Example**:
+```python
+class MyMultiBot(Bot):
+    def __init__(self):
+        super().__init__("MyMultiBot", tickers=["SPY", "QQQ", "GLD"],
+                         interval="1d", period="1y")
+
+    def decisionFunction(self, row):
+        if row["momentum_rsi"] < 30:
+            return 1
+        elif row["momentum_rsi"] > 70:
+            return -1
+        return 0
 ```
 
 ### 2. Medium Complexity: Override `makeOneIteration()`
@@ -100,7 +131,7 @@ holding = bot.dbBot.portfolio.get("QQQ", 0)
 
 ## Data Caching
 
-- **Instance cache**: `self.data` caches last fetched DataFrame
+- **Instance cache**: `self.data` caches last fetched DataFrame (for single-ticker). For multi-ticker bots, `self.datas` is a dictionary caching DataFrames keyed by ticker.
 - **Database persistence**: Set `saveToDB=True` for cross-run data reuse
 - **Automatic freshness check**: Stale data (>10 minutes) is refetched
 

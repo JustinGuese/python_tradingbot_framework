@@ -30,5 +30,4 @@ class EarningsInsiderTiltBot(Bot):
 
 if __name__ == "__main__":
     bot = EarningsInsiderTiltBot()
-    # bot.local_backtest()
     bot.run()

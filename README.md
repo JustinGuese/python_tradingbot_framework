@@ -106,11 +106,12 @@ bot.local_development()  # Finds best params, then backtests
 - Data pre-fetching: Historical data fetched once, reused for all parameter combinations
 - Database caching: Data persisted to DB, subsequent runs are instant
 - Parallel execution: Uses multiple CPU cores automatically
+- Automatic QuantStats reports: Generated and uploaded to Google Cloud Storage with Sharpe/return optimizations and drawdown analysis
 
 
 ## 📈 Dashboard & Monitoring
 
-The framework includes a built-in visualization suite to track your bots' performance.
+The framework includes a built-in visualization suite to track your bots' performance. Each backtest generates a professional **QuantStats report** with cumulative returns, drawdown analysis, monthly heatmaps, and more ([see example](docs/examplequantstatsreport.html)).
 
 ![Portfolio Overview](docs/overview.png)
 

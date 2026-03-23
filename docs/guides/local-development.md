@@ -107,6 +107,59 @@ with get_db_session() as session:
         print(f"{log.start_time}: {log.success} - {log.result}")
 ```
 
+## QuantStats Report Generation
+
+Backtest results are automatically analyzed and visualized via **QuantStats** — a professional portfolio analysis library. When you backtest, two HTML reports are generated and uploaded to Google Cloud Storage.
+
+**[📊 View Example Report](../examplequantstatsreport.html)** - See what a generated report looks like
+
+### Automatic Report Generation
+
+When `local_backtest()` or `local_development()` completes:
+
+1. **QuantStats generates a rich HTML report** with:
+   - Cumulative returns chart
+   - Drawdown analysis
+   - Monthly/yearly returns heatmap
+   - Risk metrics (Sharpe, Sortino, max drawdown)
+   - Win rate and trade statistics
+   - Comparison vs. buy-and-hold benchmark
+
+2. **Two report variants are created**:
+   - `sharpewinner/report.html` — Optimized for Sharpe ratio
+   - `yearlyreturnwinner/report.html` — Optimized for yearly return
+
+3. **Reports are uploaded to GCS** (if credentials are configured):
+   - Path: `gs://tradingbotrunresults/{BotName}/{metric}/report.html`
+   - Example: `gs://tradingbotrunresults/AdaptiveMeanReversionBot/sharpewinner/report.html`
+
+### Configuring GCS Upload
+
+Add to `.env`:
+
+```bash
+GCS_ACCESS_KEY_ID=GOOG1E42PG...        # Your GCS HMAC access key
+GCS_SECRET_ACCESS_KEY=DEhAhzG6Ok...    # Your GCS HMAC secret
+GCS_BUCKET_NAME=tradingbotrunresults   # Cloud Storage bucket name
+```
+
+**To get HMAC credentials**:
+1. Go to Google Cloud Console → Service Accounts
+2. Create or select a service account
+3. Create HMAC key (Keys tab → "Create key" → HMAC)
+4. Copy Access Key ID and Secret from the JSON
+
+**Without GCS configured**, backtests still run and generate local insights—reports are simply skipped. This is safe for local development.
+
+### What to Look For in Reports
+
+- **Cumulative Returns**: Should show consistent growth or stay positive during drawdowns
+- **Monthly Heatmap**: Look for consistency across months (avoid concentrated returns)
+- **Sharpe Ratio**: Higher is better; >1.0 is good, >2.0 is excellent
+- **Max Drawdown**: How much the strategy lost at its worst point (smaller is better)
+- **Win Rate**: Percentage of profitable trades
+- **Comparison vs Benchmark**: Did your bot beat buy-and-hold?
+
 ## Next Steps
 
 - [Hyperparameter Tuning API](../api/hyperparameter-tuning.md) - Complete API docs

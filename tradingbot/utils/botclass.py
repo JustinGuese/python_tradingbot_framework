@@ -65,14 +65,17 @@ class Bot:
     # Optional class attribute: subclasses can define their hyperparameter search space
     param_grid: Optional[Dict[str, List[Any]]] = None
 
-    def __init__(self, name: str, symbol: Optional[str] = None, interval: str = "1m", period: str = "1d", **kwargs):
+    def __init__(self, name: str, symbol: Optional[str] = None, tickers: Optional[List[str]] = None, interval: str = "1m", period: str = "1d", **kwargs):
         """
         Initialize a trading bot.
-        
+
         Args:
             name: Unique name for the bot (used for database identification)
             symbol: Trading symbol (e.g., "EURUSD=X", "^XAU", "QQQ")
                     Optional for multi-asset bots that override makeOneIteration()
+            tickers: List of trading symbols for multi-ticker strategies.
+                     If provided, symbol is ignored and set to None.
+                     e.g. tickers=["SPY", "QQQ", "GLD"]
             interval: Data interval (e.g., "1m", "5m", "1h", "1d") - default: "1m"
             period: Data period (e.g., "1d", "5d", "1mo", "1y") - default: "1d"
             **kwargs: Arbitrary hyperparameters that will be stored in self.params
@@ -82,7 +85,18 @@ class Bot:
         self.bot_name = name  # Store name separately to avoid DetachedInstanceError
         init_db()  # Ensure database is initialized before first access
         self.dbBot = BotRepository.create_or_get_bot(name)
-        self.symbol = symbol
+        if tickers is not None:
+            # Guard: accept a bare string as a single-element list
+            if isinstance(tickers, str):
+                tickers = [tickers]
+            self.tickers: List[str] = list(tickers)
+            self.symbol: Optional[str] = None
+        elif symbol is not None:
+            self.tickers = [symbol]
+            self.symbol = symbol
+        else:
+            self.tickers = []
+            self.symbol = None
         self.interval = interval
         self.period = period
         
@@ -101,8 +115,51 @@ class Bot:
         
         # Maintain backward compatibility for data caching
         self.data: Optional[pd.DataFrame] = None
+        self.datas: Dict[str, Optional[pd.DataFrame]] = {}  # per-ticker cache for multi-ticker bots
         self.datasettings: Tuple[Optional[str], Optional[str]] = (None, None)
-    
+
+    @property
+    def backtest_type(self) -> str:
+        """
+        Classify the bot's backtesting mode.
+
+        Returns:
+            "single_asset"  — decisionFunction overridden + single ticker  → backtestable
+            "multi_asset"   — decisionFunction overridden + multiple tickers → backtestable
+            "event_driven"  — only makeOneIteration overridden              → NOT backtestable
+            "unknown"       — neither method overridden                      → NOT backtestable
+        """
+        has_df = type(self).decisionFunction is not Bot.decisionFunction
+        has_moi = type(self).makeOneIteration is not Bot.makeOneIteration
+        if has_df and len(self.tickers) > 1:
+            return "multi_asset"
+        if has_df and len(self.tickers) == 1:
+            return "single_asset"
+        if has_moi:
+            return "event_driven"
+        return "unknown"
+
+    @property
+    def can_backtest(self) -> bool:
+        """
+        True if this bot can be backtested with local_backtest() / local_optimize().
+
+        Only data-driven bots that implement decisionFunction() are backtestable.
+        Event-driven bots (makeOneIteration only) must use run() for live execution.
+        """
+        return self.backtest_type in ("single_asset", "multi_asset")
+
+    def _assert_backtestable(self) -> None:
+        """Raise a clear error if this bot is not backtestable."""
+        if not self.can_backtest:
+            raise NotImplementedError(
+                f"{self.__class__.__name__} is not backtestable "
+                f"(backtest_type='{self.backtest_type}'). "
+                "Only data-driven bots that implement decisionFunction() support "
+                "local_backtest() / local_optimize(). "
+                "Use bot.run() for live execution."
+            )
+
     # Data fetching methods - delegate to DataService
     def _parsePeriodToDateRange(self, period: str) -> Tuple[pd.Timestamp, pd.Timestamp]:
         """
@@ -156,10 +213,14 @@ class Bot:
         Returns:
             DataFrame with columns: symbol, timestamp, open, high, low, close, volume
         """
+        is_primary = False
         if not symbol:
             if self.symbol is None:
                 raise ValueError("symbol parameter is required when self.symbol is None (multi-asset bot)")
             symbol = self.symbol
+            is_primary = True
+        elif symbol == self.symbol:
+            is_primary = True
         
         data = self._data_service.get_yf_data(
             symbol=symbol,
@@ -169,9 +230,11 @@ class Bot:
             use_cache=True,
         )
         
-        # Update cache for backward compatibility
-        if (interval, period) == self.datasettings:
-            self.data = data
+        # Update cache for backward compatibility: only if it's the primary symbol
+        # or it's a single-ticker bot.
+        if is_primary or len(self.tickers) <= 1:
+            if (interval, period) == self.datasettings:
+                self.data = data
         
         return data
     
@@ -192,7 +255,7 @@ class Bot:
         - If saveToDB=True, saves fetched data to database for future reuse
         
         Note: For repeated backtests or hyperparameter tuning, set saveToDB=True
-        to enable efficient data reuse across multiple runs.
+        to enable efficient data reuse.
         
         Args:
             symbol: Trading symbol (defaults to self.symbol)
@@ -206,10 +269,14 @@ class Bot:
         Returns:
             DataFrame with market data and technical analysis features
         """
+        is_primary = False
         if not symbol:
             if self.symbol is None:
                 raise ValueError("symbol parameter is required when self.symbol is None (multi-asset bot)")
             symbol = self.symbol
+            is_primary = True
+        elif symbol == self.symbol:
+            is_primary = True
         
         data = self._data_service.get_yf_data_with_ta(
             symbol=symbol,
@@ -219,9 +286,11 @@ class Bot:
             features=features,
         )
         
-        # Update cache for backward compatibility
-        if (interval, period) == self.datasettings:
-            self.data = data
+        # Update cache for backward compatibility: only if it's the primary symbol
+        # or it's a single-ticker bot.
+        if is_primary or len(self.tickers) <= 1:
+            if (interval, period) == self.datasettings:
+                self.data = data
         
         return data
     
@@ -299,7 +368,9 @@ class Bot:
         Raises:
             ValueError: If no price data is available
         """
-        return self._data_service.get_latest_price(symbol, cached_data=self.data)
+        # Pass the per-ticker cache if available, else fallback to self.data
+        cached = self.datas.get(symbol, self.data)
+        return self._data_service.get_latest_price(symbol, cached_data=cached)
     
     def getLatestPricesBatch(self, symbols: list[str]) -> dict[str, float]:
         """
@@ -322,7 +393,9 @@ class Bot:
             symbol: Trading symbol to buy
             quantityUSD: Amount in USD to spend (-1 means use all available cash)
         """
-        self._portfolio_manager.buy(symbol, quantity_usd=quantityUSD, cached_data=self.data)
+        # Use per-ticker cache if available
+        cached = self.datas.get(symbol, self.data)
+        self._portfolio_manager.buy(symbol, quantity_usd=quantityUSD, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
     
@@ -334,7 +407,9 @@ class Bot:
             symbol: Trading symbol to sell
             quantityUSD: Amount in USD to sell (-1 means sell all holdings)
         """
-        self._portfolio_manager.sell(symbol, quantity_usd=quantityUSD, cached_data=self.data)
+        # Use per-ticker cache if available
+        cached = self.datas.get(symbol, self.data)
+        self._portfolio_manager.sell(symbol, quantity_usd=quantityUSD, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
     
@@ -559,13 +634,18 @@ class Bot:
         Raises:
             NotImplementedError: If self.symbol is None (multi-asset bot) and method not overridden
         """
-        # For multi-asset bots, this method must be overridden
-        if self.symbol is None:
+        # Truly uninitialized bot (no symbol and no tickers)
+        if self.symbol is None and len(self.tickers) == 0:
             raise NotImplementedError(
-                "Multi-asset bots must override makeOneIteration(). "
-                "Single-asset bots must provide a symbol in __init__()."
+                "Bot has no symbol or tickers configured. "
+                "Pass symbol= for single-asset or tickers= for multi-asset bots."
             )
-        
+
+        # Multi-ticker path: delegate to _run_multi_ticker_iteration
+        if len(self.tickers) > 1:
+            return self._run_multi_ticker_iteration()
+
+        # Single-asset path (unchanged)
         # Refresh dbBot to ensure it's attached to a session
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         data = self.getYFDataWithTA(saveToDB=True, interval=self.interval, period=self.period)
@@ -581,6 +661,50 @@ class Bot:
         else:
             logger.info("No trade action taken (hold).")
         return 0
+
+    def _run_multi_ticker_iteration(self) -> int:
+        """
+        Execute one live-trading iteration for a multi-ticker bot.
+
+        For each ticker, fetches the latest data, calls decisionFunction on the
+        most recent row, and rebalances toward equal-weight using buy/sell.
+
+        Returns:
+            Number of trades executed (buys + sells)
+        """
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+        N = len(self.tickers)
+        decisions: Dict[str, int] = {}
+
+        for ticker in self.tickers:
+            data = self.getYFDataWithTA(
+                symbol=ticker,
+                saveToDB=True,
+                interval=self.interval,
+                period=self.period,
+            )
+            self.datas[ticker] = data
+            decisions[ticker] = self.getLatestDecision(data)
+
+        prices = self.getLatestPricesBatch(self.tickers)
+        portfolio = self.dbBot.portfolio
+        total_value = portfolio.get("USD", 0) + sum(
+            portfolio.get(t, 0) * prices.get(t, 0) for t in self.tickers
+        )
+        target_per_ticker = total_value / N
+
+        actions = 0
+        for ticker, signal in decisions.items():
+            holding_value = portfolio.get(ticker, 0) * prices.get(ticker, 0)
+            if signal == 1:
+                shortfall = target_per_ticker - holding_value
+                if shortfall > 1:
+                    self.buy(ticker, quantityUSD=shortfall)
+                    actions += 1
+            elif signal == -1 and portfolio.get(ticker, 0) > 0:
+                self.sell(ticker)
+                actions += 1
+        return actions
     
     def local_optimize(
         self,
@@ -610,7 +734,9 @@ class Bot:
             ValueError: If no param_grid is defined
         """
         from .hyperparameter_tuning import tune_hyperparameters
-        
+
+        self._assert_backtestable()
+
         # Use provided grid, or fall back to class attribute
         grid = param_grid or getattr(self, "param_grid", None) or self.__class__.param_grid
         if not grid:
@@ -652,7 +778,8 @@ class Bot:
             Backtest results dictionary
         """
         from .backtest import backtest_bot
-        
+
+        self._assert_backtestable()
         results = backtest_bot(self, initial_capital=initial_capital)
         logger.info(f"\n--- Backtest Results: {self.bot_name} ---")
         logger.info(f"Yearly Return: {results['yearly_return']:.2%}")
@@ -697,6 +824,8 @@ class Bot:
             # Then backtests with those parameters
             # Copy the printed parameters into __init__ defaults
         """
+        self._assert_backtestable()
+
         # Step 1: Optimize
         opt_results = self.local_optimize(
             param_grid=param_grid,

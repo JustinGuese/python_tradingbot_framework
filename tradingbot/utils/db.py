@@ -1,7 +1,7 @@
 import logging
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from os import environ
 from typing import Generator
 from urllib.parse import quote_plus
@@ -273,6 +273,27 @@ class StockInsiderTrade(Base):
     shares = Column(Float, nullable=True)
     value = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BacktestResult(Base):
+    __tablename__ = "backtest_results"
+    __table_args__ = (
+        UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bot_name = Column(String, nullable=False, index=True)
+    symbol = Column(String, nullable=True)
+    interval = Column(String, nullable=True)
+    period = Column(String, nullable=True)
+    metric = Column(String, nullable=False)  # "best_sharpe" or "best_yearly_return"
+    params = Column(MutableDict.as_mutable(JSON), default=lambda: {})
+    yearly_return = Column(Float, nullable=True, index=True)
+    sharpe_ratio = Column(Float, nullable=True, index=True)
+    nrtrades = Column(Integer, nullable=True)
+    maxdrawdown = Column(Float, nullable=True)
+    buy_hold_return = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class TelegramMessage(Base):

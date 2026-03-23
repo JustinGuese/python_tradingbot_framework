@@ -172,18 +172,57 @@ class DataService:
         # Try to load from DB first
         db_data = self.get_data_from_db(symbol=symbol, start_date=start_date, end_date=end_date)
         
-        # Check if DB data is fresh enough
+        # Check if DB data is fresh enough AND covers the full requested range
         need_yf_fetch = False
         if db_data.empty:
             need_yf_fetch = True
         else:
+            # Coverage check: if DB data doesn't start early enough, refetch
+            if start_date is not None:
+                earliest_db_ts = ensure_utc_timestamp(db_data["timestamp"].min())
+                if earliest_db_ts > ensure_utc_timestamp(start_date) + pd.Timedelta(days=5):
+                    need_yf_fetch = True
+
             # Check freshness of latest DB data
             latest_db_timestamp = db_data["timestamp"].max()
             now = pd.Timestamp.now(tz="UTC")
-            time_diff_minutes = (now - latest_db_timestamp).total_seconds() / 60
             
-            if time_diff_minutes > FRESHNESS_TOLERANCE_MINUTES:
-                need_yf_fetch = True
+            if interval == "1d":
+                # For daily data, check if we have data for today or yesterday.
+                # Markets are closed on weekends, so if it's Saturday/Sunday/Monday morning
+                # and we have Friday's data, it's considered fresh.
+                latest_db_date = latest_db_timestamp.date()
+                today_date = now.date()
+                yesterday_date = today_date - pd.Timedelta(days=1)
+                
+                # Heuristic for weekends/Monday (equities/FX only):
+                # Cryptos (usually containing '-') trade 24/7 and don't get a weekend skip.
+                is_crypto = "-" in symbol
+                weekday = now.weekday()
+                
+                is_fresh = False
+                if latest_db_date >= yesterday_date:
+                    is_fresh = True
+                elif not is_crypto:
+                    # 0=Mon, 5=Sat, 6=Sun
+                    if weekday == 0 and latest_db_date >= (today_date - pd.Timedelta(days=3)):
+                        # It's Monday, and we have Friday's data. Fresh until market close.
+                        if now.hour < 21:
+                            is_fresh = True
+                    elif weekday == 6 and latest_db_date >= (today_date - pd.Timedelta(days=2)):
+                        # It's Sunday, and we have Friday's data.
+                        is_fresh = True
+                    elif weekday == 5 and latest_db_date >= (today_date - pd.Timedelta(days=1)):
+                        # It's Saturday, and we have Friday's data.
+                        is_fresh = True
+                
+                if not is_fresh:
+                    need_yf_fetch = True
+            else:
+                # For intraday data, use time-based freshness check
+                time_diff_minutes = (now - latest_db_timestamp).total_seconds() / 60
+                if time_diff_minutes > FRESHNESS_TOLERANCE_MINUTES:
+                    need_yf_fetch = True
         
         # Fetch from yfinance if needed
         if need_yf_fetch:

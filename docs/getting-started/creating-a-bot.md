@@ -87,7 +87,7 @@ helm upgrade --install tradingbots \
 
 ## Implementation Approaches
 
-### Simple (Recommended): `decisionFunction()`
+### Simple (Recommended): single-ticker `decisionFunction()`
 
 For strategies that can be expressed as logic on a single data row:
 
@@ -99,6 +99,45 @@ def decisionFunction(self, row):
     return 0
 ```
 
+### Multi-ticker variant: `tickers=[...]` + `decisionFunction()`
+
+Same `decisionFunction` logic applied across a basket — pass `tickers=` instead of `symbol=`.
+Equal-weight sizing: each ticker targets `total_value / N`. Fully backtestable.
+
+```python
+class MyMultiBot(Bot):
+    param_grid = {"rsi_buy": [25, 30, 35], "rsi_sell": [65, 70, 75]}
+
+    def __init__(self, rsi_buy: float = 30.0, rsi_sell: float = 70.0, **kwargs):
+        super().__init__(
+            "MyMultiBot",
+            tickers=["SPY", "QQQ", "GLD"],
+            interval="1d",
+            period="1y",
+            **kwargs,
+        )
+        self.rsi_buy = rsi_buy
+        self.rsi_sell = rsi_sell
+
+    def decisionFunction(self, row):
+        if row["momentum_rsi"] < self.rsi_buy:
+            return 1   # buy toward equal-weight target for this ticker
+        elif row["momentum_rsi"] > self.rsi_sell:
+            return -1  # sell all holdings of this ticker
+        return 0
+
+if __name__ == "__main__":
+    bot = MyMultiBot()
+    bot.local_development()  # optimize + backtest across all three tickers
+    # bot.run()
+```
+
+**Key points for multi-ticker bots:**
+- `decisionFunction(row)` signature is unchanged — row is for one ticker at a time
+- `bot.tickers` replaces `bot.symbol` (which is `None` for multi-ticker bots)
+- `bot.datas` dict holds the per-ticker DataFrames after a backtest
+- `bot.backtest_type` returns `"multi_asset"`
+
 ### Medium Complexity: Override `makeOneIteration()`
 
 For external APIs or custom data processing:
@@ -107,7 +146,7 @@ For external APIs or custom data processing:
 def makeOneIteration(self):
     # Fetch external data
     fear_greed = get_fear_greed_index()
-    
+
     # Custom logic
     if fear_greed < 20:
         self.buy("QQQ")
@@ -116,13 +155,13 @@ def makeOneIteration(self):
 
 ### Complex: Portfolio Optimization
 
-For multi-asset strategies:
+For multi-asset strategies with custom allocation logic:
 
 ```python
 def makeOneIteration(self):
     # Fetch multiple symbols
     data = self.getYFDataMultiple(["QQQ", "GLD", "TLT"])
-    
+
     # Portfolio optimization
     weights = optimize_portfolio(data)
     self.rebalancePortfolio(weights)

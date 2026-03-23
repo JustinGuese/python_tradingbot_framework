@@ -107,9 +107,10 @@ class AdaptiveMeanReversionBot(Bot):
         interval: str = "1d",
         period: str = "1y",
         saveToDB: bool = True,
+        **kwargs,
     ) -> pd.DataFrame:
         """Fetch standard TA data, then add the custom columns decisionFunction needs."""
-        data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB)
+        data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB, **kwargs)
         return self._enrich(data)
 
     @staticmethod
@@ -190,8 +191,8 @@ class AdaptiveMeanReversionBot(Bot):
 
 
 bot = AdaptiveMeanReversionBot()
-# bot.local_development()
-bot.run()
+bot.local_development()
+# bot.run()
 # ============================================================
 # 2026-03-22 11:51:07 - utils.botclass - INFO - Backtesting with best parameters...
 # 2026-03-22 11:51:07 - utils.botclass - INFO - ============================================================

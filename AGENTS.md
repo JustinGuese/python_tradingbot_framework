@@ -10,9 +10,10 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
   Pattern A: decisionFunction(row) -> int (simple, backtestable)
   - Override this method; the base class handles data fetching, looping, and execution
   - Called once per OHLCV row. Return 1 (buy), -1 (sell), 0 (hold)
-  - The framework buys/sells self.symbol automatically
   - Supports local_backtest(), local_optimize(), hyperparameter tuning
-  - Single-asset only — self.symbol must be set in __init__
+
+  Pattern A1 — Single-ticker (symbol=):
+  - The framework buys/sells self.symbol automatically
 
   class MyBot(Bot):
       def __init__(self):
@@ -23,6 +24,23 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
               return 1
           elif row["momentum_rsi"] > 70:
               return -1
+          return 0
+
+  Pattern A2 — Multi-ticker (tickers=[...]):
+  - Pass tickers= instead of symbol=; decisionFunction is called per ticker per bar
+  - Position sizing: equal-weight — each ticker targets total_portfolio_value / N
+  - Fully backtestable via local_backtest() and local_optimize()
+
+  class MyMultiBot(Bot):
+      def __init__(self):
+          super().__init__("MyMultiBot", tickers=["SPY", "QQQ", "GLD"],
+                           interval="1d", period="1y")
+
+      def decisionFunction(self, row) -> int:
+          if row["momentum_rsi"] < 30:
+              return 1   # buy this ticker toward equal-weight target
+          elif row["momentum_rsi"] > 70:
+              return -1  # sell all holdings of this ticker
           return 0
 
   Pattern B: makeOneIteration() -> int (complex, not backtestable)
@@ -100,8 +118,7 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
   Guardrails & Limitations
 
   Hard limitations:
-  1. Single-asset decisionFunction only — local_backtest() requires symbol != None. Multi-asset bots (makeOneIteration) cannot be backtested    
-  with the built-in engine.
+  1. Event-driven bots (makeOneIteration only) cannot be backtested with the built-in engine. Multi-ticker decisionFunction bots (tickers=[...]) ARE backtestable via local_backtest() and local_optimize().
   2. No short selling — sell() only sells existing holdings; going short is not supported.
   3. No leverage — position sizing is bounded by available cash.
   4. No fractional lot enforcement — the framework buys fractional quantities; fine for crypto/forex, may not reflect reality for equities.     
@@ -114,6 +131,7 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
   - Commission: 0% default (configurable via commission_pct)
   - Risk-free rate: 0% default for Sharpe (configurable via risk_free_rate)
   - No look-ahead bias — bfill() removed from TA computation
+  - QuantStats reports: Automatically generated and uploaded to GCS (if credentials configured) showing Sharpe/return optimization views, drawdown analysis, and performance vs. buy-and-hold benchmark. Local backtest() and local_optimize() both produce reports. [Example report](docs/examplequantstatsreport.html)
 
   Practical constraints:
   - Bots run as Kubernetes CronJobs — no real-time streaming, no intra-bar execution
