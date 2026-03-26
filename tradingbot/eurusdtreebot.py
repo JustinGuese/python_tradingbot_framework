@@ -2,64 +2,60 @@ from utils.core import Bot
 
 
 class EURUSDTreeBot(Bot):
-    # Define the hyperparameter search space for this bot
+    # Define a new hyperparameter grid using relative indicators
+    # These are normalized (0-100 or centered around 0) and don't depend on price levels.
     param_grid = {
-        "sma_slow_threshold": [1.14, 1.16, 1.18],
-        "macd_signal_threshold": [-0.01, -0.00, 0.01],
-        "bbh_threshold": [1.13, 1.15, 1.17],
-        "ichimoku_b_threshold": [1.13, 1.15, 1.17],
-        "dcl_threshold": [1.13, 1.15, 1.17],
+        "rsi_oversold": [30, 35, 40],
+        "rsi_overbought": [60, 65, 70],
+        "macd_diff_threshold": [-0.0005, 0.0, 0.0005],
+        "bb_p_threshold": [0.05, 0.1, 0.15],
     }
     
     def __init__(
         self,
-        sma_slow_threshold=1.16,
-        macd_signal_threshold=-0.01,
-        bbh_threshold=1.15,
-        ichimoku_b_threshold=1.15,
-        dcl_threshold=1.15,
+        rsi_oversold=35,
+        rsi_overbought=65,
+        macd_diff_threshold=0.0,
+        bb_p_threshold=0.1,
         **kwargs
     ):
         """
-        Initialize the EURUSD Tree Bot with configurable thresholds.
+        EURUSD Tree Bot using relative indicators.
         
         Args:
-            sma_slow_threshold: Threshold for trend_sma_slow indicator (default: 1.16)
-            macd_signal_threshold: Threshold for trend_macd_signal indicator (default: -0.00)
-            bbh_threshold: Threshold for volatility_bbh indicator (default: 1.15)
-            ichimoku_b_threshold: Threshold for trend_visual_ichimoku_b indicator (default: 1.15)
-            dcl_threshold: Threshold for volatility_dcl indicator (default: 1.15)
+            rsi_oversold: RSI level for bullish bias (default: 35)
+            rsi_overbought: RSI level for bearish bias (default: 65)
+            macd_diff_threshold: Minimum MACD Histogram value (default: 0.0)
+            bb_p_threshold: Threshold for Bollinger %B mean reversion (default: 0.1)
             **kwargs: Additional parameters passed to base class
         """
+        # Increased period to 2y for proper TA warmup and robust backtesting
         super().__init__(
             "EURUSDTreeBot",
             "EURUSD=X",
             interval="1d",
-            period="1mo",
-            sma_slow_threshold=sma_slow_threshold,
-            macd_signal_threshold=macd_signal_threshold,
-            bbh_threshold=bbh_threshold,
-            ichimoku_b_threshold=ichimoku_b_threshold,
-            dcl_threshold=dcl_threshold,
+            period="2y",
+            rsi_oversold=rsi_oversold,
+            rsi_overbought=rsi_overbought,
+            macd_diff_threshold=macd_diff_threshold,
+            bb_p_threshold=bb_p_threshold,
             **kwargs
         )
-        # Store parameters as instance variables for easy access
-        self.sma_slow_threshold = sma_slow_threshold
-        self.macd_signal_threshold = macd_signal_threshold
-        self.bbh_threshold = bbh_threshold
-        self.ichimoku_b_threshold = ichimoku_b_threshold
-        self.dcl_threshold = dcl_threshold
+        self.rsi_oversold = rsi_oversold
+        self.rsi_overbought = rsi_overbought
+        self.macd_diff_threshold = macd_diff_threshold
+        self.bb_p_threshold = bb_p_threshold
 
     def decisionFunction(self, row):
         """
-        Decision function for EURUSD trading using tree-based logic.
+        Decision function for EURUSD trading using relative/normalized indicators.
         
         Args:
             row: Pandas Series with market data and technical indicators
             
         Returns:
             -1: Sell signal
-             0: Hold (no action) - returned if data is invalid
+             0: Hold (no action)
              1: Buy signal
         """
         import pandas as pd
@@ -74,59 +70,56 @@ class EURUSDTreeBot(Bot):
             except (ValueError, TypeError):
                 return default
         
-        # Get indicator values with NaN handling
-        sma_slow = safe_get("trend_sma_slow", 0.0)
-        macd_signal = safe_get("trend_macd_signal", 0.0)
-        bbh = safe_get("volatility_bbh", 0.0)
-        ichimoku_b = safe_get("trend_visual_ichimoku_b", 0.0)
-        dcl = safe_get("volatility_dcl", 0.0)
+        close = safe_get("close")
+        if close <= 0:
+            return 0
+            
+        # 1. Trend Filter: Price vs SMA (Relative)
+        sma = safe_get("trend_sma_slow")
         
-        # Check if we have valid price data
-        close_price = safe_get("close", 0.0)
-        if close_price <= 0:
-            return 0  # Invalid price data, hold
+        # 2. Momentum: RSI (0-100)
+        rsi = safe_get("momentum_rsi", 50.0)
         
-        # Tree-based decision logic
-        if sma_slow <= self.sma_slow_threshold:
-            if macd_signal <= self.macd_signal_threshold:
-                return -1
-            else:  # trend_macd_signal > macd_signal_threshold
-                if bbh <= self.bbh_threshold:
-                    if ichimoku_b <= self.ichimoku_b_threshold:
-                        # Both branches return 1 regardless of trend_kst_diff
-                        return 1
-                    else:  # trend_visual_ichimoku_b > ichimoku_b_threshold
-                        if dcl <= self.dcl_threshold:
-                            return -1
-                        else:
-                            return 1
-                else:  # volatility_bbh > bbh_threshold
-                    return 1
-        else:  # trend_sma_slow > sma_slow_threshold
-            return -1
+        # 3. Trend Confirmation: MACD Difference (Histogram)
+        # trend_macd_diff is (macd - macd_signal)
+        macd_diff = safe_get("trend_macd_diff")
+        
+        # 4. Volatility: Bollinger Band %B (Normalized position)
+        bbh = safe_get("volatility_bbh")
+        bbl = safe_get("volatility_bbl")
+        bb_width = bbh - bbl
+        b_percent = (close - bbl) / bb_width if bb_width > 0 else 0.5
+
+        # --- Tree-based decision logic ---
+        # Branch 1: Bullish Trend (Price above SMA)
+        if close > sma:
+            if rsi < self.rsi_overbought:
+                if macd_diff > self.macd_diff_threshold:
+                    return 1 # Strong Buy: Trend + Momentum + MACD confirm
+                else:
+                    return 0 # Neutral: Trend is up but MACD is weakening
+            else:
+                return -1 # Sell/Take Profit: Overbought in an uptrend
+        
+        # Branch 2: Bearish Trend (Price below SMA)
+        else:
+            if rsi > self.rsi_oversold:
+                if macd_diff < -self.macd_diff_threshold:
+                    return -1 # Strong Sell: Trend + Momentum + MACD confirm
+                else:
+                    return 0 # Neutral: Trend is down but MACD is bottoming
+            else:
+                # Mean Reversion Opportunity: Extreme oversold below BB in a downtrend
+                if b_percent < self.bb_p_threshold:
+                    return 1 
+                return 0
 
 
 bot = EURUSDTreeBot()
 
+bot.run()
+# For local development, run optimization + backtest
 # bot.local_development()
 
-# ============================================================
-# Best parameters (paste into __init__ defaults):
-# ============================================================
-#     sma_slow_threshold: 1.16,
-#     macd_signal_threshold: -0.01,
-#     bbh_threshold: 1.15,
-#     ichimoku_b_threshold: 1.15,
-#     dcl_threshold: 1.15,
-
-
-# ============================================================
-# Backtesting with best parameters...
-# ============================================================
-
-# --- Backtest Results: EURUSDTreeBot ---
-# Yearly Return: 3.85%
-# Sharpe Ratio: 0.07
-# Number of Trades: 76
-# Max Drawdown: 1.01%
-bot.run()
+# Live execution:
+# bot.local_backtest()

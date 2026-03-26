@@ -104,3 +104,4 @@ if __name__ == "__main__":
     # Max Drawdown: 2.62%
     # bot.local_development(objective="yearly_return", param_sample_ratio=.1) # 
     bot.run()
+    # bot.local_development()

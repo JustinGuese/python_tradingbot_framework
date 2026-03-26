@@ -293,6 +293,10 @@ class BacktestResult(Base):
     nrtrades = Column(Integer, nullable=True)
     maxdrawdown = Column(Float, nullable=True)
     buy_hold_return = Column(Float, nullable=True)
+    sortino_ratio = Column(Float, nullable=True)
+    calmar_ratio = Column(Float, nullable=True)
+    win_rate = Column(Float, nullable=True)  # fraction 0.0–1.0
+    volatility = Column(Float, nullable=True)  # annualized
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -337,6 +341,11 @@ def _migrate_schema() -> None:
             "ALTER TABLE stock_news "
             "ADD COLUMN IF NOT EXISTS acted_on BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        # BacktestResult new metrics
+        conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS sortino_ratio FLOAT"))
+        conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio FLOAT"))
+        conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS win_rate FLOAT"))
+        conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS volatility FLOAT"))
         conn.commit()
 
 

@@ -35,7 +35,7 @@ from .db import (
     Trade,
     get_db_session,
 )
-from .portfolio_worth_calculator import calculate_portfolio_worth
+from .portfolio_utils import calculate_portfolio_worth
 
 logger = logging.getLogger(__name__)
 

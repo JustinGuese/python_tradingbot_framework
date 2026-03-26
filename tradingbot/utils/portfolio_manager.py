@@ -9,7 +9,7 @@ from .bot_repository import BotRepository
 from .data_service import DataService
 from .db import Bot as BotModel
 from .db import get_db_session
-from .settings import PORTFOLIO_CONFIG
+from .config import PORTFOLIO_CONFIG
 
 logger = logging.getLogger(__name__)
 

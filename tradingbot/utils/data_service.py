@@ -9,7 +9,7 @@ import yfinance as yf
 from cachetools import TTLCache
 from ta import add_all_ta_features
 
-from .constants import (
+from .config import (
     FRESHNESS_TOLERANCE_MINUTES,
     PRICE_CACHE_MAXSIZE,
     PRICE_CACHE_TTL,

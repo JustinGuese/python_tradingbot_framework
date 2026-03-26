@@ -95,5 +95,5 @@ class RegimeAdaptiveBot(Bot):
 
 if __name__ == "__main__":
     bot = RegimeAdaptiveBot()
-    # bot.local_backtest()
+    # bot.local_backtest() # not possible, event driven
     bot.run()

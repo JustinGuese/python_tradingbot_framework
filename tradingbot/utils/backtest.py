@@ -100,23 +100,39 @@ def _upload_quantstats_report(
     tmp_path = None
     try:
         if all(t is not None for t in portfolio_timestamps):
-            idx = pd.DatetimeIndex(pd.to_datetime(portfolio_timestamps, utc=True).tz_convert(None))
+            idx = pd.DatetimeIndex(
+                pd.to_datetime(portfolio_timestamps, utc=True).tz_convert(None).normalize()
+            )
         else:
             idx = None
-        returns = pd.Series(portfolio_values, index=idx).pct_change().dropna()
+        returns = pd.Series(portfolio_values, index=idx)
+        returns = returns[~returns.index.duplicated(keep="last")].pct_change().dropna()
         close = data["close"].dropna()
-        benchmark = (
-            pd.Series(close.values[:len(portfolio_values)], index=idx).pct_change().dropna()
-            if idx is not None else close.pct_change().dropna()
-        )
+        if "timestamp" in data.columns:
+            ts_idx = pd.to_datetime(
+                data.loc[close.index, "timestamp"], utc=True
+            ).dt.tz_convert(None).dt.normalize()
+            close = pd.Series(close.values, index=ts_idx)
+        else:
+            close = close.reset_index(drop=True)
+            close.index = returns.index[:len(close)]
+        close = close[~close.index.duplicated(keep="last")]
+        benchmark = close.pct_change().dropna()
         benchmark.name = "Benchmark"
 
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             tmp_path = f.name
 
-        qs.reports.html(returns, benchmark=benchmark, output=tmp_path,
-                        title=f"{bot_name} – {metric_folder}",
-                        download_filename="report.html")
+        try:
+            qs.reports.html(returns, benchmark=benchmark, output=tmp_path,
+                            title=f"{bot_name} – {metric_folder}",
+                            download_filename="report.html")
+        except (ValueError, TypeError):
+            # Benchmark alignment failed (e.g. no overlap or zero variance);
+            # fall back to a report without benchmark.
+            qs.reports.html(returns, output=tmp_path,
+                            title=f"{bot_name} – {metric_folder}",
+                            download_filename="report.html")
 
         client = boto3.client(
             "s3",

@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 from utils.botclass import Bot
-from utils.sentiment import get_fear_greed_index
+from utils.portfolio_utils import get_fear_greed_index
 
 logger = logging.getLogger(__name__)
 
@@ -374,5 +374,5 @@ class SynthesizedHyperConvexityBot(Bot):
 
 
 bot = SynthesizedHyperConvexityBot()
-bot.run()
+bot.run() # EVENT DRIVEN, no backtest possible
 # bot.local_development()

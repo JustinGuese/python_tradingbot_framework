@@ -4,7 +4,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .constants import REQUIRED_DATA_COLUMNS
+from .config import REQUIRED_DATA_COLUMNS
 
 
 def ensure_utc_timestamp(timestamp: pd.Timestamp) -> pd.Timestamp:

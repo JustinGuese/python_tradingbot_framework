@@ -157,5 +157,5 @@ class StockNewsSentimentBot(Bot):
         return 0
 
 
-bot = StockNewsSentimentBot()
+bot = StockNewsSentimentBot() # backtest not possible, event driven
 bot.run()

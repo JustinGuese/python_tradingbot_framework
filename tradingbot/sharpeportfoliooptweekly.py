@@ -74,5 +74,5 @@ class SharpePortfolioOptWeeklyBot(Bot):
 
 bot = SharpePortfolioOptWeeklyBot()
 
-# bot.local_development()
+# bot.local_development() # not possible, event driven
 bot.run()

@@ -2,92 +2,62 @@ from utils.core import Bot
 
 
 class gptbasedstrategytabased(Bot):
-    # Define the hyperparameter search space for this bot
+    # Refined hyperparameter search space including requested exit logic
     param_grid = {
-        "adx_threshold": [15, 20, 25, 30],
-        "rsi_buy": [65, 70, 75],
-        "rsi_sell": [25, 30, 35],
-        "bbp_buy_low": [0.2, 0.3, 0.4],
-        "bbp_buy_high": [0.6, 0.7, 0.8],
-        "mfi_buy": [75, 80, 85],
-        "mfi_sell": [15, 20, 25],
+        "adx_threshold": [15, 20, 25],
+        "rsi_buy": [60, 65, 70],
+        "vix_rsi_exit": [65, 70, 75],
+        "sell_buffer": [0.01, 0.02, 0.03],
+        "bbp_buy_threshold": [0.4, 0.5, 0.6],
     }
+
     def __init__(
         self,
         adx_threshold: float = 20.0,
         rsi_buy: float = 65.0,
-        rsi_sell: float = 25.0,
-        bbp_buy_low: float = 0.2,
-        bbp_buy_high: float = 0.7,
-        bbp_sell_low: float = 0.2,
-        bbp_sell_high: float = 0.7,
-        mfi_buy: float = 75.0,
-        mfi_sell: float = 15.0,
+        vix_rsi_exit: float = 70.0,
+        sell_buffer: float = 0.02,
+        bbp_buy_threshold: float = 0.5,
         **kwargs
     ):
         """
-        Initialize the GPT-based strategy bot with configurable hyperparameters.
+        Improved GPT-based strategy for BTC.
         
         Args:
-            adx_threshold: ADX threshold below which trend is considered weak (default: 20.0)
-            rsi_buy: RSI threshold for buy signals - must be below this (default: 70.0)
-            rsi_sell: RSI threshold for sell signals - must be above this (default: 30.0)
-            bbp_buy_low: Lower Bollinger Band position for buy signals (default: 0.3)
-            bbp_buy_high: Upper Bollinger Band position for buy signals (default: 0.7)
-            bbp_sell_low: Lower Bollinger Band position for sell signals (default: 0.3)
-            bbp_sell_high: Upper Bollinger Band position for sell signals (default: 0.7)
-            mfi_buy: MFI threshold for buy signals - must be below this (default: 80.0)
-            mfi_sell: MFI threshold for sell signals - must be above this (default: 20.0)
-            **kwargs: Additional parameters passed to base class
+            adx_threshold: Minimum ADX for trend strength (default: 20.0)
+            rsi_buy: Max RSI for buy entry (default: 65.0)
+            vix_rsi_exit: RSI level to trigger 'fear' exit (default: 70.0)
+            sell_buffer: Percentage below SMA to trigger trend exit (default: 0.02)
+            bbp_buy_threshold: Max Bollinger %B for entry (default: 0.5)
         """
-        # Store parameters as instance variables for easy access
+        # Store parameters
         self.adx_threshold = adx_threshold
         self.rsi_buy = rsi_buy
-        self.rsi_sell = rsi_sell
-        self.bbp_buy_low = bbp_buy_low
-        self.bbp_buy_high = bbp_buy_high
-        self.bbp_sell_low = bbp_sell_low
-        self.bbp_sell_high = bbp_sell_high
-        self.mfi_buy = mfi_buy
-        self.mfi_sell = mfi_sell
+        self.vix_rsi_exit = vix_rsi_exit
+        self.sell_buffer = sell_buffer
+        self.bbp_buy_threshold = bbp_buy_threshold
         
-        # Pass parameters to base class via kwargs
+        # Increased period to 1y for statistically significant backtesting
         super().__init__(
             "GptBasedStrategyBTCTabased",
             "BTC-USD",
             interval="1d",
-            period="1mo",
+            period="1y",
             adx_threshold=adx_threshold,
             rsi_buy=rsi_buy,
-            rsi_sell=rsi_sell,
-            bbp_buy_low=bbp_buy_low,
-            bbp_buy_high=bbp_buy_high,
-            bbp_sell_low=bbp_sell_low,
-            bbp_sell_high=bbp_sell_high,
-            mfi_buy=mfi_buy,
-            mfi_sell=mfi_sell,
+            vix_rsi_exit=vix_rsi_exit,
+            sell_buffer=sell_buffer,
+            bbp_buy_threshold=bbp_buy_threshold,
             **kwargs
         )
 
     def decisionFunction(self, row) -> int:
         """
-        Decision function for Bitcoin trading using multiple technical indicators.
-        
-        Uses trend, momentum, volatility, and volume indicators to generate
-        buy (1), sell (-1), or hold (0) signals optimized for BTC daily trading.
-        
-        Args:
-            row: Pandas Series with market data and technical indicators
-            
-        Returns:
-            -1: Sell signal
-             0: Hold (no action)
-             1: Buy signal
+        Improved Decision function using trend-following with a volatility-aware exit.
         """
         import numpy as np
         import pandas as pd
         
-        # Helper function to safely get indicator value with NaN handling
         def safe_get(indicator, default=0.0):
             value = row.get(indicator, default)
             if pd.isna(value):
@@ -97,85 +67,67 @@ class gptbasedstrategytabased(Bot):
             except (ValueError, TypeError):
                 return default
         
-        # Check if we have valid price data
-        close_price = safe_get("close", 0.0)
-        if close_price <= 0:
-            return 0  # Invalid price data, hold
+        close = safe_get("close", 0.0)
+        if close <= 0:
+            return 0
         
-        # Extract indicator values with NaN handling
-        ema_fast = safe_get("trend_ema_fast", 0.0)
-        ema_slow = safe_get("trend_ema_slow", 0.0)
-        sma_fast = safe_get("trend_sma_fast", 0.0)
-        sma_slow = safe_get("trend_sma_slow", 0.0)
-        adx = safe_get("trend_adx", 0.0)
+        # 1. Trend Indicators
+        sma_50 = safe_get("trend_sma_fast")  # 50-day proxy
+        sma_200 = safe_get("trend_sma_slow") # 200-day proxy
+        adx = safe_get("trend_adx")
+        
+        # 2. Momentum & Volatility
         rsi = safe_get("momentum_rsi", 50.0)
-        macd = safe_get("trend_macd", 0.0)
-        macd_signal = safe_get("trend_macd_signal", 0.0)
         macd_diff = safe_get("trend_macd_diff", 0.0)
         bbp = safe_get("volatility_bbp", 0.5)
-        mfi = safe_get("volume_mfi", 50.0)
         
-        # Validate RSI is in reasonable range (0-100)
-        if not (0 <= rsi <= 100):
-            rsi = 50.0  # Default to neutral if invalid
-        
-        # Validate MFI is in reasonable range (0-100)
-        if not (0 <= mfi <= 100):
-            mfi = 50.0  # Default to neutral if invalid
-        
-        # Validate BBP is in reasonable range (0-1)
-        if not (0 <= bbp <= 1):
-            bbp = 0.5  # Default to middle if invalid
-        
-        # If ADX is too low, trend is weak - hold
-        if adx <= self.adx_threshold:
+        # Check validity
+        if sma_50 <= 0 or sma_200 <= 0:
             return 0
+
+        # --- ENTRY LOGIC (Bullish Trend Following) ---
+        # Enter when: 
+        # - Golden Cross (50 > 200)
+        # - Price is above 50 SMA
+        # - ADX confirms trend strength
+        # - Not overbought (RSI)
+        # - MACD histogram is positive
+        # - Not at the very top of Bollinger Bands
         
-        # Check if we have valid moving average values (must be positive and reasonable)
-        if (ema_fast <= 0 or ema_slow <= 0 or sma_fast <= 0 or sma_slow <= 0 or
-            not np.isfinite(ema_fast) or not np.isfinite(ema_slow) or
-            not np.isfinite(sma_fast) or not np.isfinite(sma_slow)):
-            return 0
+        if close > sma_50 and sma_50 > sma_200:
+            if adx > self.adx_threshold and rsi < self.rsi_buy:
+                if macd_diff > 0 and bbp < self.bbp_buy_threshold:
+                    return 1
         
-        # Determine trend direction
-        uptrend = (ema_fast > ema_slow) and (sma_fast > sma_slow)
-        downtrend = (ema_fast < ema_slow) and (sma_fast < sma_slow)
+        # --- EXIT LOGIC (Risk Management) ---
+        # Exit when:
+        # - Price falls below the 50 SMA by the 'sell_buffer' percentage
+        # - RSI hits the 'extreme' threshold (vix_rsi_exit)
         
-        # Buy Signal Conditions
-        if uptrend:
-            # Momentum conditions for buy: RSI not overbought
-            rsi_buy = rsi < self.rsi_buy
-            macd_buy = (macd > macd_signal) or (macd_diff > 0)  # MACD bullish
-            volatility_buy = (bbp < self.bbp_buy_low) or (self.bbp_buy_low <= bbp <= self.bbp_buy_high)  # Near lower BB or middle range
-            
-            # Volume confirmation (optional - MFI not extremely overbought)
-            volume_buy = mfi < self.mfi_buy
-            
-            # All conditions must be met for strong buy signal
-            if rsi_buy and macd_buy and volatility_buy and volume_buy:
-                return 1
+        exit_threshold = sma_50 * (1 - self.sell_buffer)
         
-        # Sell Signal Conditions
-        if downtrend:
-            # Momentum conditions for sell: RSI not oversold
-            rsi_sell = rsi > self.rsi_sell
-            macd_sell = (macd < macd_signal) or (macd_diff < 0)  # MACD bearish
-            volatility_sell = (bbp > self.bbp_sell_high) or (self.bbp_sell_low <= bbp <= self.bbp_sell_high)  # Near upper BB or middle range
-            
-            # Volume confirmation (optional - MFI not extremely oversold)
-            volume_sell = mfi > self.mfi_sell
-            
-            # All conditions must be met for strong sell signal
-            if rsi_sell and macd_sell and volatility_sell and volume_sell:
-                return -1
+        if close < exit_threshold or rsi > self.vix_rsi_exit:
+            return -1
         
-        # Default: Hold
         return 0
 
 
-
 bot = gptbasedstrategytabased()
-
-# bot.local_development()
 bot.run()
-
+# Start with a backtest of the new logic
+# bot.local_backtest()
+# bot.local_development()
+#  GptBasedStrategyBTCTabased ---
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Yearly Return: 24.20%
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Buy & Hold Return: -16.84%
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Outperformance vs B&H: +41.05%
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Sharpe Ratio: 0.68
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Number of Trades: 3
+# 2026-03-23 16:08:44 - utils.botclass - INFO - Max Drawdown: 14.66%
+# adx_threshold: 25
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   rsi_buy: 65
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   rsi_sell: 25
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   bbp_buy_low: 0.2
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   bbp_buy_high: 0.7
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   mfi_buy: 75
+# 2026-03-23 16:08:17 - utils.botclass - INFO -   mfi_sell: 15

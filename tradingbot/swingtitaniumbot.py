@@ -76,16 +76,14 @@ class SwingTitaniumBot(Bot):
                 sub_prices.values, distance=self.order, prominence=self.prominence
             )[0],
         )
-        troughs_full = start_idx + troughs
-        peaks_full = start_idx + peaks
         support_info = (
-            self._trendline_from_extrema(sub_dates, sub_prices, troughs_full)
-            if len(troughs_full) >= self.min_points_for_trend
+            self._trendline_from_extrema(sub_dates, sub_prices, troughs)
+            if len(troughs) >= self.min_points_for_trend
             else None
         )
         resistance_info = (
-            self._trendline_from_extrema(sub_dates, sub_prices, peaks_full)
-            if len(peaks_full) >= self.min_points_for_trend
+            self._trendline_from_extrema(sub_dates, sub_prices, peaks)
+            if len(peaks) >= self.min_points_for_trend
             else None
         )
         # Determine trend
@@ -154,3 +152,17 @@ bot = SwingTitaniumBot()
 
 # bot.local_development()
 bot.run()
+# - INFO - ============================================================
+# 2026-03-23 18:02:21 - utils.hyperparameter_tuning - INFO - Best parameters: {'order': 6, 'prominence': 0.3, 'rebalance_bars': 10, 'touch_tolerance': 0.005, 'min_points_for_trend': 3}
+# 2026-03-23 18:02:21 - utils.hyperparameter_tuning - INFO - Best sharpe_ratio: 0.1841
+# 2026-03-23 18:02:21 - utils.hyperparameter_tuning - INFO - ============================================================
+# 2026-03-23 18:02:21 - utils.botclass - INFO -
+# ============================================================
+# 2026-03-23 18:02:21 - utils.botclass - INFO - Best parameters (paste into __init__ defaults):
+# 2026-03-23 18:02:21 - utils.botclass - INFO - ============================================================
+# 2026-03-23 18:02:21 - utils.botclass - INFO -     order: 6,
+# 2026-03-23 18:02:21 - utils.botclass - INFO -     prominence: 0.3,
+# 2026-03-23 18:02:21 - utils.botclass - INFO -     rebalance_bars: 10,
+# 2026-03-23 18:02:21 - utils.botclass - INFO -     touch_tolerance: 0.005,
+# 2026-03-23 18:02:21 - utils.botclass - INFO -     min_points_for_trend: 3,
+# 2026-03-23 18:02:21 - utils.botclass - INFO -

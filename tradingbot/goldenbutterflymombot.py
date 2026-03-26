@@ -14,10 +14,18 @@ RRG Classification:
   RS-Ratio  = 12-month log return relative to SPY (z-scored across universe)
   RS-Mom    = rate-of-change of relative return (12-month minus 1-month, z-scored)
 
-  Leading   (RS-Ratio > 0, RS-Mom > 0) → full weight; reduce if CMF < 0
-  Weakening (RS-Ratio > 0, RS-Mom < 0) → half weight
-  Improving (RS-Ratio < 0, RS-Mom > 0) → full weight if OBV rising, else half
-  Lagging   (RS-Ratio < 0, RS-Mom < 0) → excluded (weight → SHY or cash)
+  Leading   (RS-Ratio > 0, RS-Mom > 0) → buy (1); hold if CMF < 0 (0)
+  Weakening (RS-Ratio > 0, RS-Mom < 0) → hold (0)
+  Improving (RS-Ratio < 0, RS-Mom > 0) → buy (1) if OBV rising, else hold (0)
+  Lagging   (RS-Ratio < 0, RS-Mom < 0) → sell (-1)
+
+Signal mapping (decisionFunction return values):
+  1  = buy / target full weight
+  0  = hold (keep existing position, don't add)
+  -1 = sell / exclude
+
+SPY (benchmark) is included in self.tickers so its history is available in
+self.datas for RRG computation, but decisionFunction always returns 0 for it.
 
 Schedule: weekly 0 14 * * 1 (Monday 2 PM UTC, before US market open)
 
@@ -42,9 +50,6 @@ LOOKBACK_12M = 252   # ~trading days in 12 months
 LOOKBACK_1M = 21     # ~trading days in 1 month
 OBV_WINDOW = 10      # OBV trend lookback (days)
 CMF_PERIOD = 20      # Chaikin Money Flow rolling window
-
-FULL_WEIGHT = 1.0
-HALF_WEIGHT = 0.5
 
 
 # ------------------------------------------------------------------
@@ -93,57 +98,70 @@ class GoldenButterflyMomBot(Bot):
     """
     Golden Butterfly five-asset portfolio with RRG momentum overlay (Pattern B).
 
-    Rebalances weekly. Assets in the Lagging quadrant are replaced by SHY
-    (or USD if SHY is also Lagging) to reduce drawdown. OBV confirmation
-    upgrades Improving assets to full weight; CMF distribution warning
-    downgrades Leading assets to half weight.
+    Rebalances weekly. Assets in the Lagging quadrant are sold; OBV confirmation
+    upgrades Improving assets to full weight; CMF distribution warning downgrades
+    Leading assets to hold.
+
+    Uses decisionFunction() for full backtestability via local_backtest().
+    self.tickers includes SPY so its history is loaded into self.datas for RRG
+    computation, but SPY is never traded (decisionFunction returns 0 for it).
     """
 
     def __init__(self):
-        super().__init__("GoldenButterflyMomBot", symbol=None)
-
-    def makeOneIteration(self) -> int:
-        symbols = UNIVERSE + [BENCHMARK]
-        data_long = self.getYFDataMultiple(
-            symbols=symbols,
+        super().__init__(
+            "GoldenButterflyMomBot",
+            tickers=UNIVERSE + [BENCHMARK],
             interval="1d",
-            period="2y",   # ~504 bars — enough for LOOKBACK_12M=252 + buffer
-            saveToDB=True,
+            period="2y",        # ~504 bars — enough for LOOKBACK_12M=252 + buffer
         )
 
-        if data_long.empty:
-            logger.warning("No data returned — skipping rebalance")
-            return 0
+    # ------------------------------------------------------------------
+    # RRG signal computation
+    # ------------------------------------------------------------------
 
-        # ---- Build per-symbol DataFrames --------------------------------
-        by_symbol: dict[str, pd.DataFrame] = {
-            sym: grp.sort_values("timestamp").reset_index(drop=True)
-            for sym, grp in data_long.groupby("symbol")
-        }
+    def _rrg_cache_key(self) -> tuple:
+        """
+        Cheap proxy for 'has self.datas advanced to a new bar?'
+        Returns the latest timestamp (or row count) for each loaded ticker.
+        """
+        keys = []
+        for sym, df in self.datas.items():
+            if df is not None and not df.empty:
+                if hasattr(df, "index") and not isinstance(df.index, pd.RangeIndex):
+                    ts = df.index[-1]
+                else:
+                    ts = len(df)
+                keys.append((sym, ts))
+        return tuple(sorted(keys))
 
-        if BENCHMARK not in by_symbol:
-            logger.warning("Benchmark %s missing — skipping rebalance", BENCHMARK)
-            return 0
+    def _compute_rrg_signals(self) -> dict:
+        """
+        Compute RRG quadrant signals for all UNIVERSE tickers from self.datas.
 
-        spy_df = by_symbol[BENCHMARK]
+        Returns {ticker: signal} for each UNIVERSE ticker where signal is:
+          1  = Leading, or Improving with OBV confirmation → buy
+          0  = Weakening, or Improving without OBV, or Leading with CMF warning → hold
+          -1 = Lagging → sell
+        """
+        spy_df = self.datas.get(BENCHMARK)
+        if spy_df is None or spy_df.empty:
+            logger.warning("Benchmark %s missing from self.datas — no signals", BENCHMARK)
+            return {}
+
         spy_12m = _safe_log_return(spy_df, LOOKBACK_12M)
         spy_1m = _safe_log_return(spy_df, LOOKBACK_1M)
-
         if spy_12m is None or spy_1m is None:
-            logger.warning("Insufficient %s history for RRG — skipping rebalance", BENCHMARK)
-            return 0
+            logger.warning("Insufficient %s history for RRG", BENCHMARK)
+            return {}
 
-        # ---- Compute relative metrics per asset -------------------------
-        # raw_weights: 0.0 / HALF_WEIGHT / FULL_WEIGHT per asset
-        raw_weights: dict[str, float] = {}
-        rs_ratio_raw: list[float] = []
-        rs_mom_raw: list[float] = []
-        valid_symbols: list[str] = []
+        rs_ratio_raw: list = []
+        rs_mom_raw: list = []
+        valid_symbols: list = []
 
         for sym in UNIVERSE:
-            df = by_symbol.get(sym)
+            df = self.datas.get(sym)
             if df is None or len(df) < LOOKBACK_12M + 1:
-                logger.warning("%s: insufficient history — will be marked Lagging", sym)
+                logger.warning("%s: insufficient history — marking Lagging", sym)
                 rs_ratio_raw.append(-1.0)
                 rs_mom_raw.append(-1.0)
                 valid_symbols.append(sym)
@@ -158,30 +176,25 @@ class GoldenButterflyMomBot(Bot):
                 # RS-Ratio: 12m return relative to benchmark
                 rs_ratio_raw.append(r12 - spy_12m)
                 # RS-Momentum: rate-of-change of relative outperformance
-                # = (12m - 1m relative return) captures acceleration
                 rs_mom_raw.append((r12 - r1) - (spy_12m - spy_1m))
 
             valid_symbols.append(sym)
 
-        if len(valid_symbols) < len(UNIVERSE):
-            logger.warning("Some universe symbols are missing data; proceeding with available data")
+        if not valid_symbols:
+            return {}
 
-        # ---- Z-score across universe ------------------------------------
-        rr_arr = np.array(rs_ratio_raw)
-        rm_arr = np.array(rs_mom_raw)
-        rr_z = _zscore(rr_arr)
-        rm_z = _zscore(rm_arr)
+        rr_z = _zscore(np.array(rs_ratio_raw))
+        rm_z = _zscore(np.array(rs_mom_raw))
 
-        # ---- Classify quadrants and assign raw weights ------------------
-        logger.info(f"{'SYM':4s}  {'QUADRANT':10s}  {'RR-Z':>6s}  {'RM-Z':>6s}  {'CMF':>6s}  {'OBV↑':>4s}  {'W':>4s}")
-        logger.info("-" * 60)
+        logger.info(f"{'SYM':4s}  {'QUADRANT':10s}  {'RR-Z':>6s}  {'RM-Z':>6s}  {'CMF':>6s}  {'OBV↑':>4s}  {'SIG':>3s}")
+        logger.info("-" * 58)
 
+        signals: dict = {}
         for i, sym in enumerate(valid_symbols):
-            df = by_symbol.get(sym)
+            df = self.datas.get(sym)
             rr = rr_z[i]
             rm = rm_z[i]
 
-            # Volume indicators from raw OHLCV
             if df is not None and len(df) > OBV_WINDOW + 1:
                 obv = _compute_obv(df)
                 obv_rising = bool(obv.iloc[-1] > obv.iloc[-(OBV_WINDOW + 1)])
@@ -192,48 +205,48 @@ class GoldenButterflyMomBot(Bot):
 
             if rr >= 0 and rm >= 0:
                 quadrant = "Leading"
-                # Distribution warning: CMF negative → reduce to half weight
-                w = HALF_WEIGHT if cmf_val < 0 else FULL_WEIGHT
+                sig = 0 if cmf_val < 0 else 1
             elif rr >= 0 and rm < 0:
                 quadrant = "Weakening"
-                w = HALF_WEIGHT
+                sig = 0
             elif rr < 0 and rm >= 0:
                 quadrant = "Improving"
-                # Volume confirmation: OBV rising → full weight (institutional accumulation)
-                w = FULL_WEIGHT if obv_rising else HALF_WEIGHT
+                sig = 1 if obv_rising else 0
             else:
                 quadrant = "Lagging"
-                w = 0.0
+                sig = -1
 
-            raw_weights[sym] = w
-            logger.info(f"{sym:4s}  {quadrant:10s}  {rr:+6.2f}  {rm:+6.2f}  {cmf_val:+6.2f}  {str(obv_rising):>4s}  {w:.1f}")
+            signals[sym] = sig
+            logger.info(f"{sym:4s}  {quadrant:10s}  {rr:+6.2f}  {rm:+6.2f}  {cmf_val:+6.2f}  {str(obv_rising):>4s}  {sig:>3d}")
 
-        # ---- Build target allocation ------------------------------------
-        base = 1.0 / len(UNIVERSE)   # 0.20 per asset
+        return signals
 
-        # Each asset gets (raw_weight × base); reduces lagging assets to 0
-        target: dict[str, float] = {sym: raw_weights[sym] * base for sym in UNIVERSE}
+    # ------------------------------------------------------------------
+    # decisionFunction — called per ticker per bar by backtest and live loop
+    # ------------------------------------------------------------------
 
-        # Redirect freed capital (from Lagging/partial Weakening) to safe haven
-        remaining = 1.0 - sum(target.values())
-        if remaining > 1e-6:
-            if raw_weights.get("SHY", 0.0) > 0:
-                # SHY is active — absorb freed capital into it
-                target["SHY"] = target.get("SHY", 0.0) + remaining
-            else:
-                # SHY itself is Lagging — redirect to cash
-                target["USD"] = target.get("USD", 0.0) + remaining
+    def decisionFunction(self, row: pd.Series) -> int:
+        """
+        Return -1 (sell), 0 (hold), or 1 (buy) for self._current_ticker.
 
-        # Remove zero entries; normalise to guard against float rounding
-        target = {k: v for k, v in target.items() if v > 1e-6}
-        total = sum(target.values())
-        target = {k: v / total for k, v in target.items()}
+        The backtest loop and _run_multi_ticker_iteration both set
+        bot._current_ticker = ticker before calling this method, so the bot
+        knows which asset it is deciding for.
 
-        logger.info(f"Target: {', '.join(f'{k}={v:.1%}' for k, v in sorted(target.items()))}")
+        RRG signals are computed once per bar (cache keyed on self.datas state)
+        and reused across all tickers at the same timestamp.
+        """
+        ticker = getattr(self, "_current_ticker", None)
+        if ticker is None or ticker == BENCHMARK:
+            return 0
 
+        # Recompute RRG signals only when data snapshot advances to a new bar
+        cache_key = self._rrg_cache_key()
+        if getattr(self, "_rrg_cache_key_val", None) != cache_key:
+            self._rrg_signals = self._compute_rrg_signals()
+            self._rrg_cache_key_val = cache_key
 
-        self.rebalancePortfolio(target, onlyOver50USD=True)
-        return 0
+        return self._rrg_signals.get(ticker, 0)
 
 
 bot = GoldenButterflyMomBot()
