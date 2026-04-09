@@ -30,7 +30,7 @@ resources:
   # Maximum resources allowed (container will be throttled/killed if exceeded)
   limits:
     cpu: 1000m    # 1 CPU core
-    memory: 1Gi   # 1 gigabyte
+    memory: 2Gi   # 2 gigabytes
 
 # CronJob cleanup and concurrency settings
 # These settings apply to all bot CronJobs
