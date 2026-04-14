@@ -385,31 +385,31 @@ class Bot:
         return self._data_service.get_latest_prices_batch(symbols)
     
     # Portfolio management methods - delegate to PortfolioManager
-    def buy(self, symbol: str, quantityUSD: float = -1) -> None:
+    def buy(self, symbol: str, quantity_usd: float = -1) -> None:
         """
         Buy a quantity of the specified symbol.
-        
+
         Args:
             symbol: Trading symbol to buy
-            quantityUSD: Amount in USD to spend (-1 means use all available cash)
+            quantity_usd: Amount in USD to spend (-1 means use all available cash)
         """
         # Use per-ticker cache if available
         cached = self.datas.get(symbol, self.data)
-        self._portfolio_manager.buy(symbol, quantity_usd=quantityUSD, cached_data=cached)
+        self._portfolio_manager.buy(symbol, quantity_usd=quantity_usd, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
     
-    def sell(self, symbol: str, quantityUSD: float = -1) -> None:
+    def sell(self, symbol: str, quantity_usd: float = -1) -> None:
         """
         Sell a quantity of the specified symbol.
-        
+
         Args:
             symbol: Trading symbol to sell
-            quantityUSD: Amount in USD to sell (-1 means sell all holdings)
+            quantity_usd: Amount in USD to sell (-1 means sell all holdings)
         """
         # Use per-ticker cache if available
         cached = self.datas.get(symbol, self.data)
-        self._portfolio_manager.sell(symbol, quantity_usd=quantityUSD, cached_data=cached)
+        self._portfolio_manager.sell(symbol, quantity_usd=quantity_usd, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
     
@@ -710,7 +710,7 @@ class Bot:
             if signal == 1:
                 shortfall = target_per_ticker - holding_value
                 if shortfall > 1:
-                    self.buy(ticker, quantityUSD=shortfall)
+                    self.buy(ticker, quantity_usd=shortfall)
                     actions += 1
             elif signal == -1 and portfolio.get(ticker, 0) > 0:
                 self.sell(ticker)

@@ -49,6 +49,8 @@ class XAUSyntheticMetalTreeBot(Bot):
         self.kch_threshold = kch_threshold
 
     def decisionFunction(self, row):
+        if "volatility_dch" not in row.index:
+            return 0
         if row["volatility_dch"] <= self.dch_threshold:
             if row["volatility_dcl"] <= self.dcl_threshold:
                 return -1

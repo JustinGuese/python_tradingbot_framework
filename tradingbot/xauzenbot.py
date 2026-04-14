@@ -49,6 +49,8 @@ class XAUZenbotTreeBot(Bot):
         self.dcl_threshold = dcl_threshold
 
     def decisionFunction(self, row):
+        if "trend_visual_ichimoku_b" not in row.index:
+            return 0
         if row["trend_visual_ichimoku_b"] <= self.ichimoku_b_threshold:
             if row["volatility_atr"] <= self.atr_threshold:
                 if row["momentum_roc"] <= self.roc_threshold:
