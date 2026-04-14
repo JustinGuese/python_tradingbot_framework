@@ -46,6 +46,7 @@ from ..helpers import (
     parse_period_to_date_range,
     validate_dataframe_columns,
 )
+from ..kronos_client import KronosClient, kronos_forecast
 from ..portfolio_manager import PortfolioManager
 from ..backtest import backtest_bot, _get_backtest_period
 from ..hyperparameter_tuning import (
@@ -84,6 +85,9 @@ __all__ = [
     "ensure_utc_timestamp",
     "parse_period_to_date_range",
     "validate_dataframe_columns",
+    # Kronos forecasting
+    "KronosClient",
+    "kronos_forecast",
     # Backtest + tuning
     "backtest_bot",
     "_get_backtest_period",

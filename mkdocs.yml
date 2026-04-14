@@ -88,6 +88,7 @@ nav:
       - Database: api/database.md
     - Integrations:
       - Telegram Monitor: api/telegram-monitor.md
+      - Kronos Client: api/kronos-client.md
   - Deployment:
     - Overview: deployment/overview.md
     - Helm Charts: deployment/helm.md
@@ -97,6 +98,7 @@ nav:
     - Technical Analysis: guides/technical-analysis.md
     - Portfolio Management: guides/portfolio-management.md
     - AI Tools: guides/ai-tools.md
+    - Kronos Forecasting: guides/kronos-forecasting.md
     - Local Development: guides/local-development.md
     - Telegram Monitor: guides/telegram-monitor.md
   - Examples:

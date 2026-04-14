@@ -81,6 +81,18 @@ env:
       secretKeyRef:
         key: OPENROUTER_API_KEY
 
+  # Kronos forecasting service — HF Space URL (public, no secret needed)
+  - name: KRONOS_SPACE_URL
+    value: "https://guestros-kronos-trading-api.hf.space"
+
+  # HuggingFace token — required by kronosbot to restart/pause the Space
+  # Add HF_TOKEN to tradingbot-secrets: kubectl patch secret tradingbot-secrets ...
+  - name: HF_TOKEN
+    valueFrom:
+      secretKeyRef:
+        key: HF_TOKEN
+        optional: true
+
 # Web visualization dashboard settings
 visualization:
   enabled: true  # Enable/disable the web dashboard
@@ -198,6 +210,9 @@ bots:
 
   - name: recursivedecayharvestbot
     schedule: "45 21 * * 1-5"  # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
+
+  - name: kronosbot
+    schedule: "5 22 * * 1-5"  # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
 
 # telegram monitor
 telegramMonitor:

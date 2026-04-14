@@ -1,0 +1,8 @@
+fastapi>=0.115.0
+uvicorn>=0.32.0
+numpy>=1.26.0
+pandas==2.2.2
+einops==0.8.1
+huggingface_hub==0.33.1
+tqdm==4.67.1
+safetensors==0.6.2

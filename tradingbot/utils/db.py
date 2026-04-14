@@ -300,6 +300,47 @@ class BacktestResult(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class KronosPrediction(Base):
+    """
+    Kronos foundation-model OHLCV forecast for a future date.
+
+    Written daily by kronosbot after market close.
+    Bots can query this table to use model-based price signals.
+
+    Attributes:
+        id: Auto-incrementing primary key
+        symbol: Trading symbol (e.g. "SPY", "AAPL", "EURUSD=X")
+        model_name: HuggingFace model ID used (e.g. "NeoQuasar/Kronos-mini")
+        interval: Input OHLCV interval (e.g. "1d")
+        prediction_made_at: UTC timestamp when inference was run
+        target_date: The future date being forecast
+        predicted_open: Predicted open price
+        predicted_high: Predicted high price
+        predicted_low: Predicted low price
+        predicted_close: Predicted close price
+        predicted_volume: Predicted volume (nullable — may be zero for some symbols)
+        horizon_days: Steps ahead this row represents (1 = tomorrow, 5 = five days out)
+    """
+    __tablename__ = "kronos_predictions"
+    __table_args__ = (
+        UniqueConstraint("symbol", "target_date", "model_name", name="uq_kronos_predictions_key"),
+        Index("ix_kronos_predictions_symbol_target_date", "symbol", "target_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, nullable=False, index=True)
+    model_name = Column(String, nullable=False)
+    interval = Column(String, nullable=False)
+    prediction_made_at = Column(DateTime, nullable=False)
+    target_date = Column(DateTime, nullable=False)
+    predicted_open = Column(Float, nullable=False)
+    predicted_high = Column(Float, nullable=False)
+    predicted_low = Column(Float, nullable=False)
+    predicted_close = Column(Float, nullable=False)
+    predicted_volume = Column(Float, nullable=True)
+    horizon_days = Column(Integer, nullable=False)
+
+
 class TelegramMessage(Base):
     """
     Telegram channel message model for storing monitored channel messages and AI summaries.
