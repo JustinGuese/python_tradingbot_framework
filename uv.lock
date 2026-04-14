@@ -1632,6 +1632,11 @@ docs = [
     { name = "mkdocstrings", extra = ["python"] },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "debugpy" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.35.0" },
@@ -1669,6 +1674,9 @@ requires-dist = [
     { name = "yfinance", marker = "extra == 'dev'", specifier = ">=0.2.65" },
 ]
 provides-extras = ["dev", "docs"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "debugpy", specifier = ">=1.8.20" }]
 
 [[package]]
 name = "narwhals"

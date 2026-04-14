@@ -214,6 +214,9 @@ bots:
   - name: kronosbot
     schedule: "5 22 * * 1-5"  # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
 
+  - name: kronostraderbot
+    schedule: "15 22 * * 1-5"  # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
+
 # telegram monitor
 telegramMonitor:
   enabled: true  # Set to true to deploy the Telegram monitor CronJob
