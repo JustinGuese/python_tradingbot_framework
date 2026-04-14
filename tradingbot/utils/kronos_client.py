@@ -97,6 +97,12 @@ class KronosClient:
             )
             return None
 
+        # Drop rows with NaN in OHLC columns (yfinance gaps, delisted periods, etc.)
+        df = df.dropna(subset=["open", "high", "low", "close"])
+        if len(df) < 50:
+            logger.warning(f"KronosClient: too many NaN rows for {symbol}, only {len(df)} clean rows after drop")
+            return None
+
         # Serialise to JSON-friendly list of records
         ohlcv_rows = []
         for _, row in df.iterrows():
