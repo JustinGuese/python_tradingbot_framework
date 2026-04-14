@@ -25,9 +25,9 @@ import logging
 import os
 import time
 
-from tradingbot.utils.core import BotModel, get_db_session, init_db, setup_logging
-from tradingbot.utils.db import KronosPrediction
-from tradingbot.utils.kronos_client import KronosClient
+from utils.core import BotModel, get_db_session, init_db, setup_logging
+from utils.db import KronosPrediction
+from utils.kronos_client import KronosClient
 
 setup_logging()
 logger = logging.getLogger(__name__)
