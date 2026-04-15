@@ -139,6 +139,10 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
   - All times are UTC; market hours not enforced (strategy must handle weekends/holidays if needed)
   - acted_on flag pattern is used for event-driven bots (Telegram signals, stock news) to prevent double-execution on crash
 
+  Common pitfalls:
+  - decisionFunction is called once per historical row (~252 calls/ticker for 1y daily). Any external lookup (DB query, API call) inside it runs 252 times per ticker. Always cache per-ticker: check a dict before querying, store the result, reuse it for subsequent rows of the same ticker.
+  - SQLAlchemy detached instance: ORM objects become inaccessible after their session closes. When querying inside get_db_session(), extract all needed values as plain Python types (float(), str(), etc.) before the `with` block exits. Never return an ORM object from a function that closes the session — attributes will raise DetachedInstanceError on access.
+
   ---
   Existing Strategies (don't duplicate)
 
@@ -168,6 +172,8 @@ This is a Python-based automated trading framework running on Kubernetes. Bots r
   │ TelegramSignalsBankBot │ multi        │ AI classifies Telegram signals → trade         │
   ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
   │ StockNewsSentimentBot  │ multi        │ AI classifies news headlines → trade           │
+  ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+  │ SqueezeMomentumBot     │ GLD          │ EMA/MACD/RSI zone momentum on Gold ETF        │
   └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
   ---

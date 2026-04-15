@@ -211,6 +211,9 @@ bots:
   - name: recursivedecayharvestbot
     schedule: "45 21 * * 1-5"  # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
 
+  - name: squeezemomentumbot
+    schedule: "55 21 * * 1-5"  # Daily 9:55 PM UTC (4:55 PM ET), after NYSE close
+
   - name: kronosbot
     schedule: "5 22 * * 1-5"  # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
 
