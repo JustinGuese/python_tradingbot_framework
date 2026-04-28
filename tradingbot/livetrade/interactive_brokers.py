@@ -102,7 +102,7 @@ class InteractiveBrokersBroker(LiveBroker):
 
     def _build_contract(self, meta: dict):
         sec_type = meta.get("sec_type", "STK")
-        symbol = meta.get("broker_symbol", meta.get("symbol"))
+        symbol = meta.get("symbol")
         exchange = meta.get("exchange", "SMART")
         currency = meta.get("currency", "USD")
 
@@ -168,14 +168,15 @@ class InteractiveBrokersBroker(LiveBroker):
         
         # Add IB specific fields
         res = {
-            "broker_symbol": meta["symbol"],
+            "symbol": meta["symbol"],
+            "type": meta.get("type", "stock"),
             "sec_type": "STK",
             "exchange": "SMART",
             "currency": "USD",
             "yf_symbol": yf_symbol,
             "source": meta.get("source", "unknown")
         }
-        
+
         if meta["type"] == "forex":
             res["sec_type"] = "CASH"
             res["exchange"] = "IDEALPRO"
