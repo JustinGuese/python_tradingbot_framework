@@ -226,7 +226,7 @@ bots:
 # Requires COLLECTIVE2_API_KEY in the tradingbot-secrets secret.
 # Start with dryRun=true and verify logs before flipping to false.
 liveTrade:
-  enabled: false  # Flip to true after dry-run verified
+  enabled: true  # Flip to true after dry-run verified
   schedule: "10 21 * * 1-5"  # 9:10 PM UTC (10 min after AdaptiveMeanReversionBot at 21:00)
   systemId: "155809898"  # Collective2 strategy ID
   botWeights: '{"adaptivemeanreversionbot": 1.0}'  # JSON: bot name -> weight
@@ -239,12 +239,12 @@ liveTrade:
 # Mirrors weighted paper-bot portfolios to Interactive Brokers (IB Gateway).
 # Requires IB_ACCOUNT_ID and IB_GATEWAY_HOST/PORT in the tradingbot-secrets secret.
 liveTradeIB:
-  enabled: false
+  enabled: true
   schedule: "20 21 * * 1-5"  # 9:20 PM UTC
   host: "ib-gateway-service.interactivebrokersgateway.svc.cluster.local"
   port: "4002"
   clientId: "17"
-  accountId: ""  # Required
+  # IB_ACCOUNT_ID is read from the tradingbot-secrets secret (regenerated from .env)
   botWeights: '{"adaptivemeanreversionbot": 1.0}'
   minOrderUsd: "50"
   dryRun: "true"
