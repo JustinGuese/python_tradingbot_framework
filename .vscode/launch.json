@@ -12,6 +12,18 @@
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}/tradingbot/",
       "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LiveTrade: Collective2 (LIVE)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade_collective2.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LIVETRADE_DRY_RUN": "false"
+      }
     }
   ]
 }

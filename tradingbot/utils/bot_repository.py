@@ -11,7 +11,7 @@ from .db import Trade, get_db_session
 
 class BotRepository:
     """Handles database operations for Bot entities."""
-    
+
     @staticmethod
     def create_or_get_bot(name: str, session: Optional[Session] = None) -> BotModel:
         """

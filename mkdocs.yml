@@ -101,5 +101,6 @@ nav:
     - Kronos Forecasting: guides/kronos-forecasting.md
     - Local Development: guides/local-development.md
     - Telegram Monitor: guides/telegram-monitor.md
+    - Live Trading: guides/live-trading.md
   - Examples:
     - Example Bots: examples/example-bots.md

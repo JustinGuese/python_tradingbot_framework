@@ -375,6 +375,45 @@ telegramMonitor:
 
 See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
+## 📈 Live Trading (Collective2)
+
+The framework can mirror your paper-bot portfolios to a live brokerage account. Currently, it supports **Collective2** (World API v4), with Interactive Brokers support coming soon.
+
+### 1. Configure Environment
+
+Add these to your `.env` or Kubernetes secrets:
+```bash
+COLLECTIVE2_API_KEY=your_api_key
+COLLECTIVE2_SYSTEM_ID=12345678
+LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
+LIVETRADE_COPY_OPEN_TRADES=true
+LIVETRADE_DRY_RUN=false
+```
+
+### 2. Map Your Tickers
+
+Yfinance symbols often differ from broker symbols (e.g., `EURUSD=X` vs `EURUSD`). The framework includes an **Assisted Ticker Discovery** script to help you map them:
+
+```bash
+# 1. Discover unmapped tickers from your bots and trades
+uv run python -m tradingbot.livetrade.discover_symbols
+
+# 2. Edit symbol_map.review.json in your editor
+#    Add "selected_symbol" and "selected_type" for the tickers you want to map.
+
+# 3. Apply the approved mappings to the master symbol_map.json
+uv run python -m tradingbot.livetrade.discover_symbols --apply
+```
+
+### 3. Deploy the Copier
+
+The copier runs as a standalone script. Deploy it as a CronJob to run shortly after your trading bots:
+```bash
+uv run python tradingbot/livetrade_collective2.py
+```
+
+See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configuration and mapping rules.
+
 ## 🎯 Example Bots
 
 * **eurusdtreebot.py** - Decision tree-based strategy for EUR/USD

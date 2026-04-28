@@ -18,6 +18,7 @@ This system provides a framework for building and deploying automated trading bo
 - [Bot Class System](architecture/bot-class-system.md) - Understand the core architecture
 - [AI Tools Guide](guides/ai-tools.md) - LangChain + OpenRouter tools (market data, portfolio, recent trades)
 - [Telegram Monitor](guides/telegram-monitor.md) - Monitor Telegram channels for trading signals
+- [Live Trading Guide](guides/live-trading.md) - Mirror your paper-trade portfolios to real brokerage accounts
 - [API Reference](api/bot.md) - Complete API documentation
 - [AITools API](api/aitools.md) - run_ai_with_tools, run_ai_simple, run_ai_simple_with_fallback
 

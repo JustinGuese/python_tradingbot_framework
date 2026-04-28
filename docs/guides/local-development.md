@@ -176,3 +176,10 @@ GCS_BUCKET_NAME=tradingbotrunresults   # Cloud Storage bucket name
 
 - [Hyperparameter Tuning API](../api/hyperparameter-tuning.md) - Complete API docs
 - [Backtesting API](../api/backtest.md) - Backtest details
+
+## Running in Production
+
+Once your bot is validated locally, you can deploy it to run on a schedule and mirror it to a live brokerage account.
+
+- [Deployment Guide](../deployment/overview.md) - How to run on a schedule (K8s/Docker)
+- [Live Trading Guide](live-trading.md) - How to mirror your paper portfolio to a real account

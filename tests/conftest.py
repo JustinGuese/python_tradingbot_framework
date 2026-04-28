@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Put tradingbot/ on sys.path so modules using `from utils.X` (the in-container
+# import style used by bots and livetrade) also resolve when pytest runs from
+# the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tradingbot"))
+
 import pytest
 import pandas as pd
 from sqlalchemy import create_engine

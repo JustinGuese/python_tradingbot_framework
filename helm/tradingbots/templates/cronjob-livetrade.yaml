@@ -1,0 +1,87 @@
+{{- if .Values.liveTrade.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: livetrade-collective2
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  schedule: {{ $.Values.liveTrade.schedule | quote }}
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: livetrade-collective2
+            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+            command:
+            - "python"
+            args:
+            - "livetrade_collective2.py"
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            env:
+            {{- if $.Values.postgresql.clusterConnection }}
+            - name: POSTGRES_HOST
+              value: {{ $.Values.postgresql.clusterConnection.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ $.Values.postgresql.clusterConnection.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ $.Values.postgresql.clusterConnection.user | quote }}
+            - name: POSTGRES_DATABASE
+              value: {{ $.Values.postgresql.clusterConnection.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- range $.Values.env }}
+            {{- if and $.Values.postgresql.clusterConnection (or (eq .name "POSTGRES_URI") (eq .name "POSTGRES_PASSWORD")) }}
+            {{- else }}
+            - name: {{ .name }}
+            {{- if .value }}
+              value: {{ .value | quote }}
+            {{- else if .valueFrom }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            # Collective2 credentials (from secret)
+            - name: COLLECTIVE2_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: COLLECTIVE2_API_KEY
+            - name: COLLECTIVE2_SYSTEM_ID
+              value: {{ $.Values.liveTrade.systemId | quote }}
+            # LiveTrade configuration (from values.yaml)
+            - name: LIVETRADE_BOT_WEIGHTS
+              value: {{ $.Values.liveTrade.botWeights | quote }}
+            - name: LIVETRADE_COPY_OPEN_TRADES
+              value: {{ $.Values.liveTrade.copyOpenTrades | quote }}
+            - name: LIVETRADE_MIN_ORDER_USD
+              value: {{ $.Values.liveTrade.minOrderUsd | quote }}
+            - name: LIVETRADE_DRY_RUN
+              value: {{ $.Values.liveTrade.dryRun | quote }}
+            - name: LIVETRADE_STRICT_MAPPING
+              value: {{ $.Values.liveTrade.strictMapping | quote }}
+          restartPolicy: OnFailure
+{{- end }}

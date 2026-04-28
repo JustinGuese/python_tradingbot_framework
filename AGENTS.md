@@ -746,6 +746,27 @@ def monitor_channels(api_id: int, api_hash: str, session_string, channels: list[
 **Problem**: `TypeError: can't compare offset-naive and offset-aware datetimes` when comparing database timestamps
 **Solution**: Use `datetime.now(timezone.utc)` instead of `datetime.utcnow()`, and handle timezone-naive datetimes from database by adding UTC timezone info
 
+### 7. Bot Name Casing — Never Normalize
+**Problem**: Bot names in the `bots` table are stored **exactly** as the bot constructs itself, e.g. `"AdaptiveMeanReversionBot"` (CamelCase). Lookups via `BotRepository.create_or_get_bot(name)` use a case-sensitive `filter_by(name=...)` exact match. If the lookup misses, **a new row is silently created with default `{"USD": 10000}`** — no error.
+
+This combination is a footgun: any code that lowercases (or otherwise normalizes) a bot name before lookup will silently spawn a duplicate stub row with $10k of fake cash. The bug surfaces as "no target weights / portfolio appears empty," not as an error.
+
+**Solution**:
+- Never call `.lower()` / `.upper()` / `.strip()` etc. on bot names before passing them to `BotRepository`. Pass user input through verbatim.
+- When accepting bot names from external input (env vars, JSON config, CLI args), validate against `session.query(Bot).all()` first and abort with a clear error if the user's name isn't an exact match — do **not** rely on `create_or_get_bot` for validation, it will happily create whatever you ask for.
+- Filename / Helm `name:` are lowercase by convention (`adaptivemeanreversionbot.py`, `name: adaptivemeanreversionbot`), but the DB row name is **CamelCase** (whatever the bot passes to `super().__init__("CamelCaseName", ...)`). Don't conflate them.
+
+### 8. `create_or_get_bot` is Not a Validator
+**Problem**: The name `create_or_get_bot` suggests safe lookup, but it's actually `INSERT IF NOT EXISTS` — it never returns `None` and never raises on a missing bot. Calling it with a typo'd or normalized name pollutes the DB with empty stub rows.
+
+**Solution**: For paths that should fail loudly on a missing bot (live-trade copier, AI bot weight configs, anything driven by user input), do an explicit existence check first:
+```python
+with get_db_session() as s:
+    if not s.query(Bot).filter_by(name=name).first():
+        raise ValueError(f"Bot {name!r} not in DB. Existing: {[b.name for b in s.query(Bot).all()]}")
+```
+Only use `create_or_get_bot` when the caller genuinely owns the bot's identity (i.e., the bot itself, registering on first run).
+
 ## Technical Analysis Indicators
 
 After calling `getYFDataWithTA()`, the DataFrame includes indicators from the `ta` library:

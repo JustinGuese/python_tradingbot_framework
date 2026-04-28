@@ -220,6 +220,21 @@ bots:
   - name: kronostraderbot
     schedule: "15 22 * * 1-5"  # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
 
+# Live Trade Copier (Collective2)
+# Mirrors weighted paper-bot portfolios to a real Collective2 strategy.
+# See docs/guides/live-trading.md for the full guide.
+# Requires COLLECTIVE2_API_KEY in the tradingbot-secrets secret.
+# Start with dryRun=true and verify logs before flipping to false.
+liveTrade:
+  enabled: false  # Flip to true after dry-run verified
+  schedule: "10 21 * * 1-5"  # 9:10 PM UTC (10 min after AdaptiveMeanReversionBot at 21:00)
+  systemId: "155809898"  # Collective2 strategy ID
+  botWeights: '{"adaptivemeanreversionbot": 1.0}'  # JSON: bot name -> weight
+  copyOpenTrades: "true"  # See docs for COPY_OPEN_TRADES semantics
+  minOrderUsd: "50"
+  dryRun: "true"  # ALWAYS start with true; flip to false only after validation
+  strictMapping: "true"  # Abort if any target ticker is unmapped
+
 # telegram monitor
 telegramMonitor:
   enabled: true  # Set to true to deploy the Telegram monitor CronJob
