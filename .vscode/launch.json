@@ -11,7 +11,10 @@
       "program": "${file}",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}/tradingbot/",
-      "envFile": "${workspaceFolder}/.env"
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
     },
     {
       "name": "LiveTrade: Collective2 (LIVE)",
@@ -22,7 +25,49 @@
       "cwd": "${workspaceFolder}/tradingbot/",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "LIVETRADE_DRY_RUN": "false"
+        "LIVETRADE_DRY_RUN": "false",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
+      "name": "LiveTrade: Interactive Brokers (paper)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade_interactive_brokers.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LIVETRADE_DRY_RUN": "false",
+        "IB_GATEWAY_PORT": "4004",
+        "IB_CLIENT_ID": "18",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
+      "name": "Print Portfolio: Collective2",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade/collective2.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
+      "name": "Print Portfolio: Interactive Brokers",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade/interactive_brokers.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "IB_GATEWAY_PORT": "4004",
+        "IB_CLIENT_ID": "19",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
       }
     }
   ]

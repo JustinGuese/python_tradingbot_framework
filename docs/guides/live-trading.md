@@ -1,5 +1,8 @@
 # Live Trading Guide
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
 The Trading Bot Framework can mirror your paper-trade portfolios (stored in PostgreSQL) to a live brokerage account. This is handled by a separate **Live Trade Copier** layer that runs independently of your bots.
 
 > [!CAUTION]
@@ -23,6 +26,27 @@ You can verify the copier logic immediately without any complex setup.
     uv run python tradingbot/livetrade_collective2.py
     ```
 3.  **Review the Log**: Look for `[DRY RUN] Would BUY/SELL ...` lines to see what the copier would have done.
+
+---
+
+## 🔎 Inspect Account & Positions
+
+Each broker module is runnable as a script and prints a summary of the configured
+account — equity, cash, and current open positions. Use it to sanity-check
+credentials and account IDs before running the copier:
+
+```bash
+# Collective2 — reads COLLECTIVE2_API_KEY + COLLECTIVE2_SYSTEM_ID
+uv run python tradingbot/livetrade/collective2.py
+
+# Interactive Brokers — reads IB_GATEWAY_HOST/PORT + IB_ACCOUNT_ID
+# Connects read-only with IB_CLIENT_ID=19 by default so it won't collide
+# with the cron client (17) or the vscode debug config (18).
+uv run python tradingbot/livetrade/interactive_brokers.py
+```
+
+Programmatically, both brokers expose `print_account_summary()` on the broker
+class, so you can call it from any script after constructing the broker.
 
 ---
 
@@ -61,10 +85,62 @@ If you have $100,000 in your live account and configure:
 | `COLLECTIVE2_API_KEY` | Your C2 API v4 key. Get it from the [C2 API Dashboard](https://collective2.com/account-management/apiv4/dashboard/0). |
 | `COLLECTIVE2_SYSTEM_ID` | The ID of your C2 strategy. |
 | `LIVETRADE_BOT_WEIGHTS` | JSON: `{"botname": 0.6, "otherbot": 0.4}`. Weights are normalized to 1.0. |
-| `LIVETRADE_COPY_OPEN_TRADES` | `true`: Mirror all existing positions on first run. `false`: **Skips run #1 only** to mark state; subsequent runs full-mirror identically to `true`. |
 | `LIVETRADE_MIN_ORDER_USD` | Skip trades smaller than this amount (default: $50). |
 | `LIVETRADE_DRY_RUN` | `true`: Logs orders without sending them. **Always start here.** |
 | `LIVETRADE_STRICT_MAPPING` | `true`: **Aborts the sync** if any target ticker is unmapped, instead of silently skipping it. |
+| `LIVETRADE_PORTFOLIO_FRACTION` | Fraction of broker equity to allocate to copy-trading. Default `1.0` (use the full account); `0.5` would mirror the bot portfolios into half the account and leave the rest as cash. Range: `(0, 1]`. |
+
+### Enabling the Copiers in Helm
+
+Each broker is its own CronJob, gated by a separate flag in [helm/tradingbots/values.yaml](../../helm/tradingbots/values.yaml). Both default to `false` — opt in independently:
+
+```yaml
+liveTrade:
+  enabled: true     # Collective2 copier
+  # ...
+liveTradeIB:
+  enabled: true     # Interactive Brokers copier
+  # ...
+```
+
+You can run only Collective2, only IBKR, both, or neither.
+
+---
+
+## 🏦 Interactive Brokers (IBKR)
+
+The framework supports Interactive Brokers via **IB Gateway** (or TWS).
+
+### 1. Requirements
+- **IB Gateway** running and configured for API access.
+- **Paper Account** strongly recommended for initial testing.
+- **Paper Port**: Usually `4002` (standard) or `4004` (often used in local setups).
+
+### 2. Configuration
+Set these environment variables:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `IB_GATEWAY_HOST` | Hostname of IB Gateway. | `127.0.0.1` |
+| `IB_GATEWAY_PORT` | API Port. | `4004` |
+| `IB_CLIENT_ID` | Unique ID for this connection. | `17` |
+| `IB_ACCOUNT_ID` | Your IB account ID (e.g., `DU1234567`). | **Required** |
+| `LIVETRADE_DRY_RUN` | Paper-safety: defaults to `true`. | `true` |
+
+> [!IMPORTANT]
+> **clientId and Order Isolation**: The copier is designed to be idempotent. Before each sync, it calls `cancel_open_orders()` to clear any stale orders submitted by previous runs that haven't filled yet. To ensure this **does not cancel your manual orders**, the copier only targets orders with a matching `IB_CLIENT_ID`. 
+> - **Always use a unique `IB_CLIENT_ID` (default: 17)** for the copier.
+> - **Avoid using "Master Client ID" (0)** for the copier, as it can see and cancel orders from all other clients.
+
+### 3. Usage
+```bash
+uv run python tradingbot/livetrade_interactive_brokers.py
+```
+
+### 4. Ticker Discovery for IB
+```bash
+uv run python -m tradingbot.livetrade.discover_symbols --broker ib
+```
 
 ---
 

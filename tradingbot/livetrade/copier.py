@@ -1,7 +1,6 @@
 import logging
 import os
-import json
-from pathlib import Path
+import time
 from typing import Dict, List, Literal
 from .broker import LiveBroker
 from utils.bot_repository import BotRepository
@@ -14,66 +13,29 @@ class LiveTradeCopier:
         self,
         broker: LiveBroker,
         bot_weights: Dict[str, float],
-        copy_open_trades: bool = True,
         min_order_usd: float = 50.0,
-        dry_run: bool = False
+        dry_run: bool = False,
+        portfolio_fraction: float = 1.0
     ):
         self.broker = broker
         self.bot_weights = dict(bot_weights)
-        self.copy_open_trades = copy_open_trades
         self.min_order_usd = min_order_usd
         self.dry_run = dry_run
+        self.portfolio_fraction = portfolio_fraction
         self.data_service = DataService()
         self.bot_repo = BotRepository()
         self.strict_mapping = os.getenv("LIVETRADE_STRICT_MAPPING", "false").lower() == "true"
-        self.marker_file = Path("data/state/livetrade_seen.json")
-        
+        # Pause between SELL batch and BUY batch so liquidation proceeds settle
+        # and brokers update buying power before we size the buys.
+        self.settle_delay_seconds = float(os.getenv("LIVETRADE_SETTLE_DELAY_SECONDS", "10"))
+
         # Inject our data service into the broker if it supports it
         if hasattr(self.broker, 'data_service'):
             self.broker.data_service = self.data_service
 
-    def _load_seen_markers(self) -> Dict[str, bool]:
-        if not self.marker_file.exists():
-            return {}
-        try:
-            with open(self.marker_file, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading marker file {self.marker_file}: {e}")
-            return {}
-
-    def _save_seen_marker(self, broker_name: str, bot_name: str):
-        markers = self._load_seen_markers()
-        key = f"{broker_name}:{bot_name}"
-        markers[key] = True
-        
-        self.marker_file.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(self.marker_file, "w") as f:
-                json.dump(markers, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving marker file {self.marker_file}: {e}")
-
     def sync(self) -> None:
         """Main entry point to synchronize live portfolio with paper bot portfolios."""
         logger.info(f"Starting sync (dry_run={self.dry_run}, strict_mapping={self.strict_mapping})")
-        
-        # Check for first-run skip if copy_open_trades=False
-        if not self.copy_open_trades:
-            broker_name = getattr(self.broker, "name", "generic")
-            markers = self._load_seen_markers()
-            all_marked = True
-            
-            for bot_name in self.bot_weights:
-                key = f"{broker_name}:{bot_name}"
-                if not markers.get(key):
-                    all_marked = False
-                    self._save_seen_marker(broker_name, bot_name)
-                    logger.info(f"Marked first-run for {bot_name} on {broker_name}")
-            
-            if not all_marked:
-                logger.info("First run with copy_open_trades=False: Skipping initial rebalance.")
-                return
 
         # 1. Calculate target weights across all bots (yf_symbol -> weight)
         target_weights = self._calculate_target_weights()
@@ -104,13 +66,26 @@ class LiveTradeCopier:
         total_equity = self.broker.get_total_equity()
         logger.info(f"Broker total equity: ${total_equity:.2f}")
 
+        if total_equity <= 0:
+            logger.error(f"Aborting sync due to non-positive equity: ${total_equity:.2f}")
+            return
+
+        if self.portfolio_fraction != 1.0:
+            scaled = total_equity * self.portfolio_fraction
+            logger.info(f"Applying portfolio_fraction={self.portfolio_fraction:.2f}: ${total_equity:.2f} -> ${scaled:.2f}")
+            total_equity = scaled
+
         # 4. Get current positions from broker
+        cancelled = self.broker.cancel_open_orders()
+        if cancelled:
+            logger.info(f"Cancelled {cancelled} stale open orders before sync")
+
         current_positions = self.broker.get_positions() # broker_symbol -> quantity
-        
-        # 5. Calculate orders
+
+        # 5. Calculate orders (full target-state sync: liquidates anything not in target)
         orders = self._calculate_orders(broker_target_weights, current_positions, total_equity)
-        
-        # 6. Execute orders: Sells first, then Buys
+
+        # 6. Execute orders: Sells first, then Buys (with a settle pause in between)
         self._execute_orders(orders)
         logger.info("Sync complete")
 
@@ -168,29 +143,35 @@ class LiveTradeCopier:
         for symbol in all_symbols:
             target_meta = target_weights.get(symbol, {"weight": 0.0, "type": "stock"})
             target_weight = target_meta["weight"]
-            target_value = total_equity * target_weight
-            
             current_qty = current_positions.get(symbol, 0.0)
+
+            # Full liquidation: not in target, just sell the whole position.
+            # No price lookup needed — broker knows the quantity.
+            if target_weight == 0.0 and current_qty > 0:
+                orders.append({
+                    "symbol": symbol,
+                    "quantity": current_qty,
+                    "side": "SELL",
+                    "value": 0.0,  # unknown without a price; not used for execution
+                    "type": target_meta["type"]
+                })
+                continue
+
+            target_value = total_equity * target_weight
             current_price = self.broker.get_latest_price(symbol)
-            
             if current_price <= 0:
-                logger.warning(f"Broker price for {symbol} is 0, trying yfinance fallback")
-                try:
-                    yf_symbol = self.broker.symbol_mapper.unmap_symbol(symbol)
-                    current_price = self.data_service.get_latest_price(yf_symbol)
-                except Exception as e:
-                    logger.error(f"Could not get fallback price for {symbol}: {e}")
-                    continue
+                logger.error(f"No price available for {symbol}; skipping")
+                continue
 
             current_value = current_qty * current_price
             diff_value = target_value - current_value
-            
+
             if abs(diff_value) < self.min_order_usd:
                 continue
-                
+
             qty_to_trade = diff_value / current_price
             side: Literal["BUY", "SELL"] = "BUY" if qty_to_trade > 0 else "SELL"
-            
+
             orders.append({
                 "symbol": symbol,
                 "quantity": abs(qty_to_trade),
@@ -204,19 +185,26 @@ class LiveTradeCopier:
     def _execute_orders(self, orders: List[Dict]) -> None:
         sells = [o for o in orders if o["side"] == "SELL"]
         buys = [o for o in orders if o["side"] == "BUY"]
-        
-        for order in sells + buys:
+
+        def _submit(o: Dict) -> None:
             if self.dry_run:
-                logger.info(f"[DRY RUN] Would {order['side']} {order['quantity']:.4f} {order['symbol']} "
-                            f"(type={order['type']}, ~${order['value']:.2f})")
-            else:
-                try:
-                    self.broker.place_order(
-                        order["symbol"], 
-                        order["quantity"], 
-                        order["side"], 
-                        symbol_type=order["type"]
-                    )
-                    logger.info(f"Executed {order['side']} {order['quantity']:.4f} {order['symbol']}")
-                except Exception as e:
-                    logger.error(f"Failed to execute {order['side']} for {order['symbol']}: {e}")
+                logger.info(f"[DRY RUN] Would {o['side']} {o['quantity']:.4f} {o['symbol']} "
+                            f"(type={o['type']}, ~${o['value']:.2f})")
+                return
+            try:
+                self.broker.place_order(o["symbol"], o["quantity"], o["side"], symbol_type=o["type"])
+                logger.info(f"Submitted {o['side']} {o['quantity']:.4f} {o['symbol']}")
+            except Exception as e:
+                logger.error(f"Failed to execute {o['side']} for {o['symbol']}: {e}")
+
+        for o in sells:
+            _submit(o)
+
+        # Let sells settle (cash become available) before issuing buys.
+        # Skipped on dry run and when there's nothing to wait for.
+        if sells and buys and not self.dry_run and self.settle_delay_seconds > 0:
+            logger.info(f"Waiting {self.settle_delay_seconds:.0f}s for sells to settle before buying...")
+            time.sleep(self.settle_delay_seconds)
+
+        for o in buys:
+            _submit(o)

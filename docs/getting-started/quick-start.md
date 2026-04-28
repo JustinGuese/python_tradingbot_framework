@@ -1,5 +1,8 @@
 # Quick Start
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of this framework (including "Step 5: Run Your Bot Live") is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
 Get your first trading bot up and running locally in minutes. This guide covers local development, testing, and running bots live.
 
 ## Prerequisites

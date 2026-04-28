@@ -1,8 +1,8 @@
-{{- if .Values.liveTrade.enabled }}
+{{- if .Values.liveTradeIB.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: livetrade-collective2
+  name: livetrade-ib
   namespace: {{ $.Values.namespace }}
   labels:
     app.kubernetes.io/managed-by: Helm
@@ -10,7 +10,7 @@ metadata:
     meta.helm.sh/release-name: {{ $.Release.Name }}
     meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
 spec:
-  schedule: {{ $.Values.liveTrade.schedule | quote }}
+  schedule: {{ $.Values.liveTradeIB.schedule | quote }}
   successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
   concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
@@ -19,18 +19,21 @@ spec:
       activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
       ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
       template:
+        metadata:
+          labels:
+            ib-gateway-client: "true"  # required by ibgateway-allow-clients NetworkPolicy
         spec:
           imagePullSecrets:
           {{- range $.Values.imagePullSecrets }}
           - name: {{ .name }}
           {{- end }}
           containers:
-          - name: livetrade-collective2
+          - name: livetrade-ib
             image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
             command:
             - "python"
             args:
-            - "livetrade_collective2.py"
+            - "livetrade_interactive_brokers.py"
             imagePullPolicy: {{ $.Values.image.pullPolicy }}
             resources:
               {{- toYaml $.Values.resources | nindent 14 }}
@@ -64,24 +67,28 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
-            # Collective2 credentials (from secret)
-            - name: COLLECTIVE2_API_KEY
+            # IB credentials (from secret or values)
+            - name: IB_GATEWAY_HOST
+              value: {{ $.Values.liveTradeIB.host | quote }}
+            - name: IB_GATEWAY_PORT
+              value: {{ $.Values.liveTradeIB.port | quote }}
+            - name: IB_CLIENT_ID
+              value: {{ $.Values.liveTradeIB.clientId | quote }}
+            - name: IB_ACCOUNT_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ $.Values.secretName }}
-                  key: COLLECTIVE2_API_KEY
-            - name: COLLECTIVE2_SYSTEM_ID
-              value: {{ $.Values.liveTrade.systemId | quote }}
+                  key: IB_ACCOUNT_ID
             # LiveTrade configuration (from values.yaml)
             - name: LIVETRADE_BOT_WEIGHTS
-              value: {{ $.Values.liveTrade.botWeights | quote }}
+              value: {{ $.Values.liveTradeIB.botWeights | quote }}
             - name: LIVETRADE_MIN_ORDER_USD
-              value: {{ $.Values.liveTrade.minOrderUsd | quote }}
+              value: {{ $.Values.liveTradeIB.minOrderUsd | quote }}
             - name: LIVETRADE_DRY_RUN
-              value: {{ $.Values.liveTrade.dryRun | quote }}
-            - name: LIVETRADE_PORTFOLIO_FRACTION
-              value: {{ $.Values.liveTrade.portfolioFraction | quote }}
+              value: {{ $.Values.liveTradeIB.dryRun | quote }}
             - name: LIVETRADE_STRICT_MAPPING
-              value: {{ $.Values.liveTrade.strictMapping | quote }}
+              value: {{ $.Values.liveTradeIB.strictMapping | quote }}
+            - name: LIVETRADE_PORTFOLIO_FRACTION
+              value: {{ $.Values.liveTradeIB.portfolioFraction | quote }}
           restartPolicy: OnFailure
 {{- end }}

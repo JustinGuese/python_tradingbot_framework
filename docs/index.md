@@ -4,6 +4,9 @@ Welcome to the Trading Bot System documentation!
 
 This system provides a framework for building and deploying automated trading bots that:
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of this framework (including "Live Trading" features) is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
 - Fetch market data from Yahoo Finance
 - Apply technical analysis indicators
 - Make trading decisions based on configurable strategies

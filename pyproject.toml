@@ -28,6 +28,7 @@ dependencies = [
     "huggingface_hub>=0.20.0",
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
+    "ib_async>=1.0.0",
 ]
 [project.optional-dependencies]
 dev = [

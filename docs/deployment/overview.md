@@ -1,5 +1,8 @@
 # Deployment Overview
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss. Deploying bots to run on a schedule or for live trading is strictly at your own risk. The authors and contributors are not liable for any financial losses or damages incurred.
+
 The trading bot system supports two deployment approaches:
 
 1. **Kubernetes with Helm** (Production) - Deploys PostgreSQL and bots as CronJobs

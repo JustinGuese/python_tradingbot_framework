@@ -1,5 +1,8 @@
 # Bot Implementation Levels
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of this framework (including "Live Trading" features) is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
 This guide explains the three implementation patterns for trading bots and when to use each one. Choosing the right pattern is critical for backtestability, maintainability, and development speed.
 
 ## Quick Decision Tree

@@ -181,5 +181,8 @@ GCS_BUCKET_NAME=tradingbotrunresults   # Cloud Storage bucket name
 
 Once your bot is validated locally, you can deploy it to run on a schedule and mirror it to a live brokerage account.
 
+> [!WARNING]
+> **DISCLAIMER:** Use of "Live Trading" features is strictly at your own risk. Trading involves significant risk of loss. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
 - [Deployment Guide](../deployment/overview.md) - How to run on a schedule (K8s/Docker)
 - [Live Trading Guide](live-trading.md) - How to mirror your paper portfolio to a real account

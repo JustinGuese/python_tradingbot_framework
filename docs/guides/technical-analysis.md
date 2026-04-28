@@ -1,5 +1,8 @@
 # Technical Analysis Indicators
 
+> [!WARNING]
+> **DISCLAIMER:** Technical indicators are for educational and research purposes only. No indicator or combination of indicators can guarantee future returns. Trading involves significant risk of loss.
+
 After calling `getYFDataWithTA()`, the DataFrame includes ~150+ technical analysis indicators.
 
 ## Indicator Categories

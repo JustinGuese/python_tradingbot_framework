@@ -1,8 +1,16 @@
 {
   "QQQ": {
-    "symbol": "QQQ",
-    "type": "stock",
-    "verified": "2026-04-28",
-    "source": "human"
+    "collective2": {
+      "symbol": "QQQ",
+      "type": "stock",
+      "verified": "2026-04-28",
+      "source": "human"
+    },
+    "interactive_brokers": {
+      "symbol": "QQQ",
+      "type": "stock",
+      "verified": "2026-04-28",
+      "source": "human"
+    }
   }
 }

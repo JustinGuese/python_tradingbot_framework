@@ -767,6 +767,17 @@ with get_db_session() as s:
 ```
 Only use `create_or_get_bot` when the caller genuinely owns the bot's identity (i.e., the bot itself, registering on first run).
 
+### 9. `POSTGRES_URI` Required Even for Non-DB Tests
+**Problem**: `pytest tests/...` fails with `KeyError: 'Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection'` even when running tests that don't touch the DB (e.g. pure-mock tests under `tests/test_livetrade.py`).
+
+**Cause**: `tradingbot/utils/__init__.py` imports `botclass` → `bot_repository` → `db`, and `db.py` resolves `DATABASE_URL` at module import time. Any test that imports anything from `tradingbot.utils` (or transitively, like the livetrade copier) triggers this.
+
+**Solution**: Pass a stub URI for non-DB test runs:
+```bash
+POSTGRES_URI="postgresql://x:x@localhost:5432/x" PYTHONPATH=. uv run pytest tests/ -q
+```
+The connection isn't opened until a session is actually used, so a syntactically-valid bogus URI is enough to satisfy import.
+
 ## Technical Analysis Indicators
 
 After calling `getYFDataWithTA()`, the DataFrame includes indicators from the `ta` library:

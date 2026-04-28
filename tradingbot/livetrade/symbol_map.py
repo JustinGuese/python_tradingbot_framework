@@ -20,13 +20,15 @@ class SymbolMapper:
             except Exception as e:
                 logger.error(f"Failed to load symbol map from {map_file}: {e}")
 
-    def map_symbol(self, yf_symbol: str) -> Optional[Dict]:
+    def map_symbol(self, yf_symbol: str, broker_name: Optional[str] = None) -> Optional[Dict]:
         """
         Translate yfinance symbol to broker symbol metadata.
+        Override JSON is broker-keyed: {"QQQ": {"collective2": {...}, "interactive_brokers": {...}}}.
         Returns: {"symbol": str, "type": str, "verified": str, "source": str} or None
         """
-        if yf_symbol in self.overrides:
-            return self.overrides[yf_symbol]
+        entry = self.overrides.get(yf_symbol, {})
+        if broker_name and broker_name in entry:
+            return entry[broker_name]
 
         # Default rules
         broker_symbol = yf_symbol
@@ -61,14 +63,16 @@ class SymbolMapper:
             "source": source
         }
 
-    def unmap_symbol(self, broker_symbol: str) -> str:
+    def unmap_symbol(self, broker_symbol: str, broker_name: Optional[str] = None) -> str:
         """
         Heuristic to translate broker symbol back to yfinance for price lookups.
         """
-        # 1. Exact inverse overrides
-        for yf, meta in self.overrides.items():
-            if meta.get("symbol") == broker_symbol:
-                return yf
+        # 1. Exact inverse override
+        if broker_name:
+            for yf, entry in self.overrides.items():
+                slot = entry.get(broker_name) if isinstance(entry, dict) else None
+                if slot and slot.get("symbol") == broker_symbol:
+                    return yf
 
         # 2. Known Crypto heuristics (C2 BTCUSD -> yf BTC-USD)
         # Check common crypto bases. If it looks like CRYPTOUSD, it's likely crypto.

@@ -375,19 +375,45 @@ telegramMonitor:
 
 See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
-## 📈 Live Trading (Collective2)
+## 📈 Live Trading (Collective2 & Interactive Brokers)
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Currently, it supports **Collective2** (World API v4), with Interactive Brokers support coming soon.
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
+
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4) and **Interactive Brokers** (via IB Gateway / `ib_async`).
 
 ### 1. Configure Environment
 
 Add these to your `.env` or Kubernetes secrets:
 ```bash
+# Collective2
 COLLECTIVE2_API_KEY=your_api_key
 COLLECTIVE2_SYSTEM_ID=12345678
+
+# Interactive Brokers (IB Gateway must be running)
+IB_GATEWAY_HOST=127.0.0.1
+IB_GATEWAY_PORT=4004
+IB_CLIENT_ID=17
+IB_ACCOUNT_ID=DU1234567   # paper accounts start with DU; live with U
+
+# Shared
 LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
-LIVETRADE_COPY_OPEN_TRADES=true
 LIVETRADE_DRY_RUN=false
+```
+
+### Inspect Account & Portfolio
+
+Each broker module is runnable directly to print the account summary and current
+positions — useful for sanity-checking credentials, account IDs, and mappings
+before running the copier:
+
+```bash
+# Collective2
+uv run python tradingbot/livetrade/collective2.py
+
+# Interactive Brokers (read-only connection; uses IB_CLIENT_ID=19 by default
+# so it won't collide with the cron client id 17 or vscode debug 18)
+uv run python tradingbot/livetrade/interactive_brokers.py
 ```
 
 ### 2. Map Your Tickers
@@ -407,10 +433,16 @@ uv run python -m tradingbot.livetrade.discover_symbols --apply
 
 ### 3. Deploy the Copier
 
-The copier runs as a standalone script. Deploy it as a CronJob to run shortly after your trading bots:
+The copier runs as a standalone script per broker. Deploy as a CronJob to run shortly after your trading bots:
 ```bash
+# Collective2
 uv run python tradingbot/livetrade_collective2.py
+
+# Interactive Brokers
+uv run python tradingbot/livetrade_interactive_brokers.py
 ```
+
+Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.enabled` for Collective2, `liveTradeIB.enabled` for IBKR), so you can run only one, both, or neither. Both default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).
 
 See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configuration and mapping rules.
 

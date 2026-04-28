@@ -1,5 +1,8 @@
 # Portfolio Management
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss. Any portfolio management actions (Buy/Sell/Rebalance) are strictly at your own risk.
+
 The system provides built-in portfolio management with automatic trade logging.
 
 ## Portfolio Structure

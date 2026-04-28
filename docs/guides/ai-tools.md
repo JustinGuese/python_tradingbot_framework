@@ -1,5 +1,8 @@
 # AI Tools (LangChain + OpenRouter)
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. AI-generated analysis and trading decisions are not financial advice and involve significant risk of loss. Use of these features is strictly at your own risk.
+
 The framework includes AI tools that let an LLM access market data, portfolio status, and recent trades (including profit on sells) via LangChain and the OpenRouter API.
 
 ## Two LLMs: Main and Cheap

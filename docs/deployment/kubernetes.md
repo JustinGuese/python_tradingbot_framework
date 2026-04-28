@@ -1,5 +1,8 @@
 # Kubernetes Deployment
 
+> [!WARNING]
+> **DISCLAIMER:** Use of this framework for live trading in a production environment is strictly at your own risk. Trading involves significant risk of loss.
+
 ## Prerequisites
 
 - Kubernetes cluster (1.20+)

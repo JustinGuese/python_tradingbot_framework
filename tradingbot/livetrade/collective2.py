@@ -1,8 +1,8 @@
 import logging
 from typing import Dict, Literal, Optional
 import httpx
-from .broker import LiveBroker
-from .symbol_map import SymbolMapper
+from livetrade.broker import LiveBroker
+from livetrade.symbol_map import SymbolMapper
 from utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
@@ -42,42 +42,24 @@ class Collective2Broker(LiveBroker):
         # v4 typically returns { "Results": [ { ... } ] } but field names vary.
         results = data.get("Results") or data.get("Strategy") or []
         if isinstance(results, list) and results:
-            money_fields = {
-                k: results[0].get(k)
-                for k in ["Equity", "Cash", "StartingCash", "ModelAccountValue", "BuyingPower", "MarginUsed", "IsAlive"]
-                if k in results[0]
-            }
-            logger.info(f"Strategy money/state fields: {money_fields}")
             return results[0]
         if isinstance(results, dict):
-            logger.info(f"Strategy object keys: {list(results.keys())}")
             return results
         logger.warning(f"Could not extract strategy object from response: {data}")
         return {}
 
-    def _extract_money_field(self, obj: dict, candidates: list[str]) -> float:
-        """Try multiple field name candidates and prefer non-zero values
-        (C2 leaves some money fields like Equity at 0 for sim/model strategies)."""
-        for key in candidates:
-            if key in obj and obj[key] not in (None, ""):
-                try:
-                    val = float(obj[key])
-                except (TypeError, ValueError):
-                    continue
-                if val != 0:
-                    return val
-        return 0.0
+    @staticmethod
+    def _money(obj: dict, key: str) -> float:
+        try:
+            return float(obj.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def get_cash(self) -> float:
-        obj = self._strategy_details()
-        return self._extract_money_field(obj, ["Cash", "AvailableCash", "BuyingPower", "ModelAccountCash"])
+        return self._money(self._strategy_details(), "ModelAccountCash")
 
     def get_total_equity(self) -> float:
-        obj = self._strategy_details()
-        return self._extract_money_field(
-            obj,
-            ["Equity", "ModelAccountValue", "NAV", "AccountValue", "TotalValue", "ModelAccountEquity"],
-        )
+        return self._money(self._strategy_details(), "ModelAccountValue")
 
     def get_positions(self) -> Dict[str, float]:
         """Returns broker_symbol -> quantity."""
@@ -90,18 +72,7 @@ class Collective2Broker(LiveBroker):
             positions[symbol] = qty
         return positions
 
-    def get_latest_price(self, broker_symbol: str) -> float:
-        """
-        C2 API v4 doesn't have a direct quote endpoint.
-        Fallback to DataService (yfinance) using inverse mapping.
-        """
-        logger.debug(f"Fetching fallback price for {broker_symbol} via yfinance")
-        yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol)
-        try:
-            return self.data_service.get_latest_price(yf_symbol)
-        except Exception as e:
-            logger.warning(f"Could not fetch price for {broker_symbol} (yf: {yf_symbol}) via yfinance fallback: {e}")
-            return 0.0
+    # C2 API v4 has no native quote endpoint — base class falls back to yfinance.
 
     def place_order(self, 
                     broker_symbol: str, 
@@ -161,7 +132,7 @@ class Collective2Broker(LiveBroker):
             raise
 
     def map_symbol(self, yf_symbol: str) -> dict | None:
-        return self.symbol_mapper.map_symbol(yf_symbol)
+        return self.symbol_mapper.map_symbol(yf_symbol, broker_name=self.name)
 
     def search_symbol(self, query: str) -> list[dict]:
         """
@@ -185,3 +156,41 @@ class Collective2Broker(LiveBroker):
         except Exception as e:
             logger.error(f"C2 symbol search failed: {e}")
             return []
+
+    def print_account_summary(self) -> None:
+        obj = self._strategy_details()
+        cash = self.get_cash()
+        equity = self.get_total_equity()
+        print(f"\nCollective2 Strategy {self.system_id}")
+        print(f"  IsAlive:          {obj.get('IsAlive', '?')}")
+        print(f"  Cash:             {cash:>15,.2f}")
+        print(f"  Equity:           {equity:>15,.2f}")
+
+        positions_data = self._get("Strategies/GetStrategyOpenPositions", {"StrategyIds": [int(self.system_id)]})
+        results = positions_data.get("Results", [])
+        print(f"\nPositions ({len(results)}):")
+        if not results:
+            print("  (none)")
+            return
+        print(f"  {'Symbol':<14} {'Type':<8} {'Qty':>12} {'AvgPrice':>12} {'OpenPnL':>12}")
+        for p in results:
+            print(f"  {str(p.get('Symbol','')):<14} {str(p.get('SymbolType','')):<8} "
+                  f"{float(p.get('Quantity', 0)):>12.4f} "
+                  f"{float(p.get('OpenPrice', 0) or 0):>12.4f} "
+                  f"{float(p.get('OpenPnL', 0) or 0):>12.2f}")
+
+
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    api_key = os.getenv("COLLECTIVE2_API_KEY")
+    system_id = os.getenv("COLLECTIVE2_SYSTEM_ID")
+    if not api_key or not system_id:
+        raise SystemExit("COLLECTIVE2_API_KEY and COLLECTIVE2_SYSTEM_ID must be set in .env")
+
+    broker = Collective2Broker(api_key=api_key, system_id=system_id)
+    broker.print_account_summary()

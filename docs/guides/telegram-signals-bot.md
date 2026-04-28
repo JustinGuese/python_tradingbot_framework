@@ -1,5 +1,8 @@
 # Telegram Signals Bot Guide
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. AI-generated trading signals are not financial advice and involve significant risk of loss. Use of this bot is strictly at your own risk.
+
 `telegramsignalsbankbot` is a trading bot that reads AI-summarized Telegram messages from the database, classifies them as BUY/SELL entry signals, and executes trades automatically.
 
 It is the **downstream consumer** of the `telegram-monitor` CronJob — the monitor fills the `telegram_messages` table, the signals bot acts on it.

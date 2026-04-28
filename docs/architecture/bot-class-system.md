@@ -1,5 +1,8 @@
 # Bot Class System
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss. Use of this framework for live trading is strictly at your own risk.
+
 The `Bot` class is the foundation of the trading bot system. All bots inherit from it and implement trading strategies.
 
 ## Implementation Approaches

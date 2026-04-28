@@ -1,5 +1,8 @@
 # Telegram Channel Monitor Guide
 
+> [!WARNING]
+> **DISCLAIMER:** This software is for educational and research purposes only. AI-generated analysis of news and signals is not financial advice. Trading based on these signals involves significant risk of loss. Use of these features is strictly at your own risk.
+
 Monitor Telegram channels for news and trading signals. The monitor polls channels for new messages, summarizes them with AI, extracts trading symbols, and stores everything in the database.
 
 ## Overview

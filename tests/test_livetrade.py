@@ -1,8 +1,5 @@
 import unittest
-import json
-import os
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock
 from tradingbot.livetrade.copier import LiveTradeCopier
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.utils.db import Bot
@@ -14,26 +11,15 @@ class TestLiveTrade(unittest.TestCase):
         self.bot_repo = MagicMock()
         self.data_service = MagicMock()
         self.broker.get_latest_price.return_value = 150.0
-        
-        # Default marker file path for tests
-        self.marker_file = Path("data/state/test_livetrade_seen.json")
-        if self.marker_file.exists():
-            self.marker_file.unlink()
 
         self.bot_weights = {"bot1": 1.0}
         self.copier = LiveTradeCopier(
             broker=self.broker,
             bot_weights=self.bot_weights,
-            copy_open_trades=True,
             dry_run=True
         )
         self.copier.bot_repo = self.bot_repo
         self.copier.data_service = self.data_service
-        self.copier.marker_file = self.marker_file
-
-    def tearDown(self):
-        if self.marker_file.exists():
-            self.marker_file.unlink()
 
     def test_calculate_target_weights(self):
         # Mock bot portfolio
@@ -85,32 +71,87 @@ class TestLiveTrade(unittest.TestCase):
             self.copier.sync()
             self.assertTrue(any("STRICT MODE: Aborting sync" in line for line in cm.output))
 
-    def test_copy_open_trades_marker_file(self):
-        self.copier.copy_open_trades = False
+    def test_calculate_orders_skips_zero_price(self):
+        target_weights = {"AAPL": {"weight": 0.5, "type": "stock"}}
+        current_positions = {"AAPL": 0}
+        total_equity = 2000
         
-        # Mock target weights to avoid early exit in sync if it gets past markers
-        self.copier._calculate_target_weights = MagicMock(return_value={"AAPL": 0.6})
-        self.broker.map_symbol.return_value = {"symbol": "AAPL", "type": "stock"}
-        self.broker.get_total_equity.return_value = 1000.0
+        # Mock price as 0
+        self.broker.get_latest_price.return_value = 0.0
+        
+        orders = self.copier._calculate_orders(target_weights, current_positions, total_equity)
+        self.assertEqual(len(orders), 0)
+
+    def test_execute_orders_ordering_and_delay(self):
+        import time
+        from unittest.mock import patch
+        
+        orders = [
+            {"symbol": "MSFT", "quantity": 10, "side": "BUY", "value": 1000, "type": "stock"},
+            {"symbol": "AAPL", "quantity": 5, "side": "SELL", "value": 750, "type": "stock"},
+        ]
+        
+        self.copier.dry_run = False
+        self.copier.settle_delay_seconds = 5
+        
+        with patch("time.sleep") as mock_sleep:
+            self.copier._execute_orders(orders)
+            
+            # Verify SELL was called before BUY
+            # self.broker.place_order.call_args_list shows the order
+            calls = self.broker.place_order.call_args_list
+            self.assertEqual(calls[0][0][2], "SELL")
+            self.assertEqual(calls[1][0][2], "BUY")
+            
+            # Verify sleep was called
+            mock_sleep.assert_called_once_with(5)
+
+    def test_copier_continues_on_broker_exception(self):
+        orders = [
+            {"symbol": "AAPL", "quantity": 5, "side": "SELL", "value": 750, "type": "stock"},
+            {"symbol": "MSFT", "quantity": 10, "side": "SELL", "value": 1000, "type": "stock"},
+        ]
+        self.copier.dry_run = False
+        
+        # First call raises error, second succeeds
+        self.broker.place_order.side_effect = [Exception("API Error"), None]
+        
+        with self.assertLogs("tradingbot.livetrade.copier", level="ERROR") as cm:
+            self.copier._execute_orders(orders)
+            # Verify both were attempted
+            self.assertEqual(self.broker.place_order.call_count, 2)
+            # Verify error was logged
+            self.assertTrue(any("Failed to execute" in line for line in cm.output))
+
+    def test_portfolio_fraction_scales_target_value(self):
+        # equity 2000, fraction 0.5 -> effective 1000; weight 0.5 -> target $500
+        # 0 current shares @ $100 -> buy 500/100 = 5
+        self.copier.portfolio_fraction = 0.5
+        target_weights = {"AAPL": {"weight": 0.5, "type": "stock"}}
+        self.broker.get_latest_price.return_value = 100.0
+        # _calculate_orders receives the already-scaled equity from sync()
+        orders = self.copier._calculate_orders(target_weights, {}, total_equity=1000.0)
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(orders[0]["side"], "BUY")
+        self.assertAlmostEqual(orders[0]["quantity"], 5.0)
+
+    def test_sync_aborts_on_negative_equity(self):
+        # Mock target weights
+        mock_bot = MagicMock(spec=Bot)
+        mock_bot.portfolio = {"USD": 1000, "AAPL": 10}
+        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.data_service.get_latest_prices_batch.return_value = {"AAPL": 150.0}
+        
+        # Mock negative equity and empty positions
+        self.broker.get_total_equity.return_value = -100.0
         self.broker.get_positions.return_value = {}
-
-        # Run 1: Should mark and skip
-        with self.assertLogs("tradingbot.livetrade.copier", level="INFO") as cm:
-            self.copier.sync()
-            self.assertTrue(any("Marked first-run for bot1" in line for line in cm.output))
-            self.assertTrue(any("Skipping initial rebalance" in line for line in cm.output))
         
-        self.assertTrue(self.marker_file.exists())
-        with open(self.marker_file, "r") as f:
-            markers = json.load(f)
-            self.assertTrue(markers.get("mock_broker:bot1"))
-
-        # Run 2: Should proceed
-        with self.assertLogs("tradingbot.livetrade.copier", level="INFO") as cm:
+        with self.assertLogs("tradingbot.livetrade.copier", level="ERROR") as cm:
             self.copier.sync()
-            self.assertTrue(any("Starting sync" in line for line in cm.output))
-            # Should NOT contain skip message
-            self.assertFalse(any("Skipping initial rebalance" in line for line in cm.output))
+            self.assertTrue(any("Aborting sync due to non-positive equity" in line for line in cm.output))
+        
+        # Verify no orders were executed
+        self.broker.place_order.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

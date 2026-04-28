@@ -1,5 +1,8 @@
 # Architecture Overview
 
+> [!WARNING]
+> **DISCLAIMER:** This architecture is designed for educational and research purposes. Use of this system for live trading is strictly at your own risk. Trading involves significant risk of loss.
+
 ## System Components
 
 The Trading Bot System consists of several key components:

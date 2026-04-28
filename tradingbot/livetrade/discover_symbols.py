@@ -9,6 +9,7 @@ from typing import Set, List, Dict
 
 from .symbol_map import SymbolMapper
 from .collective2 import Collective2Broker
+from .interactive_brokers import InteractiveBrokersBroker
 from utils.db import get_db_session, Bot as BotModel, Trade
 from utils.bot_repository import BotRepository
 
@@ -160,19 +161,35 @@ def main():
     parser = argparse.ArgumentParser(description="Discover and map yfinance tickers to broker symbols.")
     parser.add_argument("--apply", action="store_true", help="Merge approved entries from review file")
     parser.add_argument("--review-file", default="symbol_map.review.json", help="Path to review file")
+    parser.add_argument("--broker", default="c2", choices=["c2", "ib"], help="Broker to use for search (c2 or ib)")
     
     args = parser.parse_args()
     
-    api_key = os.getenv("COLLECTIVE2_API_KEY", "")
-    system_id = os.getenv("COLLECTIVE2_SYSTEM_ID", "")
+    if args.broker == "ib":
+        host = os.getenv("IB_GATEWAY_HOST", "127.0.0.1")
+        port = int(os.getenv("IB_GATEWAY_PORT", "4004"))
+        account_id = os.getenv("IB_ACCOUNT_ID", "")
+        broker = InteractiveBrokersBroker(host=host, port=port, account_id=account_id)
+        logger.info(f"Using Interactive Brokers at {host}:{port}")
+    else:
+        api_key = os.getenv("COLLECTIVE2_API_KEY", "")
+        system_id = os.getenv("COLLECTIVE2_SYSTEM_ID", "")
+        broker = Collective2Broker(api_key, system_id)
+        logger.info(f"Using Collective2 (System {system_id})")
     
-    broker = Collective2Broker(api_key, system_id)
     discoverer = SymbolDiscoverer(broker)
     
-    if args.apply:
-        discoverer.apply_review(args.review_file)
-    else:
-        discoverer.discover(review_file=args.review_file)
+    try:
+        if args.broker == "ib":
+            broker.connect(readonly=True)
+            
+        if args.apply:
+            discoverer.apply_review(args.review_file)
+        else:
+            discoverer.discover(review_file=args.review_file)
+    finally:
+        if args.broker == "ib":
+            broker.disconnect()
 
 if __name__ == "__main__":
     main()

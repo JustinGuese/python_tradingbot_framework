@@ -1,5 +1,8 @@
 # Helm Charts
 
+> [!WARNING]
+> **DISCLAIMER:** Use of this framework for live trading in a production environment is strictly at your own risk. Trading involves significant risk of loss.
+
 The system uses Helm charts for Kubernetes deployment.
 
 ## Chart Structure
