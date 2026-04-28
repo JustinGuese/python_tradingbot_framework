@@ -5,8 +5,8 @@
 # All bots run from the same container image
 image:
   repository: registry.gitlab.com/datafortress/tradingbot25
-  tag: main  # Image tag (typically branch name or version)
-  pullPolicy: Always  # Always pull latest image (use IfNotPresent for production)
+  tag: main # Image tag (typically branch name or version)
+  pullPolicy: Always # Always pull latest image (use IfNotPresent for production)
 
 # Kubernetes namespace for all resources
 namespace: tradingbots-2025
@@ -14,23 +14,23 @@ namespace: tradingbots-2025
 # Kubernetes secret name
 # This secret must be created manually before deploying (see README.md)
 # All secrets (database, API keys, passwords) are stored in this single secret
-secretName: tradingbot-secrets  # Secret name created from .env file
+secretName: tradingbot-secrets # Secret name created from .env file
 
 # Image pull secrets for private Docker registry authentication
 imagePullSecrets:
-  - name: regcred
+- name: regcred
 
 # Resource limits for trading bot containers
 # These apply to all bot CronJobs
 resources:
   # Minimum resources requested (for scheduling)
   requests:
-    cpu: 10m      # 0.01 CPU cores
-    memory: 25Mi  # 25 megabytes
+    cpu: 10m # 0.01 CPU cores
+    memory: 25Mi # 25 megabytes
   # Maximum resources allowed (container will be throttled/killed if exceeded)
   limits:
-    cpu: 1000m    # 1 CPU core
-    memory: 2Gi   # 2 gigabytes
+    cpu: 1000m # 1 CPU core
+    memory: 2Gi # 2 gigabytes
 
 # CronJob cleanup and concurrency settings
 # These settings apply to all bot CronJobs
@@ -55,82 +55,82 @@ cronjob:
 # and POSTGRES_PASSWORD from secret (POSTGRES_URI is not set; app builds it in-cluster).
 # Otherwise POSTGRES_URI is read from secret (e.g. localhost for local dev).
 env:
-  - name: POSTGRES_URI
-    valueFrom:
-      secretKeyRef:
-        key: POSTGRES_URI  # Used when clusterConnection is not set (e.g. local)
+- name: POSTGRES_URI
+  valueFrom:
+    secretKeyRef:
+      key: POSTGRES_URI # Used when clusterConnection is not set (e.g. local)
 
-  - name: POSTGRES_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        key: POSTGRES_PASSWORD  # Required when clusterConnection is set (from .env)
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      key: POSTGRES_PASSWORD # Required when clusterConnection is set (from .env)
 
-  # LangSmith tracing (EU). Add LANGSMITH_API_KEY to your secret (e.g. from .env).
-  - name: LANGSMITH_API_KEY
-    valueFrom:
-      secretKeyRef:
-        key: LANGSMITH_API_KEY
-  - name: LANGSMITH_TRACING
-    value: "true"
-  - name: LANGSMITH_ENDPOINT
-    value: "https://eu.api.smith.langchain.com"
+# LangSmith tracing (EU). Add LANGSMITH_API_KEY to your secret (e.g. from .env).
+- name: LANGSMITH_API_KEY
+  valueFrom:
+    secretKeyRef:
+      key: LANGSMITH_API_KEY
+- name: LANGSMITH_TRACING
+  value: "true"
+- name: LANGSMITH_ENDPOINT
+  value: "https://eu.api.smith.langchain.com"
 
-  # OpenRouter API key for AI-based bots (DeepSeekToolBot, etc.)
-  - name: OPENROUTER_API_KEY
-    valueFrom:
-      secretKeyRef:
-        key: OPENROUTER_API_KEY
+# OpenRouter API key for AI-based bots (DeepSeekToolBot, etc.)
+- name: OPENROUTER_API_KEY
+  valueFrom:
+    secretKeyRef:
+      key: OPENROUTER_API_KEY
 
-  # Kronos forecasting service — HF Space URL (public, no secret needed)
-  - name: KRONOS_SPACE_URL
-    value: "https://guestros-kronos-trading-api.hf.space"
+# Kronos forecasting service — HF Space URL (public, no secret needed)
+- name: KRONOS_SPACE_URL
+  value: "https://guestros-kronos-trading-api.hf.space"
 
-  # HuggingFace token — required by kronosbot to restart/pause the Space
-  # Add HF_TOKEN to tradingbot-secrets: kubectl patch secret tradingbot-secrets ...
-  - name: HF_TOKEN
-    valueFrom:
-      secretKeyRef:
-        key: HF_TOKEN
-        optional: true
+# HuggingFace token — required by kronosbot to restart/pause the Space
+# Add HF_TOKEN to tradingbot-secrets: kubectl patch secret tradingbot-secrets ...
+- name: HF_TOKEN
+  valueFrom:
+    secretKeyRef:
+      key: HF_TOKEN
+      optional: true
 
 # Web visualization dashboard settings
 visualization:
-  enabled: true  # Enable/disable the web dashboard
+  enabled: true # Enable/disable the web dashboard
   basicAuth:
     username: admin
     # Password is stored in Kubernetes secret 'app-secrets' with key 'BASIC_AUTH_PASSWORD'
     # Create secret using: kubectl create secret generic app-secrets --from-env-file=.env
 
-# Kubernetes Ingress configuration for web dashboard
+    # Kubernetes Ingress configuration for web dashboard
 ingress:
-  enabled: true  # Enable external access to visualization dashboard
+  enabled: true # Enable external access to visualization dashboard
 
 # PostgreSQL database configuration
 # If enabled, deploys a PostgreSQL instance in the cluster
 postgresql:
-  enabled: true  # Set to false if using external PostgreSQL
+  enabled: true # Set to false if using external PostgreSQL
   image:
     repository: postgres
-    tag: 17-alpine  # PostgreSQL version
+    tag: 17-alpine # PostgreSQL version
   # Password is stored in Kubernetes secret 'psqlcreds' with key 'POSTGRES_PASSWORD'
   # Create secret using: kubectl create secret generic psqlcreds --from-env-file=.env
-  database: postgres  # Database name
+  database: postgres # Database name
   service:
-    name: psql-service  # Kubernetes service name
-    port: 5432  # PostgreSQL port
+    name: psql-service # Kubernetes service name
+    port: 5432 # PostgreSQL port
   # Cluster-internal connection for CronJob bots (overrides POSTGRES_URI from secret).
   # When set, bots get POSTGRES_HOST/PORT/USER/DATABASE from here and POSTGRES_PASSWORD from secret.
   clusterConnection:
-    host: psql-service  # K8s service name (same namespace) or FQDN
+    host: psql-service # K8s service name (same namespace) or FQDN
     port: 5432
     user: postgres
     database: postgres
   storage:
-    hostPath: /mnt/hdd/tradingbot_2025/psql/  # Persistent storage path on node
-    type: DirectoryOrCreate  # Create directory if it doesn't exist
+    hostPath: /mnt/hdd/tradingbot_2025/psql/ # Persistent storage path on node
+    type: DirectoryOrCreate # Create directory if it doesn't exist
   deployment:
     name: psql-deployment
-    replicas: 1  # Number of PostgreSQL instances (1 for single-node)
+    replicas: 1 # Number of PostgreSQL instances (1 for single-node)
 
 # List of trading bots to deploy
 # Each bot will be deployed as a Kubernetes CronJob
@@ -156,105 +156,103 @@ postgresql:
 #   "0 */4 * * 1-5"     - Every 4 hours, Monday-Friday
 #   "30 17 * * 1-5"     - Daily at 5:30 PM, Monday-Friday
 bots:
-  - name: eurusdtreebot
-    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+- name: eurusdtreebot
+  schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
 
-  - name: feargreedbot
-    schedule: "3 17 * * 1-5"  # Daily at 5:03 PM, Mon-Fri
+- name: feargreedbot
+  schedule: "3 17 * * 1-5" # Daily at 5:03 PM, Mon-Fri
 
-  - name: swingtitaniumbot
-    schedule: "0 */4 * * 1-5"  # Every 4 hours, Mon-Fri
+- name: swingtitaniumbot
+  schedule: "0 */4 * * 1-5" # Every 4 hours, Mon-Fri
 
-  - name: xauzenbot
-    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+- name: xauzenbot
+  schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
 
-  - name: xauaisyntheticmetalbot
-    schedule: "*/5 * * * 1-5"  # Every 5 minutes, Mon-Fri
+- name: xauaisyntheticmetalbot
+  schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
 
-  - name: sharpeportfoliooptweekly
-    schedule: "0 17 * * 2"  # Weekly on Tuesday at 5:00 PM
+- name: sharpeportfoliooptweekly
+  schedule: "0 17 * * 2" # Weekly on Tuesday at 5:00 PM
 
-  - name: gptbasedstrategytabased
-    schedule: "30 17 * * 1-5"  # Daily at 5:30 PM, Mon-Fri
+- name: gptbasedstrategytabased
+  schedule: "30 17 * * 1-5" # Daily at 5:30 PM, Mon-Fri
 
-  - name: aihedgefundbot
-    # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
-    schedule: "10 22 * * 3"  # Weekly on Wednesday at 10:10 PM
+- name: aihedgefundbot
+  # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
+  schedule: "10 22 * * 3" # Weekly on Wednesday at 10:10 PM
 
-  - name: aideepseektoolbot
-    schedule: "18 18 * * 4"  #  at 6:18 PM, Thursday
+- name: aideepseektoolbot
+  schedule: "18 18 * * 4" #  at 6:18 PM, Thursday
 
-  - name: regimeadaptivebot
-    schedule: "20 20 * * 3"  # Weekly on Wednesday at 8:20 PM
+- name: regimeadaptivebot
+  schedule: "20 20 * * 3" # Weekly on Wednesday at 8:20 PM
 
-  - name: earningsinsidertiltbot
-    schedule: "30 20 * * 3"  # Weekly on Wednesday at 8:30 PM
+- name: earningsinsidertiltbot
+  schedule: "30 20 * * 3" # Weekly on Wednesday at 8:30 PM
 
-  - name: taregimebot
-    schedule: "20 17 * * 4"  # weekly 5:20 PM, Thursday
+- name: taregimebot
+  schedule: "20 17 * * 4" # weekly 5:20 PM, Thursday
 
-  - name: telegramsignalsbankbot
-    schedule: "*/5 * * * *"  # Every 5 minutes (matches telegram-monitor cadence)
+- name: telegramsignalsbankbot
+  schedule: "*/5 * * * *" # Every 5 minutes (matches telegram-monitor cadence)
 
-  - name: stocknewssentimentbot
-    schedule: "30 22 * * 1-5"  # Daily at 10:30 PM UTC Mon-Fri, after portfolio-worth-calculator (0 22) refreshes news
+- name: stocknewssentimentbot
+  schedule: "30 22 * * 1-5" # Daily at 10:30 PM UTC Mon-Fri, after portfolio-worth-calculator (0 22) refreshes news
 
-  - name: adaptivemeanreversionbot
-    schedule: "0 21 * * 1-5"  # Daily 9 PM UTC (4 PM ET), near NYSE close for fresh daily OHLCV
+- name: adaptivemeanreversionbot
+  schedule: "0 21 * * 1-5" # Daily 9 PM UTC (4 PM ET), near NYSE close for fresh daily OHLCV
 
-  - name: goldenbutterflymombot
-    schedule: "0 14 * * 1"  # Weekly Monday 2 PM UTC, before US market open
+- name: goldenbutterflymombot
+  schedule: "0 14 * * 1" # Weekly Monday 2 PM UTC, before US market open
 
-  - name: synthesizedhyperconvexitybot
-    schedule: "30 21 * * 1-5"  # Daily 9:30 PM UTC (30 min after US close), Mon-Fri
+- name: synthesizedhyperconvexitybot
+  schedule: "30 21 * * 1-5" # Daily 9:30 PM UTC (30 min after US close), Mon-Fri
 
-  - name: recursivedecayharvestbot
-    schedule: "45 21 * * 1-5"  # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
+- name: recursivedecayharvestbot
+  schedule: "45 21 * * 1-5" # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
 
-  - name: squeezemomentumbot
-    schedule: "55 21 * * 1-5"  # Daily 9:55 PM UTC (4:55 PM ET), after NYSE close
+- name: squeezemomentumbot
+  schedule: "55 21 * * 1-5" # Daily 9:55 PM UTC (4:55 PM ET), after NYSE close
 
-  - name: kronosbot
-    schedule: "5 22 * * 1-5"  # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
+- name: kronosbot
+  schedule: "5 22 * * 1-5" # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
 
-  - name: kronostraderbot
-    schedule: "15 22 * * 1-5"  # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
+- name: kronostraderbot
+  schedule: "15 22 * * 1-5" # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
 
-# Live Trade Copier (Collective2)
-# Mirrors weighted paper-bot portfolios to a real Collective2 strategy.
+# Live Trade Copier — mirrors weighted paper-bot portfolios to a real brokerage.
 # See docs/guides/live-trading.md for the full guide.
-# Requires COLLECTIVE2_API_KEY in the tradingbot-secrets secret.
-# Start with dryRun=true and verify logs before flipping to false.
+# Shared settings apply to every enabled broker; broker-specific blocks below
+# only carry connection details and per-broker schedules.
 liveTrade:
-  enabled: true  # Flip to true after dry-run verified
-  schedule: "10 21 * * 1-5"  # 9:10 PM UTC (10 min after AdaptiveMeanReversionBot at 21:00)
-  systemId: "155809898"  # Collective2 strategy ID
-  botWeights: '{"adaptivemeanreversionbot": 1.0}'  # JSON: bot name -> weight
+  # Shared across all brokers
+  botWeights: '{"SynthesizedHyperConvexityBot": 0.5,"AdaptiveMeanReversionBot": 0.5}' # JSON: bot name -> weight
   minOrderUsd: "50"
-  dryRun: "true"  # ALWAYS start with true; flip to false only after validation
-  strictMapping: "true"  # Abort if any target ticker is unmapped
-  portfolioFraction: "1.0"  # Fraction of broker equity to allocate. 1.0 = all, 0.5 = half.
+  dryRun: "false" # ALWAYS start with true; flip to false only after validation
+  strictMapping: "true" # Abort if any target ticker is unmapped
+  portfolioFraction: "1.0" # Fraction of broker equity to allocate. 1.0 = all, 0.5 = half. Override per broker below.
 
-# Live Trade Copier (Interactive Brokers)
-# Mirrors weighted paper-bot portfolios to Interactive Brokers (IB Gateway).
-# Requires IB_ACCOUNT_ID and IB_GATEWAY_HOST/PORT in the tradingbot-secrets secret.
-liveTradeIB:
-  enabled: true
-  schedule: "20 21 * * 1-5"  # 9:20 PM UTC
-  host: "ib-gateway-service.interactivebrokersgateway.svc.cluster.local"
-  port: "4002"
-  clientId: "17"
-  # IB_ACCOUNT_ID is read from the tradingbot-secrets secret (regenerated from .env)
-  botWeights: '{"adaptivemeanreversionbot": 1.0}'
-  minOrderUsd: "50"
-  dryRun: "true"
-  strictMapping: "true"
-  portfolioFraction: "1.0"  # Fraction of broker equity to allocate. 1.0 = all, 0.5 = half.
+  # Collective2 — requires COLLECTIVE2_API_KEY in tradingbot-secrets.
+  collective2:
+    enabled: true
+    schedule: "10 21 * * 1-5" # 9:10 PM UTC (10 min after AdaptiveMeanReversionBot at 21:00)
+    systemId: "155809898" # Collective2 strategy ID
+    # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
+
+  # Interactive Brokers — requires IB_ACCOUNT_ID in tradingbot-secrets and a
+  # reachable IB Gateway service (NetworkPolicy gate via ib-gateway-client label).
+  interactiveBrokers:
+    enabled: true
+    schedule: "20 21 * * 1-5" # 9:20 PM UTC
+    host: "ib-gateway-service.interactivebrokersgateway.svc.cluster.local"
+    port: "4002"
+    clientId: "17"
+    # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
 # telegram monitor
 telegramMonitor:
-  enabled: true  # Set to true to deploy the Telegram monitor CronJob
-  schedule: "*/5 * * * *"  # Every 5 minutes
+  enabled: true # Set to true to deploy the Telegram monitor CronJob
+  schedule: "*/5 * * * *" # Every 5 minutes
   # Comma-separated Telegram channel usernames or IDs to monitor
   # Examples: "durov", "some_news_channel", "-1001234567890"
   channels: "-1002202241417,-1001998690333"

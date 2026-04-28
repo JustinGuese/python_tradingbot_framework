@@ -1,4 +1,4 @@
-{{- if .Values.liveTrade.enabled }}
+{{- if .Values.liveTrade.collective2.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -10,7 +10,7 @@ metadata:
     meta.helm.sh/release-name: {{ $.Release.Name }}
     meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
 spec:
-  schedule: {{ $.Values.liveTrade.schedule | quote }}
+  schedule: {{ $.Values.liveTrade.collective2.schedule | quote }}
   successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
   concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
@@ -71,7 +71,7 @@ spec:
                   name: {{ $.Values.secretName }}
                   key: COLLECTIVE2_API_KEY
             - name: COLLECTIVE2_SYSTEM_ID
-              value: {{ $.Values.liveTrade.systemId | quote }}
+              value: {{ $.Values.liveTrade.collective2.systemId | quote }}
             # LiveTrade configuration (from values.yaml)
             - name: LIVETRADE_BOT_WEIGHTS
               value: {{ $.Values.liveTrade.botWeights | quote }}
@@ -80,7 +80,7 @@ spec:
             - name: LIVETRADE_DRY_RUN
               value: {{ $.Values.liveTrade.dryRun | quote }}
             - name: LIVETRADE_PORTFOLIO_FRACTION
-              value: {{ $.Values.liveTrade.portfolioFraction | quote }}
+              value: {{ default $.Values.liveTrade.portfolioFraction $.Values.liveTrade.collective2.portfolioFraction | quote }}
             - name: LIVETRADE_STRICT_MAPPING
               value: {{ $.Values.liveTrade.strictMapping | quote }}
           restartPolicy: OnFailure

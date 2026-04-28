@@ -1,4 +1,4 @@
-{{- if .Values.liveTradeIB.enabled }}
+{{- if .Values.liveTrade.interactiveBrokers.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -10,7 +10,7 @@ metadata:
     meta.helm.sh/release-name: {{ $.Release.Name }}
     meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
 spec:
-  schedule: {{ $.Values.liveTradeIB.schedule | quote }}
+  schedule: {{ $.Values.liveTrade.interactiveBrokers.schedule | quote }}
   successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
   concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
@@ -69,26 +69,26 @@ spec:
             {{- end }}
             # IB credentials (from secret or values)
             - name: IB_GATEWAY_HOST
-              value: {{ $.Values.liveTradeIB.host | quote }}
+              value: {{ $.Values.liveTrade.interactiveBrokers.host | quote }}
             - name: IB_GATEWAY_PORT
-              value: {{ $.Values.liveTradeIB.port | quote }}
+              value: {{ $.Values.liveTrade.interactiveBrokers.port | quote }}
             - name: IB_CLIENT_ID
-              value: {{ $.Values.liveTradeIB.clientId | quote }}
+              value: {{ $.Values.liveTrade.interactiveBrokers.clientId | quote }}
             - name: IB_ACCOUNT_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ $.Values.secretName }}
                   key: IB_ACCOUNT_ID
-            # LiveTrade configuration (from values.yaml)
+            # LiveTrade shared configuration (from values.yaml)
             - name: LIVETRADE_BOT_WEIGHTS
-              value: {{ $.Values.liveTradeIB.botWeights | quote }}
+              value: {{ $.Values.liveTrade.botWeights | quote }}
             - name: LIVETRADE_MIN_ORDER_USD
-              value: {{ $.Values.liveTradeIB.minOrderUsd | quote }}
+              value: {{ $.Values.liveTrade.minOrderUsd | quote }}
             - name: LIVETRADE_DRY_RUN
-              value: {{ $.Values.liveTradeIB.dryRun | quote }}
+              value: {{ $.Values.liveTrade.dryRun | quote }}
             - name: LIVETRADE_STRICT_MAPPING
-              value: {{ $.Values.liveTradeIB.strictMapping | quote }}
+              value: {{ $.Values.liveTrade.strictMapping | quote }}
             - name: LIVETRADE_PORTFOLIO_FRACTION
-              value: {{ $.Values.liveTradeIB.portfolioFraction | quote }}
+              value: {{ default $.Values.liveTrade.portfolioFraction $.Values.liveTrade.interactiveBrokers.portfolioFraction | quote }}
           restartPolicy: OnFailure
 {{- end }}
