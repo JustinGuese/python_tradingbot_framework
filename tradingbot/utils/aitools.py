@@ -18,6 +18,7 @@ Extensibility: Subclasses can override Bot.get_ai_tools() to add custom tools; r
 them automatically. run_ai_with_tools() accepts extra_tools= and optional tool_names= to
 whitelist which base tools to include.
 """
+
 from __future__ import annotations
 
 import logging
@@ -79,7 +80,7 @@ _configure_langsmith_eu()
 ENV_MAIN_MODEL = "OPENROUTER_MAIN_MODEL"
 ENV_CHEAP_MODEL = "OPENROUTER_CHEAP_MODEL"
 DEFAULT_MAIN_MODEL = "deepseek/deepseek-v3.2"
-DEFAULT_CHEAP_MODEL = ""
+DEFAULT_CHEAP_MODEL = "openrouter/free"
 
 
 def _get_main_model() -> str:
@@ -100,8 +101,8 @@ def _create_llm(model: str, api_key: str) -> ChatOpenAI:
         api_key=api_key,
         default_headers={
             "X-Title": "python_tradingbot_framework",
-            'HTTP-Referer': 'https://github.com/JustinGuese/python_tradingbot_framework',
-            "X-OpenRouter-Categories" : "personal-agent,cloud-agent"
+            "HTTP-Referer": "https://github.com/JustinGuese/python_tradingbot_framework",
+            "X-OpenRouter-Categories": "personal-agent,cloud-agent",
         },
     )
 
@@ -110,7 +111,9 @@ def _build_tools(bot: "Bot") -> list:
     """Build LangChain tools bound to the given bot (closure over bot)."""
 
     # Reject common malformed args from XML/JSON parsing (e.g. "parameter", "true")
-    _INVALID_SYMBOL_VALUES = frozenset({"parameter", "true", "false", "string", "null", ""})
+    _INVALID_SYMBOL_VALUES = frozenset(
+        {"parameter", "true", "false", "string", "null", ""}
+    )
 
     @tool
     def get_market_data(symbol: Optional[str] = None, period: str = "14d") -> str:
@@ -118,22 +121,36 @@ def _build_tools(bot: "Bot") -> list:
         Uses the bot's primary symbol if symbol is not provided.
         Period examples: 14d (two weeks), 5d, 1mo."""
         try:
-            raw = (symbol.strip() if isinstance(symbol, str) and symbol.strip() else None) or None
+            raw = (
+                symbol.strip() if isinstance(symbol, str) and symbol.strip() else None
+            ) or None
             if raw and raw.lower() in _INVALID_SYMBOL_VALUES:
-                logger.warning("get_market_data: invalid symbol value %r (likely malformed tool args)", raw)
+                logger.warning(
+                    "get_market_data: invalid symbol value %r (likely malformed tool args)",
+                    raw,
+                )
                 return f"Error: Invalid symbol value {raw!r}. Provide a valid ticker (e.g. AAPL, MSFT)."
             sym = raw or getattr(bot, "symbol", None)
             if not sym:
-                logger.warning("get_market_data: no symbol provided and bot has no primary symbol")
+                logger.warning(
+                    "get_market_data: no symbol provided and bot has no primary symbol"
+                )
                 return "Error: No symbol provided and this bot has no primary symbol. Please provide a symbol."
             # Normalize period if it got mangled (e.g. "14invoke" -> "14d")
-            if isinstance(period, str) and not (period.endswith("d") or period.endswith("mo")):
+            if isinstance(period, str) and not (
+                period.endswith("d") or period.endswith("mo")
+            ):
                 digits = "".join(c for c in period if c.isdigit())
                 if digits:
                     period = digits + "d"
                 else:
                     period = "14d"
-            logger.info("get_market_data: requested symbol=%r, period=%s, resolved sym=%r", symbol, period, sym)
+            logger.info(
+                "get_market_data: requested symbol=%r, period=%s, resolved sym=%r",
+                symbol,
+                period,
+                sym,
+            )
             data = bot.getYFData(symbol=sym, interval="1d", period=period)
             if data is None or len(data) == 0:
                 logger.warning("get_market_data: no data for sym=%r", sym)
@@ -142,10 +159,20 @@ def _build_tools(bot: "Bot") -> list:
             if "symbol" in data.columns:
                 data = data[data["symbol"] == sym].copy()
                 if data.empty:
-                    logger.warning("get_market_data: no rows for sym=%r (data had other symbols)", sym)
+                    logger.warning(
+                        "get_market_data: no rows for sym=%r (data had other symbols)",
+                        sym,
+                    )
                     return f"No market data found for {sym} over period {period}."
-            actual_symbols = data["symbol"].unique().tolist() if "symbol" in data.columns else []
-            logger.debug("get_market_data: sym=%r rows=%s actual_symbols=%s", sym, len(data), actual_symbols)
+            actual_symbols = (
+                data["symbol"].unique().tolist() if "symbol" in data.columns else []
+            )
+            logger.debug(
+                "get_market_data: sym=%r rows=%s actual_symbols=%s",
+                sym,
+                len(data),
+                actual_symbols,
+            )
             summary = (
                 f"Symbol {sym}, period {period}: {len(data)} trading intervals. "
                 f"Min Close: {data['close'].min():.2f}, Max Close: {data['close'].max():.2f}, "
@@ -154,7 +181,9 @@ def _build_tools(bot: "Bot") -> list:
             )
             return summary
         except Exception as e:
-            logger.exception("get_market_data failed: symbol=%r period=%s", symbol, period)
+            logger.exception(
+                "get_market_data failed: symbol=%r period=%s", symbol, period
+            )
             return f"Error fetching market data: {e!s}"
 
     @tool
@@ -244,7 +273,9 @@ def _build_tools(bot: "Bot") -> list:
                 est = r.eps_estimate if r.eps_estimate is not None else "N/A"
                 rep = r.reported_eps if r.reported_eps is not None else "N/A"
                 sur = f"{r.surprise_pct:.2f}%" if r.surprise_pct is not None else "N/A"
-                lines.append(f"  {r.report_date} | eps_estimate={est} | reported_eps={rep} | surprise_pct={sur}")
+                lines.append(
+                    f"  {r.report_date} | eps_estimate={est} | reported_eps={rep} | surprise_pct={sur}"
+                )
             return "Stock earnings:\n" + "\n".join(lines)
         except Exception as e:
             return f"Error fetching stock earnings: {e!s}"
@@ -272,7 +303,9 @@ def _build_tools(bot: "Bot") -> list:
                 ttype = r.transaction_type or "N/A"
                 shares = r.shares if r.shares is not None else "N/A"
                 value = f"{r.value:.2f}" if r.value is not None else "N/A"
-                lines.append(f"  {r.transaction_date} | {name} | {ttype} | shares={shares} | value={value}")
+                lines.append(
+                    f"  {r.transaction_date} | {name} | {ttype} | shares={shares} | value={value}"
+                )
             return "Stock insider trades:\n" + "\n".join(lines)
         except Exception as e:
             return f"Error fetching stock insider trades: {e!s}"
@@ -328,14 +361,25 @@ def run_ai_with_tools(
         HumanMessage(content=user_message),
     ]
     response = None
-    logger.info("run_ai_with_tools: model=%s max_tool_rounds=%s tool_count=%s", model, max_tool_rounds, len(tools_by_name))
+    logger.info(
+        "run_ai_with_tools: model=%s max_tool_rounds=%s tool_count=%s",
+        model,
+        max_tool_rounds,
+        len(tools_by_name),
+    )
     for round_num in range(max_tool_rounds):
         response = llm_with_tools.invoke(messages)
         tool_calls = getattr(response, "tool_calls", None) or []
         if not tool_calls:
-            logger.debug("run_ai_with_tools: round %s no tool_calls, done", round_num + 1)
+            logger.debug(
+                "run_ai_with_tools: round %s no tool_calls, done", round_num + 1
+            )
             break
-        logger.info("run_ai_with_tools: round %s tool_calls=%s", round_num + 1, [t.get("name") for t in tool_calls])
+        logger.info(
+            "run_ai_with_tools: round %s tool_calls=%s",
+            round_num + 1,
+            [t.get("name") for t in tool_calls],
+        )
         messages.append(response)
         for tool_call in tool_calls:
             name = tool_call.get("name")
@@ -351,15 +395,24 @@ def run_ai_with_tools(
             try:
                 result = tools_by_name[name].invoke(args)
                 content = result if isinstance(result, str) else str(result)
-                logger.info("run_ai_with_tools: tool name=%s result_len=%s preview=%s", name, len(content), (content[:80] + "..." if len(content) > 80 else content))
+                logger.info(
+                    "run_ai_with_tools: tool name=%s result_len=%s preview=%s",
+                    name,
+                    len(content),
+                    (content[:80] + "..." if len(content) > 80 else content),
+                )
             except Exception as e:
                 logger.exception("run_ai_with_tools: tool name=%s error", name)
                 content = f"Tool error: {e!s}"
             messages.append(ToolMessage(content=content, tool_call_id=tid))
     if response is None:
-        logger.warning("run_ai_with_tools: no response after %s rounds", max_tool_rounds)
+        logger.warning(
+            "run_ai_with_tools: no response after %s rounds", max_tool_rounds
+        )
         return ""
-    out = response.content if isinstance(response.content, str) else str(response.content)
+    out = (
+        response.content if isinstance(response.content, str) else str(response.content)
+    )
     logger.debug("run_ai_with_tools: final response len=%s", len(out))
     return out
 
@@ -407,14 +460,21 @@ def run_ai_simple(
             "Set it to your OpenRouter API key."
         )
     model = model or _get_cheap_model()
-    logger.debug("run_ai_simple: model=%s prompt_len=%s user_len=%s", model, len(system_prompt), len(user_message))
+    logger.debug(
+        "run_ai_simple: model=%s prompt_len=%s user_len=%s",
+        model,
+        len(system_prompt),
+        len(user_message),
+    )
     llm = _create_llm(model, api_key)
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_message),
     ]
     response = llm.invoke(messages)
-    out = response.content if isinstance(response.content, str) else str(response.content)
+    out = (
+        response.content if isinstance(response.content, str) else str(response.content)
+    )
     logger.debug("run_ai_simple: response_len=%s", len(out))
     return out
 
@@ -440,10 +500,16 @@ def run_ai_simple_with_fallback(
     check = sanity_check if sanity_check is not None else _default_sanity_check
     response = run_ai_simple(system_prompt, user_message, model=_get_cheap_model())
     sane = check(response)
-    logger.debug("run_ai_simple_with_fallback: cheap response_len=%s sane=%s", len(response), sane)
+    logger.debug(
+        "run_ai_simple_with_fallback: cheap response_len=%s sane=%s",
+        len(response),
+        sane,
+    )
     if sane:
         return response
     if fallback_to_main:
-        logger.info("run_ai_simple_with_fallback: sanity check failed, retrying with main model")
+        logger.info(
+            "run_ai_simple_with_fallback: sanity check failed, retrying with main model"
+        )
         return run_ai_simple(system_prompt, user_message, model=_get_main_model())
     return response

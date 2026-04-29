@@ -49,35 +49,79 @@ class InteractiveBrokersBroker(LiveBroker):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    def _summary_value(self, tag: str) -> float:
-        """Read a tag from accountSummary() — blocks until IB has populated it.
-        Tries USD first, falls back to the account's BASE currency entry."""
+    def _read_tags(self, tags: tuple) -> float:
+        """Look up a value across accountValues() and accountSummary().
+
+        accountValues() is fed by reqAccountUpdates (auto-issued on connect)
+        and uses tag names like 'NetLiquidationByCurrency'. accountSummary()
+        uses 'NetLiquidation'. Pass all candidate tag names. Prefers USD,
+        then BASE/empty currency."""
         self.connect(readonly=True)
+
+        def _pick(rows) -> Optional[float]:
+            usd_val = None
+            base_val = None
+            for r in rows:
+                if r.tag not in tags:
+                    continue
+                if self.account_id and getattr(r, "account", "") not in (self.account_id, "", "All"):
+                    continue
+                try:
+                    v = float(r.value)
+                except (TypeError, ValueError):
+                    continue
+                if r.currency == "USD":
+                    usd_val = v
+                elif r.currency in ("", "BASE"):
+                    base_val = v
+            if usd_val is not None:
+                return usd_val
+            if base_val is not None:
+                return base_val
+            return None
+
+        # Wait briefly for reqAccountUpdates to populate accountValues.
+        deadline = time.time() + 5.0
+        while True:
+            picked = _pick(self.ib.accountValues())
+            if picked is not None:
+                return picked
+            if time.time() >= deadline:
+                break
+            self.ib.sleep(0.25)
+
+        # Fallback: explicit accountSummary request.
         rows = self.ib.accountSummary(self.account_id) if self.account_id else self.ib.accountSummary()
-        usd_val = None
-        base_val = None
-        for r in rows:
-            if r.tag != tag:
-                continue
-            try:
-                v = float(r.value)
-            except (TypeError, ValueError):
-                continue
-            if r.currency == "USD":
-                usd_val = v
-            elif r.currency in ("", "BASE"):
-                base_val = v
-        if usd_val is not None:
-            return usd_val
-        if base_val is not None:
-            return base_val
+        picked = _pick(rows)
+        if picked is not None:
+            return picked
+        logger.warning(f"_read_tags: no value found for tags={tags} account={self.account_id}")
         return 0.0
 
     def get_cash(self) -> float:
-        return self._summary_value("TotalCashValue")
+        return self._read_tags(("TotalCashValue", "CashBalance"))
 
     def get_total_equity(self) -> float:
-        return self._summary_value("NetLiquidation")
+        equity = self._read_tags(("NetLiquidation", "NetLiquidationByCurrency"))
+        if equity > 0:
+            return equity
+        # Last-resort fallback: sum portfolio marketValue + cash. Portfolio is
+        # populated by reqAccountUpdates and we see updatePortfolio events on
+        # connect, so this should be reliable when accountValues lookup fails.
+        try:
+            items = self.ib.portfolio(self.account_id) if self.account_id else self.ib.portfolio()
+            mv = sum(float(getattr(p, "marketValue", 0.0) or 0.0) for p in items)
+            cash = self.get_cash()
+            total = mv + cash
+            if total > 0:
+                logger.warning(
+                    f"get_total_equity: NetLiquidation unavailable, "
+                    f"falling back to portfolio sum (mv=${mv:.2f} + cash=${cash:.2f}) = ${total:.2f}"
+                )
+                return total
+        except Exception as e:
+            logger.error(f"get_total_equity portfolio fallback failed: {e}")
+        return equity
 
     def get_positions(self) -> Dict[str, float]:
         self.connect(readonly=True)
@@ -99,6 +143,33 @@ class InteractiveBrokersBroker(LiveBroker):
         if price and not util.isNan(price) and price > 0:
             return float(price)
         return 0.0
+
+    def _resolve_stk_contract(self, symbol: str):
+        """Ask IB for valid listings of `symbol` and pick the best one.
+
+        Tries SMART/USD first, then any-exchange/USD, then any/any. Among the
+        results, prefers USD listings. Returns a fully-qualified contract
+        (with conId/primaryExchange) routed via SMART for execution, or None
+        if IB has no listing for this ticker."""
+        self.connect(readonly=True)
+        attempts = [Stock(symbol, "SMART", "USD"), Stock(symbol, "", "USD"), Stock(symbol, "", "")]
+        details = []
+        for c in attempts:
+            try:
+                details = self.ib.reqContractDetails(c)
+            except Exception as e:
+                logger.debug(f"reqContractDetails failed for {symbol} on {c.exchange or 'ANY'}/{c.currency or 'ANY'}: {e}")
+                details = []
+            if details:
+                break
+        if not details:
+            return None
+        usd = [d for d in details if d.contract.currency == "USD"]
+        chosen = (usd or details)[0].contract
+        # Route via SMART for execution; primaryExchange disambiguates the listing.
+        if chosen.secType == "STK" and chosen.primaryExchange and chosen.exchange != "SMART":
+            chosen.exchange = "SMART"
+        return chosen
 
     def _build_contract(self, meta: dict):
         sec_type = meta.get("sec_type", "STK")
@@ -127,8 +198,25 @@ class InteractiveBrokersBroker(LiveBroker):
         meta = self.map_symbol(yf_symbol)
         if not meta:
             raise ValueError(f"Could not map {broker_symbol} to IB contract metadata")
-        
-        contract = self._build_contract(meta)
+
+        # Contract resolution strategy:
+        #   1. SELLs: reuse the existing position's contract (correct exchange/conId).
+        #   2. STK BUYs (or SELLs on no-position): ask IB via reqContractDetails
+        #      to pick the right listing. Avoids guessing SMART/USD which fails
+        #      for non-US listings (CSNDX/EBS, ADRs, LSE/XETRA names).
+        #   3. Non-STK or unresolvable: fall back to symbol_map metadata.
+        contract = None
+        if side == "SELL":
+            for p in self.ib.positions(self.account_id):
+                if p.contract.symbol == broker_symbol and float(p.position) != 0.0:
+                    contract = p.contract
+                    break
+        if contract is None and meta.get("sec_type", "STK") == "STK":
+            contract = self._resolve_stk_contract(broker_symbol)
+            if contract is None:
+                logger.warning(f"reqContractDetails returned no listings for {broker_symbol}; falling back to symbol_map metadata")
+        if contract is None:
+            contract = self._build_contract(meta)
 
         # Stocks must be integer-quantity; floor residuals.
         final_qty = abs(quantity)
