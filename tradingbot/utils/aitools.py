@@ -6,7 +6,7 @@ endpoint (LANGSMITH_ENDPOINT) is used when not set. Set LANGSMITH_TRACING=false 
 Two LLMs are supported:
 - Main LLM (OPENROUTER_MAIN_MODEL, default deepseek/deepseek-v3.2): used by run_ai_with_tools
   for complex, multi-turn flows with tool use (market data, portfolio, trades).
-- Cheap LLM (OPENROUTER_CHEAP_MODEL, default openai/gpt-oss-120b): used by run_ai_simple for
+- Cheap LLM (OPENROUTER_CHEAP_MODEL, default openrouter/free): used by run_ai_simple for
   simple single-turn text tasks that do not need tools, e.g. summarization, extraction,
   classification, rewriting, or formatting. Prefer run_ai_simple for these to save cost.
 
@@ -75,11 +75,11 @@ def _configure_langsmith_eu() -> None:
 _configure_langsmith_eu()
 
 # Main LLM: complex tasks with tool use (run_ai_with_tools). Default: deepseek/deepseek-v3.2
-# Cheap LLM: simple single-turn text tasks (run_ai_simple). Default: openai/gpt-oss-120b
+# Cheap LLM: simple single-turn text tasks (run_ai_simple). Default: openrouter/free
 ENV_MAIN_MODEL = "OPENROUTER_MAIN_MODEL"
 ENV_CHEAP_MODEL = "OPENROUTER_CHEAP_MODEL"
 DEFAULT_MAIN_MODEL = "deepseek/deepseek-v3.2"
-DEFAULT_CHEAP_MODEL = "openai/gpt-oss-120b"
+DEFAULT_CHEAP_MODEL = ""
 
 
 def _get_main_model() -> str:
@@ -396,7 +396,7 @@ def run_ai_simple(
 ) -> str:
     """
     Run the AI for a single-turn, no-tools task (summarization, extraction, classification,
-    rewriting). Uses the cheap LLM (OPENROUTER_CHEAP_MODEL, default openai/gpt-oss-120b).
+    rewriting). Uses the cheap LLM (OPENROUTER_CHEAP_MODEL, default openrouter/free).
     Pass model= to override. Use run_ai_with_tools when you need tool access (market data,
     portfolio, trades).
     """

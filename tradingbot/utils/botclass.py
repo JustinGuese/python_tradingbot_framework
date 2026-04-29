@@ -579,7 +579,7 @@ class Bot:
         """
         Run the AI for a single-turn, no-tools task (summarization, extraction,
         classification, rewriting). Uses the cheap LLM (OPENROUTER_CHEAP_MODEL,
-        default openai/gpt-oss-120b). Use run_ai() when you need tool access.
+        default openrouter/free). Use run_ai() when you need tool access.
         """
         from .aitools import run_ai_simple as _run_ai_simple
         return _run_ai_simple(system_prompt, user_message, model=model)

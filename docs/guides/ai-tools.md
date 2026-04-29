@@ -8,7 +8,7 @@ The framework includes AI tools that let an LLM access market data, portfolio st
 ## Two LLMs: Main and Cheap
 
 - **Main LLM** (used by `run_ai` / `run_ai_with_tools` when tools are needed): complex, multi-turn flows with tool use. Set via **OPENROUTER_MAIN_MODEL**; default `deepseek/deepseek-v3.2`.
-- **Cheap LLM** (used by `run_ai_simple`): simple single-turn text tasks that do not need tools (summarization, extraction, classification, rewriting). Set via **OPENROUTER_CHEAP_MODEL**; default `openai/gpt-oss-120b`.
+- **Cheap LLM** (used by `run_ai_simple`): simple single-turn text tasks that do not need tools (summarization, extraction, classification, rewriting). Set via **OPENROUTER_CHEAP_MODEL**; default `openrouter/free`.
 
 Use the cheap LLM for tasks that only need one round of text in/out (e.g. "summarize this", "extract key points", "classify as buy/hold/sell", "rewrite in one sentence"). Use the main LLM when the model must call tools (market data, portfolio, trades).
 

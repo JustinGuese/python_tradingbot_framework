@@ -10,11 +10,10 @@ This framework allows developers to build, backtest, and deploy automated tradin
 
 ## 🚀 Why this Framework?
 
-* **Batteries Included**: 150+ Technical Indicators (RSI, MACD, etc.) ready out of the box.
-* **Infrastructure as Code**: Native Helm charts for easy scaling on K8s.
-* **Data Consistency**: Built-in caching and PostgreSQL persistence for trade history and market data.
-* **Backtesting to Production**: One class handles local testing, hyperparameter optimization, and live execution.
-
+- **Batteries Included**: 150+ Technical Indicators (RSI, MACD, etc.) ready out of the box.
+- **Infrastructure as Code**: Native Helm charts for easy scaling on K8s.
+- **Data Consistency**: Built-in caching and PostgreSQL persistence for trade history and market data.
+- **Backtesting to Production**: One class handles local testing, hyperparameter optimization, and live execution.
 
 ## 🛠 System Architecture
 
@@ -25,13 +24,12 @@ The system is designed to be lightweight and stateless. Each "Bot" is a containe
 3. **Execution**: `BotClass` manages the state of your portfolio in PostgreSQL.
 4. **Monitoring**: Real-time performance tracking via the included Dashboard.
 
-
 ## ⚡ Quick Start
 
 ### 1. Requirements
 
-* **Python 3.12+** (We recommend [uv](https://github.com/astral-sh/uv) for speed)
-* **Docker** (for local DB)
+- **Python 3.12+** (We recommend [uv](https://github.com/astral-sh/uv) for speed)
+- **Docker** (for local DB)
 
 ### 2. Launch Local Environment
 
@@ -55,7 +53,7 @@ from tradingbot.utils.botclass import Bot
 class RSIBot(Bot):
     def __init__(self):
         super().__init__("RSIBot", "AAPL", interval="1m", period="1d")
-    
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < 30: return 1  # Buy
         if row["momentum_rsi"] > 70: return -1 # Sell
@@ -86,12 +84,12 @@ class RSIBot(Bot):
         "rsi_buy": [25, 30, 35],
         "rsi_sell": [65, 70, 75],
     }
-    
+
     def __init__(self, rsi_buy=30.0, rsi_sell=70.0, **kwargs):
         super().__init__("RSIBot", "AAPL", interval="1m", period="1d", **kwargs)
         self.rsi_buy = rsi_buy
         self.rsi_sell = rsi_sell
-    
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < self.rsi_buy: return 1
         if row["momentum_rsi"] > self.rsi_sell: return -1
@@ -103,11 +101,11 @@ bot.local_development()  # Finds best params, then backtests
 ```
 
 **Key Features**:
+
 - Data pre-fetching: Historical data fetched once, reused for all parameter combinations
 - Database caching: Data persisted to DB, subsequent runs are instant
 - Parallel execution: Uses multiple CPU cores automatically
 - Automatic QuantStats reports: Generated and uploaded to Google Cloud Storage with Sharpe/return optimizations and drawdown analysis
-
 
 ## 📈 Dashboard & Monitoring
 
@@ -116,6 +114,7 @@ The framework includes a built-in visualization suite to track your bots' perfor
 ![Portfolio Overview](docs/overview.png)
 
 **Overview Dashboard** shows:
+
 - Current Worth, Total Return %, Annualized Return %
 - Sharpe Ratio, Sortino Ratio, Max Drawdown %
 - Volatility, Total Trades, Start Date
@@ -123,12 +122,12 @@ The framework includes a built-in visualization suite to track your bots' perfor
 ![Bot Detail Page](docs/detailpage.png)
 
 **Bot Detail Page** includes:
+
 - Portfolio value charts, daily returns distribution
 - Monthly returns heatmap, drawdown visualization
 - Current holdings table, complete trade history
 
 The dashboard is deployed automatically with the Helm chart. See [Deployment](#-deployment) for setup.
-
 
 ## 🏗 Deployment
 
@@ -160,7 +159,7 @@ kubectl create secret generic tradingbot-secrets \
 # helm/tradingbots/values.yaml
 bots:
   - name: rsibot
-    schedule: "*/5 * * * 1-5" # Every 5 mins, Mon-Fri
+    schedule: '*/5 * * * 1-5' # Every 5 mins, Mon-Fri
 ```
 
 **3. Deploy**:
@@ -175,10 +174,10 @@ helm upgrade --install tradingbots \
 **PostgreSQL** is automatically deployed via Helm (if `postgresql.enabled: true` in `values.yaml`).
 
 **For detailed guides**, see:
+
 - [Deployment Overview](docs/deployment/overview.md) - Complete deployment options
 - [Kubernetes Deployment](docs/deployment/kubernetes.md) - Cluster setup
 - [Helm Charts](docs/deployment/helm.md) - Configuration details
-
 
 ## 🧰 Developer Reference
 
@@ -245,22 +244,22 @@ def makeOneIteration(self):
 
 ### Key Methods
 
-| Method | Description |
-| --- | --- |
-| `getYFDataWithTA()` | Fetches OHLCV + 150 indicators. |
-| `decisionFunction(row)` | Logic applied to every candle. Return `-1, 0, 1`. |
-| `makeOneIteration()` | Override for custom logic. |
-| `local_backtest()` | Simulates strategy performance on historical data. |
-| `local_development()` | Optimize hyperparameters + backtest. |
-| `buy(symbol)` / `sell(symbol)` | Automated portfolio and DB logging. |
-| `rebalancePortfolio(weights)` | Rebalance to target weights. |
-| `run_ai(system_prompt, user_message)` | Runs AI with tools (main LLM); returns model response. Requires `OPENROUTER_API_KEY`. |
-| `run_ai_simple(system_prompt, user_message)` | Single-turn, no tools (cheap LLM); for summarization, extraction, classification. |
-| `run_ai_simple_with_fallback(system_prompt, user_message, sanity_check=..., fallback_to_main=True)` | Cheap LLM first; validates output; retries with main LLM if sanity check fails. |
+| Method                                                                                              | Description                                                                           |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `getYFDataWithTA()`                                                                                 | Fetches OHLCV + 150 indicators.                                                       |
+| `decisionFunction(row)`                                                                             | Logic applied to every candle. Return `-1, 0, 1`.                                     |
+| `makeOneIteration()`                                                                                | Override for custom logic.                                                            |
+| `local_backtest()`                                                                                  | Simulates strategy performance on historical data.                                    |
+| `local_development()`                                                                               | Optimize hyperparameters + backtest.                                                  |
+| `buy(symbol)` / `sell(symbol)`                                                                      | Automated portfolio and DB logging.                                                   |
+| `rebalancePortfolio(weights)`                                                                       | Rebalance to target weights.                                                          |
+| `run_ai(system_prompt, user_message)`                                                               | Runs AI with tools (main LLM); returns model response. Requires `OPENROUTER_API_KEY`. |
+| `run_ai_simple(system_prompt, user_message)`                                                        | Single-turn, no tools (cheap LLM); for summarization, extraction, classification.     |
+| `run_ai_simple_with_fallback(system_prompt, user_message, sanity_check=..., fallback_to_main=True)` | Cheap LLM first; validates output; retries with main LLM if sanity check fails.       |
 
 ### AI Tools (LangChain + OpenRouter)
 
-Two LLMs: **main** (OPENROUTER_MAIN_MODEL, default `deepseek/deepseek-v3.2`) for tool-using flows; **cheap** (OPENROUTER_CHEAP_MODEL, default `openai/gpt-oss-120b`) for simple single-turn text tasks. Set `OPENROUTER_API_KEY` (required); optionally set the two model env vars.
+Two LLMs: **main** (OPENROUTER_MAIN_MODEL, default `deepseek/deepseek-v3.2`) for tool-using flows; **cheap** (OPENROUTER_CHEAP_MODEL, default `openrouter/free`) for simple single-turn text tasks. Set `OPENROUTER_API_KEY` (required); optionally set the two model env vars.
 
 **With tools (main LLM):**
 
@@ -321,40 +320,43 @@ Access via: `bot.dbBot.portfolio.get("USD", 0)`
 
 Access over 150 indicators via the `row` object:
 
-* **Trend**: `trend_macd`, `trend_adx`, `trend_ichimoku_a`, `trend_sma_fast`, `trend_sma_slow`
-* **Momentum**: `momentum_rsi`, `momentum_stoch`, `momentum_ao`, `momentum_roc`, `momentum_ppo`
-* **Volatility**: `volatility_bbh` (Bollinger High), `volatility_bbl` (Bollinger Low), `volatility_atr`
-* **Volume**: `volume_vwap`, `volume_obv`, `volume_mfi`
+- **Trend**: `trend_macd`, `trend_adx`, `trend_ichimoku_a`, `trend_sma_fast`, `trend_sma_slow`
+- **Momentum**: `momentum_rsi`, `momentum_stoch`, `momentum_ao`, `momentum_roc`, `momentum_ppo`
+- **Volatility**: `volatility_bbh` (Bollinger High), `volatility_bbl` (Bollinger Low), `volatility_atr`
+- **Volume**: `volume_vwap`, `volume_obv`, `volume_mfi`
 
 See [Technical Analysis Guide](docs/guides/technical-analysis.md) for complete list.
-
 
 ## 📖 Documentation
 
 **Online Documentation**: [justinguese.github.io/python_tradingbot_framework/](https://justinguese.github.io/python_tradingbot_framework/)
 
 ### Getting Started
-* [Quick Start Guide](docs/getting-started/quick-start.md) - Complete local development workflow with PostgreSQL setup, bot creation at different abstraction levels, backtesting, and hyperparameter tuning
-* [Installation](docs/getting-started/installation.md) - System requirements and dependency installation
-* [Creating a Bot](docs/getting-started/creating-a-bot.md) - Detailed bot creation patterns and examples
+
+- [Quick Start Guide](docs/getting-started/quick-start.md) - Complete local development workflow with PostgreSQL setup, bot creation at different abstraction levels, backtesting, and hyperparameter tuning
+- [Installation](docs/getting-started/installation.md) - System requirements and dependency installation
+- [Creating a Bot](docs/getting-started/creating-a-bot.md) - Detailed bot creation patterns and examples
 
 ### Deployment
-* [Deployment Overview](docs/deployment/overview.md) - Kubernetes vs local deployment options
-* [Kubernetes Deployment](docs/deployment/kubernetes.md) - Cluster setup and configuration
-* [Helm Charts](docs/deployment/helm.md) - Bot scheduling and Helm configuration
+
+- [Deployment Overview](docs/deployment/overview.md) - Kubernetes vs local deployment options
+- [Kubernetes Deployment](docs/deployment/kubernetes.md) - Cluster setup and configuration
+- [Helm Charts](docs/deployment/helm.md) - Bot scheduling and Helm configuration
 
 ### Guides
-* [Technical Analysis](docs/guides/technical-analysis.md) - Complete indicator reference
-* [Portfolio Management](docs/guides/portfolio-management.md) - Advanced portfolio operations
-* [Local Development](docs/guides/local-development.md) - Development workflows
-* [AI Tools](docs/guides/ai-tools.md) - LangChain + OpenRouter tools; cheap-first with fallback and sanity checks
-* [Telegram Monitor](docs/guides/telegram-monitor.md) - Channel monitoring, AI summarization, ticker extraction
+
+- [Technical Analysis](docs/guides/technical-analysis.md) - Complete indicator reference
+- [Portfolio Management](docs/guides/portfolio-management.md) - Advanced portfolio operations
+- [Local Development](docs/guides/local-development.md) - Development workflows
+- [AI Tools](docs/guides/ai-tools.md) - LangChain + OpenRouter tools; cheap-first with fallback and sanity checks
+- [Telegram Monitor](docs/guides/telegram-monitor.md) - Channel monitoring, AI summarization, ticker extraction
 
 ### API Reference
-* [Bot API](docs/api/bot.md) - Complete Bot class documentation
-* [Data Service](docs/api/data-service.md) - Data fetching and caching
-* [Portfolio Manager](docs/api/portfolio-manager.md) - Trading operations
-* [AITools API](docs/api/aitools.md) - `run_ai_with_tools`, `run_ai_simple`, `run_ai_simple_with_fallback`
+
+- [Bot API](docs/api/bot.md) - Complete Bot class documentation
+- [Data Service](docs/api/data-service.md) - Data fetching and caching
+- [Portfolio Manager](docs/api/portfolio-manager.md) - Trading operations
+- [AITools API](docs/api/aitools.md) - `run_ai_with_tools`, `run_ai_simple`, `run_ai_simple_with_fallback`
 
 ## 📡 Telegram Channel Monitor
 
@@ -364,9 +366,9 @@ The framework includes an optional **Telegram channel monitor** that polls chann
 # helm/tradingbots/values.yaml
 telegramMonitor:
   enabled: true
-  schedule: "*/30 * * * *"          # Every 30 minutes
-  channels: "some_news_channel,-1001234567890"
-  fetchLimit: "50"
+  schedule: '*/30 * * * *' # Every 30 minutes
+  channels: 'some_news_channel,-1001234567890'
+  fetchLimit: '50'
 ```
 
 **How it works**: Runs as a CronJob — connects via a Telethon StringSession (no persistent process), fetches recent messages, skips already-stored ones, summarizes each with the cheap LLM, and persists to `telegram_messages` table with `channel`, `text`, `summary`, `symbol`, and `published_at`.
@@ -385,6 +387,7 @@ The framework can mirror your paper-bot portfolios to a live brokerage account. 
 ### 1. Configure Environment
 
 Add these to your `.env` or Kubernetes secrets:
+
 ```bash
 # Collective2
 COLLECTIVE2_API_KEY=your_api_key
@@ -434,6 +437,7 @@ uv run python -m tradingbot.livetrade.discover_symbols --apply
 ### 3. Deploy the Copier
 
 The copier runs as a standalone script per broker. Deploy as a CronJob to run shortly after your trading bots:
+
 ```bash
 # Collective2
 uv run python tradingbot/livetrade_collective2.py
@@ -448,13 +452,13 @@ See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configura
 
 ## 🎯 Example Bots
 
-* **eurusdtreebot.py** - Decision tree-based strategy for EUR/USD
-* **feargreedbot.py** - Uses Fear & Greed Index API for market sentiment
-* **swingtitaniumbot.py** - Swing trading strategy
-* **xauzenbot.py** - Gold (XAU) trading bot
-* **sharpeportfoliooptweekly.py** - Portfolio optimization with Sharpe ratio
-* **aihedgefundbot.py** - AI-driven portfolio rebalancing
-* **deepseektoolbot.py** - AI with tools (research + submit weights); cheap LLM sanity-check and main-LLM retry
-* **gptbasedstrategytabased.py** - GPT-based strategy with technical analysis
+- **eurusdtreebot.py** - Decision tree-based strategy for EUR/USD
+- **feargreedbot.py** - Uses Fear & Greed Index API for market sentiment
+- **swingtitaniumbot.py** - Swing trading strategy
+- **xauzenbot.py** - Gold (XAU) trading bot
+- **sharpeportfoliooptweekly.py** - Portfolio optimization with Sharpe ratio
+- **aihedgefundbot.py** - AI-driven portfolio rebalancing
+- **deepseektoolbot.py** - AI with tools (research + submit weights); cheap LLM sanity-check and main-LLM retry
+- **gptbasedstrategytabased.py** - GPT-based strategy with technical analysis
 
 See [Example Bots](docs/examples/example-bots.md) for implementation details.
