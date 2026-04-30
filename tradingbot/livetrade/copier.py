@@ -206,5 +206,34 @@ class LiveTradeCopier:
             logger.info(f"Waiting {self.settle_delay_seconds:.0f}s for sells to settle before buying...")
             time.sleep(self.settle_delay_seconds)
 
+        # Buys are sized against total equity, but brokers enforce margin/cash
+        # at submission time. If sells haven't fully settled (common on C2
+        # paper accounts) the broker rejects with a PreMarginCheck error.
+        # Clamp total buy notional to currently-available cash, with a small
+        # safety buffer for slippage between price snapshot and fill.
+        if buys and not self.dry_run:
+            try:
+                available_cash = self.broker.get_cash()
+            except Exception as e:
+                logger.warning(f"Could not fetch cash for buy clamp: {e}; submitting buys unscaled")
+                available_cash = None
+
+            if available_cash is not None and available_cash > 0:
+                total_buy = sum(o["value"] for o in buys)
+                budget = available_cash * 0.98  # 2% buffer for price drift
+                if total_buy > budget:
+                    scale = budget / total_buy
+                    logger.warning(
+                        f"Buy notional ${total_buy:.2f} exceeds available cash "
+                        f"${available_cash:.2f}; scaling buys by {scale:.4f}"
+                    )
+                    for o in buys:
+                        o["quantity"] *= scale
+                        o["value"] *= scale
+                    buys = [o for o in buys if o["value"] >= self.min_order_usd]
+            elif available_cash is not None:
+                logger.error(f"Available cash is ${available_cash:.2f}; skipping all buys")
+                buys = []
+
         for o in buys:
             _submit(o)

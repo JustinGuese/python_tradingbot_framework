@@ -827,7 +827,15 @@ with get_db_session() as s:
 
 Only use `create_or_get_bot` when the caller genuinely owns the bot's identity (i.e., the bot itself, registering on first run).
 
-### 9. `POSTGRES_URI` Required Even for Non-DB Tests
+### 9. LiveTrade Buy Sizing — Clamp to Cash, Not Equity
+
+**Problem**: `LiveTradeCopier` sizes buy orders against `total_equity` (broker's `ModelAccountValue` for C2, NetLiquidation for IB). But brokers run a margin/cash check at order submission and reject if cash < notional. Sells in the same sync don't necessarily release cash before the buy batch fires (C2 paper accounts in particular are slow to settle), so a target like 100% QQQ on a previously-diversified account will get rejected even though equity covers it. Symptom on C2: `PreMarginCheck api2 b cs` — "Current account cash is $X; proposed trade requires cash of $Y".
+
+**Solution**: `_execute_orders` re-fetches `broker.get_cash()` after the settle delay and scales all buys proportionally if their total notional exceeds available cash (with a 2% buffer). Buys that scale below `min_order_usd` are dropped. Don't skip the cash clamp by sizing buys against equity directly — settlement timing is broker-specific and not something the copier should pretend to know.
+
+If buys are still rejected, bump `LIVETRADE_SETTLE_DELAY_SECONDS` (defaults to 10s — too short for C2 paper).
+
+### 10. `POSTGRES_URI` Required Even for Non-DB Tests
 
 **Problem**: `pytest tests/...` fails with `KeyError: 'Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection'` even when running tests that don't touch the DB (e.g. pure-mock tests under `tests/test_livetrade.py`).
 
