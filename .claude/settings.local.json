@@ -1,9 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api-portal.etoro.com)",
+      "WebFetch(domain:skills.bullaware.com)",
+      "WebSearch"
     ]
   }
 }

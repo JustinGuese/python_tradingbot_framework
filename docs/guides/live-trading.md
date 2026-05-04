@@ -6,7 +6,7 @@
 The Trading Bot Framework can mirror your paper-trade portfolios (stored in PostgreSQL) to a live brokerage account. This is handled by a separate **Live Trade Copier** layer that runs independently of your bots.
 
 > [!CAUTION]
-> **ALPHA STATUS**: The live-trade copier is currently in Alpha. While endpoints have been validated against broker APIs (C2 v4), behavior has not yet been confirmed against a live capital account. Use extreme caution and start with very low weights.
+> **ALPHA STATUS**: The live-trade copier is currently in Alpha. While endpoints have been validated against broker APIs (C2 v4, IB, eToro), behavior has not yet been confirmed against a live capital account. Use extreme caution and start with very low weights.
 
 ---
 
@@ -43,10 +43,13 @@ uv run python tradingbot/livetrade/collective2.py
 # Connects read-only with IB_CLIENT_ID=19 by default so it won't collide
 # with the cron client (17) or the vscode debug config (18).
 uv run python tradingbot/livetrade/interactive_brokers.py
+
+# eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
+uv run python tradingbot/livetrade/etoro.py
 ```
 
-Programmatically, both brokers expose `print_account_summary()` on the broker
-class, so you can call it from any script after constructing the broker.
+All brokers expose `print_account_summary()` on the broker class, so you can
+call it from any script after constructing the broker.
 
 ---
 
@@ -84,6 +87,13 @@ If you have $100,000 in your live account and configure:
 | --- | --- |
 | `COLLECTIVE2_API_KEY` | Your C2 API v4 key. Get it from the [C2 API Dashboard](https://collective2.com/account-management/apiv4/dashboard/0). |
 | `COLLECTIVE2_SYSTEM_ID` | The ID of your C2 strategy. |
+| `IB_GATEWAY_HOST` | Hostname or IP of IB Gateway (default: `127.0.0.1`). |
+| `IB_GATEWAY_PORT` | API port for IB Gateway (default: `4004`). |
+| `IB_CLIENT_ID` | Unique client ID for the copier (default: `17`). **Do not use Master Client ID (0).** |
+| `IB_ACCOUNT_ID` | Your Interactive Brokers account ID (e.g., `DU1234567` for paper, `U1234567` for live). |
+| `ETORO_API_KEY` | Your eToro Public API Key from the [eToro API Portal](https://api-portal.etoro.com/). |
+| `ETORO_USER_KEY` | Your eToro User Key (generated in API Portal settings). |
+| `ETORO_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
 | `LIVETRADE_BOT_WEIGHTS` | JSON: `{"botname": 0.6, "otherbot": 0.4}`. Weights are normalized to 1.0. |
 | `LIVETRADE_MIN_ORDER_USD` | Skip trades smaller than this amount (default: $50). |
 | `LIVETRADE_DRY_RUN` | `true`: Logs orders without sending them. **Always start here.** |
@@ -92,7 +102,7 @@ If you have $100,000 in your live account and configure:
 
 ### Enabling the Copiers in Helm
 
-Each broker is its own CronJob, gated by a separate flag in [helm/tradingbots/values.yaml](../../helm/tradingbots/values.yaml). Both default to `false` — opt in independently:
+Each broker is its own CronJob, gated by a separate flag in [helm/tradingbots/values.yaml](../../helm/tradingbots/values.yaml). All default to `false` — opt in independently:
 
 ```yaml
 liveTrade:
@@ -101,9 +111,12 @@ liveTrade:
 liveTradeIB:
   enabled: true     # Interactive Brokers copier
   # ...
+liveTradeEToro:
+  enabled: true     # eToro copier
+  # ...
 ```
 
-You can run only Collective2, only IBKR, both, or neither.
+You can run any combination of brokers (Collective2, IBKR, eToro), or none.
 
 ---
 
@@ -140,6 +153,37 @@ uv run python tradingbot/livetrade_interactive_brokers.py
 ### 4. Ticker Discovery for IB
 ```bash
 uv run python -m tradingbot.livetrade.discover_symbols --broker ib
+```
+
+---
+
+## 🐂 eToro
+
+The framework supports eToro via their Public REST API.
+
+### 1. Requirements
+- **eToro Public API Key & User Key**. Obtain them from the [eToro API Portal](https://api-portal.etoro.com/).
+- **Paper Account** (Virtual Portfolio) is strongly recommended. Set `ETORO_DEMO=true`.
+
+### 2. Configuration
+Set these environment variables:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `ETORO_API_KEY` | Your eToro API Key. | **Required** |
+| `ETORO_USER_KEY` | Your eToro User Key. | **Required** |
+| `ETORO_DEMO` | `true` for paper trading, `false` for live. | `true` |
+| `LIVETRADE_DRY_RUN` | Safety: defaults to `true`. | `true` |
+
+### 3. Order Model (USD Amount)
+eToro orders are placed using **USD Amount** (notional) for BUY orders, which allows for fractional shares automatically. For SELL orders, the framework closes existing positions by their `positionId`.
+
+### 4. Ticker Mapping
+eToro uses numeric **Instrument IDs**. The framework automatically resolves these via the eToro search API during the mapping phase.
+
+### 5. Usage
+```bash
+uv run python tradingbot/livetrade_etoro.py
 ```
 
 ---

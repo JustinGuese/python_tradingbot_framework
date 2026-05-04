@@ -249,6 +249,13 @@ liveTrade:
     clientId: "17"
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
+  # eToro — requires ETORO_API_KEY and ETORO_USER_KEY in tradingbot-secrets.
+  etoro:
+    enabled: false
+    schedule: "30 21 * * 1-5" # 9:30 PM UTC
+    demo: true
+    # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
+
 # telegram monitor
 telegramMonitor:
   enabled: true # Set to true to deploy the Telegram monitor CronJob

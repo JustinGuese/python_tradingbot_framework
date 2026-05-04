@@ -377,12 +377,12 @@ telegramMonitor:
 
 See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
-## 📈 Live Trading (Collective2 & Interactive Brokers)
+## 📈 Live Trading (Collective2, Interactive Brokers & eToro)
 
 > [!WARNING]
 > **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4) and **Interactive Brokers** (via IB Gateway / `ib_async`).
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (via IB Gateway / `ib_async`), and **eToro** (Public REST API).
 
 ### 1. Configure Environment
 
@@ -398,6 +398,11 @@ IB_GATEWAY_HOST=127.0.0.1
 IB_GATEWAY_PORT=4004
 IB_CLIENT_ID=17
 IB_ACCOUNT_ID=DU1234567   # paper accounts start with DU; live with U
+
+# eToro (Public REST API)
+ETORO_API_KEY=your_public_key
+ETORO_USER_KEY=your_user_key
+ETORO_DEMO=true             # true for demo/paper, false for live
 
 # Shared
 LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
@@ -417,6 +422,9 @@ uv run python tradingbot/livetrade/collective2.py
 # Interactive Brokers (read-only connection; uses IB_CLIENT_ID=19 by default
 # so it won't collide with the cron client id 17 or vscode debug 18)
 uv run python tradingbot/livetrade/interactive_brokers.py
+
+# eToro (reads ETORO_API_KEY, ETORO_USER_KEY, ETORO_DEMO from .env)
+uv run python tradingbot/livetrade/etoro.py
 ```
 
 ### 2. Map Your Tickers
@@ -444,9 +452,12 @@ uv run python tradingbot/livetrade_collective2.py
 
 # Interactive Brokers
 uv run python tradingbot/livetrade_interactive_brokers.py
+
+# eToro
+uv run python tradingbot/livetrade_etoro.py
 ```
 
-Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.enabled` for Collective2, `liveTradeIB.enabled` for IBKR), so you can run only one, both, or neither. Both default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).
+Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.enabled` for Collective2, `liveTradeIB.enabled` for IBKR, `liveTradeEToro.enabled` for eToro), so you can run any combination or none. All default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).
 
 See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configuration and mapping rules.
 

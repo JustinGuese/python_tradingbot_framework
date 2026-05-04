@@ -835,7 +835,35 @@ Only use `create_or_get_bot` when the caller genuinely owns the bot's identity (
 
 If buys are still rejected, bump `LIVETRADE_SETTLE_DELAY_SECONDS` (defaults to 10s — too short for C2 paper).
 
-### 10. `POSTGRES_URI` Required Even for Non-DB Tests
+### 10. eToro Broker — API Quirks
+
+The eToro Public API (`https://public-api.etoro.com`, `/api/v1` prefix) has a number of non-obvious requirements. All of these were learned the hard way during the `livetrade/etoro.py` integration.
+
+**Auth**: two headers from the API portal's "Generated Keys" section:
+- `x-api-key` = the JWT-style token (looks like `eyJ...`)
+- `x-user-key` = the static alphanumeric string
+- Plus `x-request-id` (UUID) per request — required, not optional.
+
+**Path prefix for demo vs live**: `api/v1/trading/...` for live, `api/v1/trading/.../demo/...` for paper. The demo segment goes between `info`/`execution` and the resource (e.g. `api/v1/trading/info/demo/portfolio`). Same applies to execution endpoints.
+
+**Portfolio response shape** (`/api/v1/trading/info/{demo/}portfolio`):
+- Top-level envelope is `clientPortfolio`, **not** `portfolio`.
+- Cash field is `credit` (not `cash` or `equity`).
+- No `equity` field — compute as `credit + sum(units * currentPrice)` from positions.
+- Position fields use uppercase `ID`: `instrumentID`, `positionID` (not `instrumentId`).
+
+**Search API** (`/api/v1/market-data/search`):
+- `fields` query param is **required** (e.g. `fields=instrumentId,internalSymbolFull,symbol`). Without it, results come back empty.
+- Response key is `items`, not `results`.
+- For yfinance crypto tickers like `BTC-USD`, strip the `-USD`/`-USDT` suffix before passing as `internalSymbolFull` — eToro uses bare `BTC`.
+
+**Price endpoint**: `/api/v1/market-data/instruments` is metadata-only (no price). Use `/api/v1/market-data/instruments/rates?instrumentIds=...` instead. Response shape: `{"rates": [{"lastExecution": ..., "bid": ..., "ask": ...}]}`. Supports up to 100 IDs per call.
+
+**SELL close orders** (`POST .../market-close-orders/positions/{positionId}`):
+- Body must include `{"InstrumentId": <int>}` even though the position ID is in the path. Missing instrument ID → HTTP 400 "InstrumentId: The instrument id does not exist".
+- httpx with `json=None` omits the body **and** the `Content-Type` header → eToro returns 415 Unsupported Media Type. Always pass at least `{}` (or the InstrumentId payload above).
+
+### 11. `POSTGRES_URI` Required Even for Non-DB Tests
 
 **Problem**: `pytest tests/...` fails with `KeyError: 'Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection'` even when running tests that don't touch the DB (e.g. pure-mock tests under `tests/test_livetrade.py`).
 

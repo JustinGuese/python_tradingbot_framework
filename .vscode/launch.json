@@ -45,6 +45,33 @@
       }
     },
     {
+      "name": "LiveTrade: eToro (paper)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade_etoro.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LIVETRADE_DRY_RUN": "false",
+        "ETORO_DEMO": "true",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
+      "name": "Print Portfolio: eToro",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade/etoro.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "ETORO_DEMO": "true",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
       "name": "Print Portfolio: Collective2",
       "type": "debugpy",
       "request": "launch",
