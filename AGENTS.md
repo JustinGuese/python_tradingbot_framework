@@ -863,7 +863,35 @@ The eToro Public API (`https://public-api.etoro.com`, `/api/v1` prefix) has a nu
 - Body must include `{"InstrumentId": <int>}` even though the position ID is in the path. Missing instrument ID → HTTP 400 "InstrumentId: The instrument id does not exist".
 - httpx with `json=None` omits the body **and** the `Content-Type` header → eToro returns 415 Unsupported Media Type. Always pass at least `{}` (or the InstrumentId payload above).
 
-### 11. `POSTGRES_URI` Required Even for Non-DB Tests
+### 11. Darwinex (DXtrade) Broker — API Quirks
+
+The Darwinex DXtrade API (`/dxsca-web`) has its own set of nuances.
+
+**Auth**: Session-token based.
+- `POST /login` with `{"username", "password", "domain": "default"}` returns `sessionToken`.
+- Subsequent requests require `Authorization: DXAPI <token>` header.
+- Tokens expire (typically 24h, but v1 implementation refreshes on 401 or after 2h).
+
+**Account Selection**: A single user may have multiple accounts.
+- Use `GET /users/{username}/accounts` to list them.
+- If `DARWINEX_ACCOUNT_ID` is not provided, the broker picks the first one from this list.
+
+**Portfolio & Metrics**:
+- Metrics (`GET /accounts/{id}/metrics`): Returns `balance` (cash) and `equity` (MTM value).
+- Portfolio (`GET /accounts/{id}/portfolio`): Returns a list of `positions`.
+- DXtrade nets positions automatically; `get_positions()` aggregates by `instrumentCode`.
+- Position quantity is signed based on `side` (BUY = positive, SELL = negative).
+
+**Symbol Mapping (CFD Catalog)**:
+- Darwinex is a CFD-only broker. Equities are often suffixed with `.US` (e.g., `AAPL.US`).
+- `map_symbol()` first checks the manual `symbol_map.json`, then performs a catalog search (`GET /instruments?symbol=...`) for both the bare ticker and the `.US` variant.
+- Catalog search results can be a list or wrapped in an `instruments` key; implementation handles both.
+
+**No Native Last Price**:
+- The REST API does not provide a simple snapshot "last price" endpoint. Quotes are WebSocket-only (`/md`).
+- `_get_native_price()` returns `0.0`, triggering the base class's **yfinance fallback** for all order sizing and equity calculations.
+
+### 12. `POSTGRES_URI` Required Even for Non-DB Tests
 
 **Problem**: `pytest tests/...` fails with `KeyError: 'Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection'` even when running tests that don't touch the DB (e.g. pure-mock tests under `tests/test_livetrade.py`).
 

@@ -53,7 +53,7 @@ from ..hyperparameter_tuning import (
     get_default_param_grid,
     tune_hyperparameters,
 )
-from ...livetrade import (
+from livetrade import (
     LiveBroker,
     Collective2Broker,
     LiveTradeCopier,

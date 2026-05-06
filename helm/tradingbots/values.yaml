@@ -256,6 +256,14 @@ liveTrade:
     demo: true
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
+  # Darwinex — requires DARWINEX_USERNAME and DARWINEX_PASSWORD in tradingbot-secrets.
+  darwinex:
+    enabled: false
+    schedule: "40 21 * * 1-5" # 9:40 PM UTC
+    demo: true
+    # accountId: "12345" # optional: defaults to first found account
+    # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
+
 # telegram monitor
 telegramMonitor:
   enabled: true # Set to true to deploy the Telegram monitor CronJob

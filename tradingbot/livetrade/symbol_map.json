@@ -11,6 +11,20 @@
       "type": "stock",
       "verified": "2026-04-28",
       "source": "human"
+    },
+    "darwinex": {
+      "symbol": "QQQ.US",
+      "type": "stock",
+      "verified": "2026-05-04",
+      "source": "human"
+    }
+  },
+  "SPY": {
+    "darwinex": {
+      "symbol": "SPY.US",
+      "type": "stock",
+      "verified": "2026-05-04",
+      "source": "human"
     }
   }
 }

@@ -10,6 +10,8 @@ from typing import Set, List, Dict
 from .symbol_map import SymbolMapper
 from .collective2 import Collective2Broker
 from .interactive_brokers import InteractiveBrokersBroker
+from .etoro import EtoroBroker
+from .darwinex import DarwinexBroker
 from utils.db import get_db_session, Bot as BotModel, Trade
 from utils.bot_repository import BotRepository
 
@@ -161,7 +163,7 @@ def main():
     parser = argparse.ArgumentParser(description="Discover and map yfinance tickers to broker symbols.")
     parser.add_argument("--apply", action="store_true", help="Merge approved entries from review file")
     parser.add_argument("--review-file", default="symbol_map.review.json", help="Path to review file")
-    parser.add_argument("--broker", default="c2", choices=["c2", "ib"], help="Broker to use for search (c2 or ib)")
+    parser.add_argument("--broker", default="c2", choices=["c2", "ib", "etoro", "darwinex"], help="Broker to use for search")
     
     args = parser.parse_args()
     
@@ -171,6 +173,19 @@ def main():
         account_id = os.getenv("IB_ACCOUNT_ID", "")
         broker = InteractiveBrokersBroker(host=host, port=port, account_id=account_id)
         logger.info(f"Using Interactive Brokers at {host}:{port}")
+    elif args.broker == "etoro":
+        api_key = os.getenv("ETORO_API_KEY", "")
+        user_key = os.getenv("ETORO_USER_KEY", "")
+        demo = os.getenv("ETORO_DEMO", "true").lower() == "true"
+        broker = EtoroBroker(api_key=api_key, user_key=user_key, demo=demo)
+        logger.info(f"Using eToro (Demo: {demo})")
+    elif args.broker == "darwinex":
+        username = os.getenv("DARWINEX_USERNAME", "")
+        password = os.getenv("DARWINEX_PASSWORD", "")
+        account_id = os.getenv("DARWINEX_ACCOUNT_ID")
+        demo = os.getenv("DARWINEX_DEMO", "true").lower() == "true"
+        broker = DarwinexBroker(username=username, password=password, account_id=account_id, demo=demo)
+        logger.info(f"Using Darwinex (Demo: {demo})")
     else:
         api_key = os.getenv("COLLECTIVE2_API_KEY", "")
         system_id = os.getenv("COLLECTIVE2_SYSTEM_ID", "")

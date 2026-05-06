@@ -59,6 +59,33 @@
       }
     },
     {
+      "name": "LiveTrade: Darwinex (paper)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade_darwinex.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LIVETRADE_DRY_RUN": "false",
+        "DARWINEX_DEMO": "true",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
+      "name": "Print Portfolio: Darwinex",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade/darwinex.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "DARWINEX_DEMO": "true",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
       "name": "Print Portfolio: eToro",
       "type": "debugpy",
       "request": "launch",

@@ -377,12 +377,12 @@ telegramMonitor:
 
 See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
-## 📈 Live Trading (Collective2, Interactive Brokers & eToro)
+## 📈 Live Trading (Collective2, Interactive Brokers, eToro & Darwinex)
 
 > [!WARNING]
 > **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (via IB Gateway / `ib_async`), and **eToro** (Public REST API).
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (via IB Gateway / `ib_async`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
 
 ### 1. Configure Environment
 
@@ -403,6 +403,12 @@ IB_ACCOUNT_ID=DU1234567   # paper accounts start with DU; live with U
 ETORO_API_KEY=your_public_key
 ETORO_USER_KEY=your_user_key
 ETORO_DEMO=true             # true for demo/paper, false for live
+
+# Darwinex (DXtrade API)
+DARWINEX_USERNAME=your_username
+DARWINEX_PASSWORD=your_password
+DARWINEX_ACCOUNT_ID=12345   # optional
+DARWINEX_DEMO=true          # true for demo/paper, false for live
 
 # Shared
 LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
@@ -425,6 +431,9 @@ uv run python tradingbot/livetrade/interactive_brokers.py
 
 # eToro (reads ETORO_API_KEY, ETORO_USER_KEY, ETORO_DEMO from .env)
 uv run python tradingbot/livetrade/etoro.py
+
+# Darwinex (reads DARWINEX_USERNAME, DARWINEX_PASSWORD, DARWINEX_DEMO from .env)
+uv run python tradingbot/livetrade/darwinex.py
 ```
 
 ### 2. Map Your Tickers
@@ -455,9 +464,12 @@ uv run python tradingbot/livetrade_interactive_brokers.py
 
 # eToro
 uv run python tradingbot/livetrade_etoro.py
+
+# Darwinex
+uv run python tradingbot/livetrade_darwinex.py
 ```
 
-Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.enabled` for Collective2, `liveTradeIB.enabled` for IBKR, `liveTradeEToro.enabled` for eToro), so you can run any combination or none. All default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).
+Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.collective2.enabled`, `liveTrade.interactiveBrokers.enabled`, `liveTrade.etoro.enabled`, `liveTrade.darwinex.enabled`), so you can run any combination or none. All default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).
 
 See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configuration and mapping rules.
 

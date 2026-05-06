@@ -6,7 +6,7 @@
 The Trading Bot Framework can mirror your paper-trade portfolios (stored in PostgreSQL) to a live brokerage account. This is handled by a separate **Live Trade Copier** layer that runs independently of your bots.
 
 > [!CAUTION]
-> **ALPHA STATUS**: The live-trade copier is currently in Alpha. While endpoints have been validated against broker APIs (C2 v4, IB, eToro), behavior has not yet been confirmed against a live capital account. Use extreme caution and start with very low weights.
+> **ALPHA STATUS**: The live-trade copier is currently in Alpha. While endpoints have been validated against broker APIs (C2 v4, IB, eToro, Darwinex), behavior has not yet been confirmed against a live capital account. Use extreme caution and start with very low weights.
 
 ---
 
@@ -16,14 +16,14 @@ You can verify the copier logic immediately without any complex setup.
 
 1.  **Set Environment Variables**:
     ```bash
-    export COLLECTIVE2_API_KEY="your_api_v4_key"
-    export COLLECTIVE2_SYSTEM_ID="12345678"
+    export DARWINEX_USERNAME="your_username"
+    export DARWINEX_PASSWORD="your_password"
     export LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
     export LIVETRADE_DRY_RUN=true
     ```
 2.  **Run the Copier**:
     ```bash
-    uv run python tradingbot/livetrade_collective2.py
+    uv run python tradingbot/livetrade_darwinex.py
     ```
 3.  **Review the Log**: Look for `[DRY RUN] Would BUY/SELL ...` lines to see what the copier would have done.
 
@@ -46,6 +46,9 @@ uv run python tradingbot/livetrade/interactive_brokers.py
 
 # eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
 uv run python tradingbot/livetrade/etoro.py
+
+# Darwinex — reads DARWINEX_USERNAME + DARWINEX_PASSWORD + DARWINEX_DEMO
+uv run python tradingbot/livetrade/darwinex.py
 ```
 
 All brokers expose `print_account_summary()` on the broker class, so you can
@@ -94,6 +97,10 @@ If you have $100,000 in your live account and configure:
 | `ETORO_API_KEY` | Your eToro Public API Key from the [eToro API Portal](https://api-portal.etoro.com/). |
 | `ETORO_USER_KEY` | Your eToro User Key (generated in API Portal settings). |
 | `ETORO_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
+| `DARWINEX_USERNAME` | Your Darwinex DXtrade username. |
+| `DARWINEX_PASSWORD` | Your Darwinex DXtrade master password. |
+| `DARWINEX_ACCOUNT_ID` | Optional: Specific Darwinex account ID to use. |
+| `DARWINEX_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
 | `LIVETRADE_BOT_WEIGHTS` | JSON: `{"botname": 0.6, "otherbot": 0.4}`. Weights are normalized to 1.0. |
 | `LIVETRADE_MIN_ORDER_USD` | Skip trades smaller than this amount (default: $50). |
 | `LIVETRADE_DRY_RUN` | `true`: Logs orders without sending them. **Always start here.** |
@@ -114,9 +121,12 @@ liveTradeIB:
 liveTradeEToro:
   enabled: true     # eToro copier
   # ...
+liveTradeDarwinex:
+  enabled: true     # Darwinex copier
+  # ...
 ```
 
-You can run any combination of brokers (Collective2, IBKR, eToro), or none.
+You can run any combination of brokers (Collective2, IBKR, eToro, Darwinex), or none.
 
 ---
 
@@ -184,6 +194,39 @@ eToro uses numeric **Instrument IDs**. The framework automatically resolves thes
 ### 5. Usage
 ```bash
 uv run python tradingbot/livetrade_etoro.py
+```
+
+---
+
+## 📈 Darwinex (DXtrade)
+
+The framework supports Darwinex via the **DXtrade** REST API (`/dxsca-web`).
+
+### 1. Requirements
+- **Darwinex DXtrade Account** (Username + Master Password).
+- **Demo Account** strongly recommended for initial testing.
+
+### 2. Configuration
+Set these environment variables:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `DARWINEX_USERNAME` | Your DXtrade username. | **Required** |
+| `DARWINEX_PASSWORD` | Your DXtrade master password. | **Required** |
+| `DARWINEX_DEMO` | `true` for demo/paper trading, `false` for live. | `true` |
+| `DARWINEX_ACCOUNT_ID` | Optional: defaults to the first account found. | `None` |
+
+### 3. Symbol Mapping (CFDs)
+Darwinex is a CFD broker. Common equity tickers like `QQQ` are often mapped to `QQQ.US`. The framework uses a two-step resolution:
+1.  Check `symbol_mappings.json` for manual overrides.
+2.  Search the Darwinex catalog for the ticker (and ticker + `.US`).
+
+### 4. Native Quotes
+DXtrade REST API does not provide a simple "last price" endpoint (it is WebSocket only). For v1, the framework falls back to **yfinance** for real-time price lookups to calculate equity and order sizing.
+
+### 5. Usage
+```bash
+uv run python tradingbot/livetrade_darwinex.py
 ```
 
 ---
