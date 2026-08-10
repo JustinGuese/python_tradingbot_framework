@@ -403,6 +403,8 @@ IBIND_OAUTH1A_DH_PRIME=hex_dh_prime_from_dhparam_pem
 IBIND_OAUTH1A_ENCRYPTION_KEY_FP=/etc/ibkr/private_encryption.pem
 IBIND_OAUTH1A_SIGNATURE_KEY_FP=/etc/ibkr/private_signature.pem
 
+#   ^ see "Generating the IBKR OAuth credentials" below for where these come from
+
 # eToro (Public REST API)
 ETORO_API_KEY=your_public_key
 ETORO_USER_KEY=your_user_key
@@ -418,6 +420,74 @@ DARWINEX_DEMO=true          # true for demo/paper, false for live
 LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
 LIVETRADE_DRY_RUN=false
 ```
+
+### Generating the IBKR OAuth Credentials
+
+None of the `IBIND_OAUTH1A_*` values are handed to you in one place — you generate the key
+material locally, register it with IBKR, and IBKR returns two of the five. Requires a
+**funded IBKR Pro** account (Lite won't work); paper rides on the live account's entitlement.
+
+**1. Generate the keys and DH params locally:**
+
+```bash
+mkdir -p ~/ibkr-oauth-paper && cd ~/ibkr-oauth-paper
+openssl genrsa -out private_signature.pem 2048
+openssl rsa -in private_signature.pem -pubout -out public_signature.pem
+openssl genrsa -out private_encryption.pem 2048
+openssl rsa -in private_encryption.pem -pubout -out public_encryption.pem
+openssl dhparam -out dhparam.pem 2048   # slow, a minute or two
+```
+
+Use a **separate keypair for paper and live** — do not reuse one across both.
+
+**2. Register at the OAuth self-service portal.**
+
+It is *not* a menu item inside Client Portal. It's a separate app behind its own SSO entry
+point — open it in a browser already logged in as the username you want the bot to trade as
+(your **paper** username for paper):
+
+```
+https://ndcdyn.interactivebrokers.com/sso/Login?action=OAUTH&RL=1&ip2loc=US
+```
+
+The `action=OAUTH` parameter is what routes you there instead of the normal portal. Use the
+US domain — IBKR support has reported other entry points misbehaving. If it bounces you back
+to Client Portal, the username isn't OAuth-enabled: raise a ticket with API Support.
+
+On that page:
+
+- **Consumer Key** — *you invent this.* It is not issued by IBKR. Exactly **9 characters**,
+  alphanumeric (e.g. `TILEDOM01`). Record it verbatim: it becomes
+  `IBIND_OAUTH1A_CONSUMER_KEY`, and a mismatch later fails auth with no useful error.
+- Upload `public_signature.pem`, `public_encryption.pem`, and `dhparam.pem`.
+- Generate the **access token** and **access token secret** → `IBIND_OAUTH1A_ACCESS_TOKEN`
+  and `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET`.
+
+**3. Extract the DH prime** (a hex string derived from your `dhparam.pem`; the portal never
+shows it) → `IBIND_OAUTH1A_DH_PRIME`:
+
+```bash
+python3 -c "
+import subprocess, re
+out = subprocess.run(['openssl','dhparam','-in','dhparam.pem','-text'],
+                     capture_output=True, text=True).stdout
+m = re.search(r'(?:prime|P):\s*((?:\s*[0-9a-fA-F:]+\s*)+)', out)
+print(re.sub(r'[\s:]', '', m.group(1)) if m else 'No prime found')
+"
+```
+
+**4. Keep the two private keys** (`private_encryption.pem`, `private_signature.pem`) on disk
+and point `IBIND_OAUTH1A_*_KEY_FP` at them. In Kubernetes they are mounted at `/etc/ibkr`
+from the `ib-oauth-keys` secret.
+
+> **Activation is not always instant.** There's no formal approval process for first-party
+> self-service (the 8–14 week compliance review applies to *third-party* OAuth vendors), but
+> consumer keys have been reported taking 24 hours to ~2 weeks to go live, possibly tied to
+> IBKR's weekend server restarts. Register early; a 401 on day one isn't necessarily a
+> misconfiguration.
+
+Full runbook, including the `kubectl` commands to load the secrets:
+[docs/guides/live-trading.md](docs/guides/live-trading.md).
 
 ### Inspect Account & Portfolio
 
