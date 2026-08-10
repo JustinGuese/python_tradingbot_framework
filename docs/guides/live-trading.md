@@ -192,11 +192,65 @@ tickers under [Ticker Mapping (Discovery)](#-ticker-mapping-discovery).
 The framework connects to Interactive Brokers through the **IBKR Web API** (Client Portal REST) using the [`ibind`](https://github.com/Voyz/ibind) library with **fully headless OAuth 1.0a** authentication. There is **no IB Gateway / TWS container** and no daily browser login — the live-session token is obtained programmatically and self-renews on a 24h cycle.
 
 ### 1. One-time OAuth setup (in the IBKR self-service portal)
-1. Generate keys locally with OpenSSL: a private encryption key (`private_encryption.pem`), a private signature key (`private_signature.pem`), and DH params (`dhparam.pem`).
-2. In the IBKR **self-service OAuth portal**: register a 9-char consumer key, upload the public encryption + signature keys and the DH params, then generate an **access token** and **access token secret**.
-3. Extract the DH prime as a hex string from `dhparam.pem`.
 
-> IBKR approval/activation of OAuth access can take from a day up to a couple of weeks. A **Paper Account** is strongly recommended for initial testing.
+This is **first-party self-service** OAuth: you register against your own account and
+issue your own tokens. There is no third-party consumer application to submit and no
+approval queue to wait on.
+
+**Paper accounts are supported.** Log into the portal with your **paper** credentials and
+follow the identical flow. Generate a *separate* keypair for paper — do not reuse the live
+account's keys.
+
+1. Generate the keys and DH params:
+
+   ```bash
+   mkdir -p ~/ibkr-oauth-paper && cd ~/ibkr-oauth-paper
+   openssl genrsa -out private_signature.pem 2048
+   openssl rsa -in private_signature.pem -outform PEM -pubout -out public_signature.pem
+   openssl genrsa -out private_encryption.pem 2048
+   openssl rsa -in private_encryption.pem -outform PEM -pubout -out public_encryption.pem
+   openssl dhparam -out dhparam.pem 2048   # slow, a minute or two
+   ```
+
+2. Open the [OAuth self-service portal](https://ndcdyn.interactivebrokers.com/sso/Login?action=OAUTH&RL=1&ip2loc=US)
+   and log in with the username you want the API to trade as (your paper username).
+   Register a **9-character consumer key** (you choose the string), then upload
+   `public_signature.pem`, `public_encryption.pem`, and `dhparam.pem`. Finally generate the
+   **access token** and **access token secret**.
+
+3. Extract the DH prime as a hex string:
+
+   ```bash
+   python3 -c "
+   import subprocess, re
+   out = subprocess.run(['openssl','dhparam','-in','dhparam.pem','-text'],
+                        capture_output=True, text=True).stdout
+   m = re.search(r'(?:prime|P):\s*((?:\s*[0-9a-fA-F:]+\s*)+)', out)
+   print(re.sub(r'[\s:]', '', m.group(1)) if m else 'No prime found')
+   "
+   ```
+
+4. Load them into the cluster — the two PEMs as a file-mounted secret, the rest as env keys:
+
+   ```bash
+   kubectl -n tradingbots-2025 create secret generic ib-oauth-keys \
+     --from-file=private_encryption.pem --from-file=private_signature.pem
+
+   kubectl -n tradingbots-2025 patch secret tradingbot-secrets --type=merge -p "$(cat <<JSON
+   {"stringData": {
+     "IBIND_OAUTH1A_CONSUMER_KEY": "<9-char key>",
+     "IBIND_OAUTH1A_ACCESS_TOKEN": "<token>",
+     "IBIND_OAUTH1A_ACCESS_TOKEN_SECRET": "<token secret>",
+     "IBIND_OAUTH1A_DH_PRIME": "<hex from step 3>",
+     "IB_ACCOUNT_ID": "<DU… paper account id>"
+   }}
+   JSON
+   )"
+   ```
+
+5. Smoke-test locally before enabling the CronJob (see the account-summary command above),
+   then set `liveTrade.interactiveBrokers.enabled: true` and do one run with
+   `liveTrade.dryRun: "true"`.
 
 ### 2. Configuration
 Set these environment variables (see the reference table above for full descriptions):
