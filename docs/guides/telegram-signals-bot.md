@@ -66,9 +66,9 @@ The AI resolves broker-specific CFD names (US500, DJ30.c, XAUUSD) to Yahoo Finan
 
 ```python
 # telegramsignalsbankbot.py
-CHANNEL_ID = "-1001998690333"   # The Signals Bank - FREE
-LOOKBACK_DAYS = 3               # Only look at messages from last N days
-POSITION_SIZE_PCT = 0.2         # 20% of cash per signal
+CHANNEL_ID = "-1001998690333"  # The Signals Bank - FREE
+LOOKBACK_DAYS = 3  # Only look at messages from last N days
+POSITION_SIZE_PCT = 0.2  # 20% of cash per signal
 ```
 
 To monitor a different channel, change `CHANNEL_ID` to the numeric Telegram channel ID (find with `onetime_getTelegramChats.py`).

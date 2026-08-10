@@ -228,6 +228,17 @@ bots:
 - name: kronostraderbot
   schedule: "15 22 * * 1-5" # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
 
+- name: xauzencarrybot
+  # Meta-bot: mirrors xauzenbot's ^XAU position when it has one, else mirrors
+  # goldenbutterflymombot's basket. It reads both parents' `bots.portfolio` rows,
+  # so it MUST run after them and before any copier that publishes it:
+  #   xauzenbot            */5 * * * 1-5   (always fresh)
+  #   goldenbutterflymombot 0 14 * * 1     (weekly, well before)
+  #   -> xauzencarrybot     35 21 * * 1-5
+  #   collective2 copiers   :40 / :50      (see liveTrade below)
+  # Moving this later than :40 would publish a stale target for a day.
+  schedule: "35 21 * * 1-5" # Daily 9:35 PM UTC Mon-Fri
+
 # Live Trade Copier — mirrors weighted paper-bot portfolios to a real brokerage.
 # See docs/guides/live-trading.md for the full guide.
 # Shared settings apply to every enabled broker; broker-specific blocks below

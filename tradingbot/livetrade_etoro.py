@@ -1,19 +1,19 @@
 import json
 import logging
 import os
+
 from dotenv import load_dotenv
-from livetrade.etoro import EtoroBroker
+
 from livetrade.copier import LiveTradeCopier
+from livetrade.etoro import EtoroBroker
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("livetrade_etoro")
+
 
 def main():
     api_key = os.getenv("ETORO_API_KEY")
@@ -23,7 +23,7 @@ def main():
         return
 
     demo = os.getenv("ETORO_DEMO", "true").lower() == "true"
-    
+
     bot_weights_str = os.getenv("LIVETRADE_BOT_WEIGHTS", '{"AdaptiveMeanReversionBot": 1.0}')
     try:
         bot_weights = json.loads(bot_weights_str)
@@ -32,7 +32,9 @@ def main():
         return
 
     # Validate bot names against the DB before the copier touches them.
-    from utils.db import get_db_session, Bot as BotModel
+    from utils.db import Bot as BotModel
+    from utils.db import get_db_session
+
     with get_db_session() as session:
         existing_names = {b.name for b in session.query(BotModel).all()}
     missing = [name for name in bot_weights if name not in existing_names]
@@ -44,7 +46,7 @@ def main():
         return
 
     min_order = float(os.getenv("LIVETRADE_MIN_ORDER_USD", "50"))
-    dry_run = os.getenv("LIVETRADE_DRY_RUN", "true").lower() == "true" # Default to true for safety
+    dry_run = os.getenv("LIVETRADE_DRY_RUN", "true").lower() == "true"  # Default to true for safety
 
     try:
         portfolio_fraction = float(os.getenv("LIVETRADE_PORTFOLIO_FRACTION", "1.0"))
@@ -57,25 +59,22 @@ def main():
 
     logger.info(f"Initializing eToro copier (Demo: {demo})")
     logger.info(f"Bot weights: {bot_weights} | Dry Run: {dry_run}")
-    
-    broker = EtoroBroker(
-        api_key=api_key,
-        user_key=user_key,
-        demo=demo
-    )
-    
+
+    broker = EtoroBroker(api_key=api_key, user_key=user_key, demo=demo)
+
     copier = LiveTradeCopier(
         broker=broker,
         bot_weights=bot_weights,
         min_order_usd=min_order,
         dry_run=dry_run,
-        portfolio_fraction=portfolio_fraction
+        portfolio_fraction=portfolio_fraction,
     )
-    
+
     try:
         copier.sync()
     except Exception as e:
         logger.error(f"Error during sync: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     main()

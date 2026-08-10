@@ -59,14 +59,15 @@ For strategies that can be expressed as logic on a single data row with technica
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class MyBot(Bot):
     def __init__(self):
         super().__init__("MyBot", "QQQ", interval="1m", period="1d")
-    
+
     def decisionFunction(self, row):
         """
         Trading decision based on technical indicators.
-        
+
         Returns:
             -1: Sell signal
              0: Hold (no action)
@@ -98,14 +99,15 @@ For bots that need external APIs, custom data processing, or different timeframe
 import fear_and_greed
 from tradingbot.utils.botclass import Bot
 
+
 class FearGreedBot(Bot):
     def __init__(self):
         super().__init__("FearGreedBot", "QQQ")
-    
+
     def makeOneIteration(self):
         """
         Custom iteration logic with external API.
-        
+
         Returns:
             -1: Sell signal
              0: Hold
@@ -113,10 +115,10 @@ class FearGreedBot(Bot):
         """
         # Fetch external data
         fear_greed_index = fear_and_greed.get().value
-        
+
         cash = self.dbBot.portfolio.get("USD", 0)
         holding = self.dbBot.portfolio.get("QQQ", 0)
-        
+
         if fear_greed_index >= 70 and cash > 0:
             self.buy("QQQ")  # Extreme greed - buy
             return 1
@@ -136,40 +138,31 @@ For multi-asset strategies, portfolio rebalancing, or complex optimization algor
 from pypfopt import EfficientFrontier, expected_returns, risk_models
 from tradingbot.utils.botclass import Bot
 
+
 class PortfolioBot(Bot):
     def __init__(self):
-        super().__init__(
-            "PortfolioBot", 
-            tickers=["QQQ", "GLD", "TLT", "AAPL"],
-            interval="1d",
-            period="3mo"
-        )
-    
+        super().__init__("PortfolioBot", tickers=["QQQ", "GLD", "TLT", "AAPL"], interval="1d", period="3mo")
+
     def makeOneIteration(self):
         """
         Rebalance portfolio using optimization.
-        
+
         Returns:
             0: Rebalancing completed
         """
         # Fetch data for multiple symbols
-        data = self.getYFDataMultiple(
-            self.tickers, 
-            interval="1d", 
-            period="3mo", 
-            saveToDB=True
-        )
-        
+        data = self.getYFDataMultiple(self.tickers, interval="1d", period="3mo", saveToDB=True)
+
         # Convert to wide format for optimization
         df = self.convertToWideFormat(data, value_column="close")
-        
+
         # Calculate optimal weights
         mu = expected_returns.mean_historical_return(df)
         S = risk_models.sample_cov(df)
         ef = EfficientFrontier(mu, S)
         ef.max_sharpe()
         weights = ef.clean_weights()
-        
+
         # Rebalance portfolio
         self.rebalancePortfolio(weights)
         return 0
@@ -209,19 +202,20 @@ class MyBot(Bot):
         "rsi_sell": [25, 30, 35],
         "adx_threshold": [15, 20, 25],
     }
-    
+
     def __init__(self, rsi_buy=70.0, rsi_sell=30.0, adx_threshold=20.0, **kwargs):
         super().__init__("MyBot", "QQQ", interval="1m", period="1d", **kwargs)
         self.rsi_buy = rsi_buy
         self.rsi_sell = rsi_sell
         self.adx_threshold = adx_threshold
-    
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < self.rsi_buy:
             return 1
         elif row["momentum_rsi"] > self.rsi_sell:
             return -1
         return 0
+
 
 # Optimize and backtest
 bot = MyBot()
@@ -265,10 +259,11 @@ bot.run()  # Executes one iteration, makes trades, logs to database
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class MyBot(Bot):
     def __init__(self):
         super().__init__("MyBot", "QQQ", interval="1m", period="1d")
-    
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < 30:
             return 1
@@ -276,13 +271,14 @@ class MyBot(Bot):
             return -1
         return 0
 
+
 if __name__ == "__main__":
     bot = MyBot()
-    
+
     # Optional: Test locally first
     # bot.local_backtest()
     # bot.local_development()  # If you have param_grid defined
-    
+
     # Run live
     bot.run()
 ```

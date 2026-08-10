@@ -124,9 +124,7 @@ def test_get_positions_signed_and_skips_zero(hl):
 
 def test_place_order_buy_rounds_size_to_sz_decimals(hl):
     hl.place_order("BTC", 0.0123456789, "BUY")
-    hl.exchange.market_open.assert_called_once_with(
-        "BTC", is_buy=True, sz=0.01235, slippage=0.02
-    )
+    hl.exchange.market_open.assert_called_once_with("BTC", is_buy=True, sz=0.01235, slippage=0.02)
 
 
 def test_place_order_sell_on_long_uses_market_close(hl):
@@ -192,9 +190,7 @@ def test_error_response_is_logged_not_swallowed(hl, caplog):
     """Hyperliquid returns rejections inside a 200 OK."""
     hl.exchange.market_open.return_value = {
         "status": "ok",
-        "response": {
-            "data": {"statuses": [{"error": "Order must have minimum value of 10"}]}
-        },
+        "response": {"data": {"statuses": [{"error": "Order must have minimum value of 10"}]}},
     }
     with caplog.at_level(logging.ERROR):
         hl.place_order("BTC", 0.01, "BUY")
@@ -274,8 +270,10 @@ def equity_db():
         yield session
         session.commit()
 
-    with patch("tradingbot.livetrade.equity_recorder.get_db_session", _session), \
-         patch("tradingbot.livetrade.equity_recorder.init_db"):
+    with (
+        patch("tradingbot.livetrade.equity_recorder.get_db_session", _session),
+        patch("tradingbot.livetrade.equity_recorder.init_db"),
+    ):
         yield session
     session.close()
 
@@ -300,7 +298,7 @@ def test_equity_snapshot_is_idempotent_per_day(equity_db, hl):
     record_live_equity(hl)
     hl.info.user_state.return_value = {
         **FLAT_STATE,
-        "marginSummary": {**FLAT_STATE["marginSummary"], "accountValue": "1100.0"},
+        "marginSummary": {**FLAT_STATE["marginSummary"], "accountValue": "1100.0"},  # type: ignore[dict-item]
     }
     record_live_equity(hl)
 

@@ -16,16 +16,16 @@ refreshed the news feed, e.g. 30 22 * * 1-5 (10:30 PM UTC, Mon-Fri).
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from utils.botclass import Bot
 from utils.db import StockNews, get_db_session
 
 logger = logging.getLogger(__name__)
 
-LOOKBACK_DAYS = 2           # Only consider news published in the last N days
-MAX_ARTICLES_PER_SYMBOL = 5 # Max headlines batched per AI call
-POSITION_SIZE_PCT = 0.2     # Spend 20% of available cash per BUY signal
+LOOKBACK_DAYS = 2  # Only consider news published in the last N days
+MAX_ARTICLES_PER_SYMBOL = 5  # Max headlines batched per AI call
+POSITION_SIZE_PCT = 0.2  # Spend 20% of available cash per BUY signal
 MIN_CONFIDENCE = {"medium", "high"}  # Ignore low-confidence signals
 
 
@@ -92,7 +92,7 @@ class StockNewsSentimentBot(Bot):
         super().__init__("StockNewsSentimentBot", symbol=None)
 
     def makeOneIteration(self) -> int:
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=LOOKBACK_DAYS)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=LOOKBACK_DAYS)
 
         with get_db_session() as session:
             rows = (
@@ -109,8 +109,9 @@ class StockNewsSentimentBot(Bot):
             for row in rows:
                 by_symbol[row.symbol].append((row.id, row.title))
 
-        logger.info(f">> {sum(len(v) for v in by_symbol.values())} unacted article(s) "
-              f"across {len(by_symbol)} symbol(s).")
+        logger.info(
+            f">> {sum(len(v) for v in by_symbol.values())} unacted article(s) across {len(by_symbol)} symbol(s)."
+        )
         if not by_symbol:
             return 0
 
@@ -143,19 +144,16 @@ class StockNewsSentimentBot(Bot):
             position_usd = round(cash * POSITION_SIZE_PCT, 2)
 
             if direction == "BUY" and position_usd > 10:
-                logger.info(f"    >> BUY {symbol} ${position_usd:.2f} "
-                      f"({POSITION_SIZE_PCT:.0%} of ${cash:.2f})")
+                logger.info(f"    >> BUY {symbol} ${position_usd:.2f} ({POSITION_SIZE_PCT:.0%} of ${cash:.2f})")
                 self.buy(symbol, quantity_usd=position_usd)
             elif direction == "SELL" and holding > 0:
                 logger.info(f"    >> SELL {symbol} (holding: {holding:.6f})")
                 self.sell(symbol)
             else:
-                logger.info(f"    >> {direction} {symbol}: nothing to act on "
-                      f"(cash={cash:.2f}, holding={holding})")
-
+                logger.info(f"    >> {direction} {symbol}: nothing to act on (cash={cash:.2f}, holding={holding})")
 
         return 0
 
 
-bot = StockNewsSentimentBot() # backtest not possible, event driven
+bot = StockNewsSentimentBot()  # backtest not possible, event driven
 bot.run()

@@ -5,7 +5,7 @@ Pure functions: Hurst-style proxy from returns, z-score, regime classification,
 and single-bar decision. No Bot or db dependency. Used by TARegimeAdaptiveBot.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -56,9 +56,7 @@ def classify_ta_regime(hurst_value: float, threshold: float) -> str:
     return "trend" if hurst_value >= threshold else "mean_reversion"
 
 
-def rolling_zscore(
-    series: pd.Series, window: int, current_idx: int
-) -> Optional[float]:
+def rolling_zscore(series: pd.Series, window: int, current_idx: int) -> float | None:
     """
     Z-score of series over the window ending at current_idx.
 
@@ -102,7 +100,7 @@ def _safe_get(row: pd.Series, key: str, default: float = 0.0) -> float:
 
 def ta_regime_decision(
     row: pd.Series,
-    data: Optional[pd.DataFrame],
+    data: pd.DataFrame | None,
     *,
     hurst_window: int = 50,
     hurst_trend_threshold: float = 0.5,

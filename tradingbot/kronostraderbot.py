@@ -10,8 +10,10 @@ predicted last night is what this bot trades. No hardcoded list.
 
 Not backtestable: relies on live DB predictions, not historical yfinance data.
 """
+
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 from utils.core import Bot, get_db_session
 from utils.db import KronosPrediction
@@ -22,15 +24,10 @@ logger = logging.getLogger(__name__)
 def _load_predicted_tickers() -> list[str]:
     """Return all symbols that have a Kronos prediction for tomorrow or later."""
     try:
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         with get_db_session() as session:
             rows = (
-                session.query(KronosPrediction.symbol)
-                .filter(KronosPrediction.target_date >= tomorrow)
-                .distinct()
-                .all()
+                session.query(KronosPrediction.symbol).filter(KronosPrediction.target_date >= tomorrow).distinct().all()
             )
         tickers = [r.symbol for r in rows]
         logger.info(f"KronosTraderBot: loaded {len(tickers)} tickers from DB: {tickers}")
@@ -41,7 +38,7 @@ def _load_predicted_tickers() -> list[str]:
 
 
 class KronosTraderBot(Bot):
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         "buy_threshold": [0.01, 0.02, 0.03],
         "sell_threshold": [0.005, 0.01, 0.02],
     }
@@ -69,9 +66,7 @@ class KronosTraderBot(Bot):
     def _get_predicted_close(self, symbol: str) -> float | None:
         """Return the predicted close price for tomorrow for *symbol*, or None."""
         try:
-            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             with get_db_session() as session:
                 pred = (
                     session.query(KronosPrediction)
@@ -86,7 +81,7 @@ class KronosTraderBot(Bot):
                     .first()
                 )
                 # Extract value inside the session — ORM objects detach on session close
-                return float(pred.predicted_close) if pred is not None else None  # type: ignore[arg-type]
+                return float(pred.predicted_close) if pred is not None else None
         except Exception as exc:
             logger.warning(f"KronosTraderBot: DB query failed for {symbol}: {exc}")
             return None
@@ -116,10 +111,10 @@ class KronosTraderBot(Bot):
             )
 
         if pct_change > self.buy_threshold:
-            return 1   # buy
+            return 1  # buy
         if pct_change < -self.sell_threshold:
             return -1  # sell
-        return 0       # hold
+        return 0  # hold
 
 
 bot = KronosTraderBot()

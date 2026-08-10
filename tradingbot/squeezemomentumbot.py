@@ -43,8 +43,10 @@ Schedule: 55 21 * * 1-5  (9:55 PM UTC, near NYSE close)
 
 import logging
 import math
+from typing import ClassVar
 
 import pandas as pd
+
 from utils.botclass import Bot
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ class SqueezeMomentumBot(Bot):
     above what pure buy-and-hold achieves.
     """
 
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         # Minimum RSI at entry — avoids entering during price freefall
         "rsi_low": [35, 40, 45],
         # Maximum RSI at entry — avoids entering at momentum peaks

@@ -30,15 +30,15 @@ Located in `tradingbot.utils.db`:
 
 ```python
 class TelegramMessage(Base):
-    id: int                  # Auto-increment primary key
-    channel: str             # Channel username or numeric ID (indexed)
-    message_id: int          # Telegram message ID (unique per channel)
-    text: str                # Original message text (nullable, max 4000 chars)
-    summary: str             # AI-generated summary (nullable)
-    symbol: str              # Primary ticker extracted by AI (nullable, indexed)
-    acted_on: bool           # Set True by signals bot before evaluation (default False)
-    published_at: datetime   # UTC posting time of the message
-    created_at: datetime     # When stored in database
+    id: int  # Auto-increment primary key
+    channel: str  # Channel username or numeric ID (indexed)
+    message_id: int  # Telegram message ID (unique per channel)
+    text: str  # Original message text (nullable, max 4000 chars)
+    summary: str  # AI-generated summary (nullable)
+    symbol: str  # Primary ticker extracted by AI (nullable, indexed)
+    acted_on: bool  # Set True by signals bot before evaluation (default False)
+    published_at: datetime  # UTC posting time of the message
+    created_at: datetime  # When stored in database
 ```
 
 **Constraints**:

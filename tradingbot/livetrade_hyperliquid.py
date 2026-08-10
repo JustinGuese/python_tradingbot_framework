@@ -31,10 +31,7 @@ from livetrade.hyperliquid import HyperliquidBroker
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("livetrade_hyperliquid")
 
 
@@ -55,9 +52,7 @@ def main():
             "mainnet smoke stage."
         )
 
-    bot_weights_str = os.getenv(
-        "LIVETRADE_BOT_WEIGHTS", '{"AdaptiveMeanReversionBTCBot": 1.0}'
-    )
+    bot_weights_str = os.getenv("LIVETRADE_BOT_WEIGHTS", '{"AdaptiveMeanReversionBTCBot": 1.0}')
     try:
         bot_weights = json.loads(bot_weights_str)
     except Exception as e:
@@ -71,6 +66,7 @@ def main():
     # CamelCase the bot registers itself under.
     from utils.db import Bot as BotModel
     from utils.db import get_db_session
+
     with get_db_session() as session:
         existing_names = {b.name for b in session.query(BotModel).all()}
     missing = [name for name in bot_weights if name not in existing_names]
@@ -90,16 +86,11 @@ def main():
         logger.error("LIVETRADE_PORTFOLIO_FRACTION must be a float in (0, 1]")
         return
     if not (0 < portfolio_fraction <= 1):
-        logger.error(
-            f"LIVETRADE_PORTFOLIO_FRACTION must be in (0, 1], got {portfolio_fraction}"
-        )
+        logger.error(f"LIVETRADE_PORTFOLIO_FRACTION must be in (0, 1], got {portfolio_fraction}")
         return
 
     target = f"vault {vault_address}" if vault_address else "own account"
-    logger.info(
-        f"Initializing Hyperliquid copier "
-        f"({'TESTNET' if testnet else 'MAINNET'}, {target})"
-    )
+    logger.info(f"Initializing Hyperliquid copier ({'TESTNET' if testnet else 'MAINNET'}, {target})")
     logger.info(f"Bot weights: {bot_weights}")
 
     broker = HyperliquidBroker(

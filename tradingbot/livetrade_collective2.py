@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+
 from dotenv import load_dotenv
+
 from livetrade.collective2 import Collective2Broker
 from livetrade.copier import LiveTradeCopier
 
@@ -9,16 +11,14 @@ from livetrade.copier import LiveTradeCopier
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("livetrade_collective2")
+
 
 def main():
     api_key = os.getenv("COLLECTIVE2_API_KEY")
     system_id = os.getenv("COLLECTIVE2_SYSTEM_ID")
-    
+
     if not api_key or not system_id:
         logger.error("COLLECTIVE2_API_KEY and COLLECTIVE2_SYSTEM_ID must be set in .env")
         return
@@ -35,7 +35,9 @@ def main():
     # (see AGENTS.md "Common Pitfall 7-8"), so a typo would pollute the DB
     # instead of erroring. Names are case-sensitive and must match the
     # CamelCase the bot registers itself under.
-    from utils.db import get_db_session, Bot as BotModel
+    from utils.db import Bot as BotModel
+    from utils.db import get_db_session
+
     with get_db_session() as session:
         existing_names = {b.name for b in session.query(BotModel).all()}
     missing = [name for name in bot_weights if name not in existing_names]
@@ -60,20 +62,21 @@ def main():
 
     logger.info(f"Initializing Collective2 copier for System ID {system_id}")
     logger.info(f"Bot weights: {bot_weights}")
-    
+
     broker = Collective2Broker(api_key=api_key, system_id=system_id)
     copier = LiveTradeCopier(
         broker=broker,
         bot_weights=bot_weights,
         min_order_usd=min_order,
         dry_run=dry_run,
-        portfolio_fraction=portfolio_fraction
+        portfolio_fraction=portfolio_fraction,
     )
-    
+
     try:
         copier.sync()
     except Exception as e:
         logger.error(f"Error during sync: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     main()

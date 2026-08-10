@@ -5,6 +5,8 @@ Regime and signal logic live in utils.ta_regime; this bot only fetches data
 and calls ta_regime_decision.
 """
 
+from typing import ClassVar
+
 from utils.core import Bot
 from utils.ta_regime import ta_regime_decision
 
@@ -17,7 +19,7 @@ class TARegimeAdaptiveBot(Bot):
     """
 
     # Grid centered around best params (from prior tuning: ~12.58% return, 2.65 Sharpe)
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         "hurst_window": [40, 50, 60],
         "hurst_trend_threshold": [0.44, 0.46, 0.48],
         "adx_threshold": [14, 16, 18],
@@ -79,6 +81,7 @@ class TARegimeAdaptiveBot(Bot):
     def decisionFunction(self, row):
         return ta_regime_decision(row, self.data, **self._ta_params)
 
+
 if __name__ == "__main__":
     bot = TARegimeAdaptiveBot()
 
@@ -102,6 +105,6 @@ if __name__ == "__main__":
     # Sharpe Ratio: 2.65
     # Number of Trades: 7
     # Max Drawdown: 2.62%
-    # bot.local_development(objective="yearly_return", param_sample_ratio=.1) # 
+    # bot.local_development(objective="yearly_return", param_sample_ratio=.1) #
     bot.run()
     # bot.local_development()

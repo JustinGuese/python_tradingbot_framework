@@ -9,17 +9,18 @@ Create `tradingbot/{botname}bot.py`:
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class MyNewBot(Bot):
     # Optional: Define hyperparameter search space
     param_grid = {
         "rsi_buy": [65, 70, 75],
         "rsi_sell": [25, 30, 35],
     }
-    
+
     def __init__(self, rsi_buy: float = 70.0, rsi_sell: float = 30.0, **kwargs):
         """
         Initialize the bot.
-        
+
         Args:
             rsi_buy: RSI threshold for buy signal
             rsi_sell: RSI threshold for sell signal
@@ -28,14 +29,14 @@ class MyNewBot(Bot):
         super().__init__("MyNewBot", "QQQ", interval="1m", period="1d", **kwargs)
         self.rsi_buy = rsi_buy
         self.rsi_sell = rsi_sell
-    
+
     def decisionFunction(self, row):
         """
         Trading decision based on technical indicators.
-        
+
         Args:
             row: Pandas Series with market data and TA indicators
-            
+
         Returns:
             -1: Sell signal
              0: Hold (no action)
@@ -46,6 +47,7 @@ class MyNewBot(Bot):
         elif row["momentum_rsi"] > self.rsi_sell:
             return -1  # Overbought, sell
         return 0  # Hold
+
 
 # Entry point
 if __name__ == "__main__":
@@ -121,10 +123,11 @@ class MyMultiBot(Bot):
 
     def decisionFunction(self, row):
         if row["momentum_rsi"] < self.rsi_buy:
-            return 1   # buy toward equal-weight target for this ticker
+            return 1  # buy toward equal-weight target for this ticker
         elif row["momentum_rsi"] > self.rsi_sell:
             return -1  # sell all holdings of this ticker
         return 0
+
 
 if __name__ == "__main__":
     bot = MyMultiBot()

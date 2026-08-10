@@ -2,9 +2,9 @@
 
 import json
 import logging
-from typing import Optional
 
 from langchain_core.tools import tool
+
 from utils.core import Bot
 from utils.portfolio import TRADEABLE
 
@@ -17,6 +17,7 @@ def _sanity_check_weights_cheap_llm(bot: "Bot", weights: dict) -> bool:
     the cheap LLM says YES (sane), False if NO or unparseable.
     """
     import re
+
     weights_str = json.dumps(weights, sort_keys=True)
     system = (
         "You are a strict validator. Answer only YES or NO and one short reason. "
@@ -27,17 +28,11 @@ def _sanity_check_weights_cheap_llm(bot: "Bot", weights: dict) -> bool:
     try:
         response = bot.run_ai_simple(system_prompt=system, user_message=user)
         text = (response or "").strip().upper()
-        # Treat explicit NO as failure
-        if re.search(r"\bNO\b", text):
-            return False
-        if re.search(r"\bYES\b", text):
-            return True
-        # Unparseable: default to reject so we can fall back to main retry
-        return False
+        # Treat explicit NO as failure; default to reject on unparseable
+        return bool(re.search(r"\bYES\b", text)) and not re.search(r"\bNO\b", text)
     except Exception as e:
         logger.error(f"Sanity check failed with error: {e}")
         return False
-
 
 
 class DeepSeekToolBot(Bot):
@@ -48,7 +43,7 @@ class DeepSeekToolBot(Bot):
 
     def __init__(self):
         super().__init__("DeepSeekToolBot", symbol=None)
-        self._submitted_weights: Optional[dict] = None
+        self._submitted_weights: dict | None = None
         self.tradeable_symbols = TRADEABLE
 
     def get_ai_tools(self):
@@ -107,7 +102,7 @@ class DeepSeekToolBot(Bot):
                 system_prompt=submit_only_prompt,
                 user_message=(
                     f"Call submit_portfolio_weights now. Tradeable symbols: {symbols_list}. "
-                    "Example: {{\"AAPL\": 0.2, \"MSFT\": 0.2, \"QQQ\": 0.6}}. Weights must sum to 1.0."
+                    'Example: {{"AAPL": 0.2, "MSFT": 0.2, "QQQ": 0.6}}. Weights must sum to 1.0.'
                 ),
                 max_tool_rounds=5,
                 tool_names=[],  # No base tools: only get_tradeable_symbols + submit_portfolio_weights
@@ -149,6 +144,7 @@ class DeepSeekToolBot(Bot):
         self.rebalancePortfolio(weights, onlyOver50USD=True)
         logger.info("Rebalancing completed")
         return 0
+
 
 if __name__ == "__main__":
     bot = DeepSeekToolBot()

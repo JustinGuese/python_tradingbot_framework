@@ -11,9 +11,9 @@ Portfolio is stored as a JSON dictionary:
 
 ```python
 portfolio = {
-    "USD": 10000.0,      # Cash
-    "QQQ": 5.5,          # Holdings (quantity, not value)
-    "GLD": 10.0,         # More holdings
+    "USD": 10000.0,  # Cash
+    "QQQ": 5.5,  # Holdings (quantity, not value)
+    "GLD": 10.0,  # More holdings
 }
 ```
 
@@ -45,17 +45,16 @@ bot.sell(symbol="QQQ", quantityUSD=500)
 
 ```python
 # Rebalance to target weights
-bot.rebalancePortfolio({
-    "QQQ": 0.8,   # 80% in QQQ
-    "GLD": 0.1,   # 10% in GLD
-    "USD": 0.1    # 10% cash
-})
+bot.rebalancePortfolio(
+    {
+        "QQQ": 0.8,  # 80% in QQQ
+        "GLD": 0.1,  # 10% in GLD
+        "USD": 0.1,  # 10% cash
+    }
+)
 
 # Filter out small positions (< $50)
-bot.rebalancePortfolio(
-    {"QQQ": 0.8, "GLD": 0.1, "USD": 0.1},
-    onlyOver50USD=True
-)
+bot.rebalancePortfolio({"QQQ": 0.8, "GLD": 0.1, "USD": 0.1}, onlyOver50USD=True)
 ```
 
 ## Accessing Portfolio

@@ -24,7 +24,7 @@ To save cost while still guaranteeing sane results, use **`run_ai_simple_with_fa
 result = bot.run_ai_simple_with_fallback(
     system_prompt="You classify sentiment as buy/hold/sell.",
     user_message="Classify: ...",
-    sanity_check=None,   # use default
+    sanity_check=None,  # use default
     fallback_to_main=True,
 )
 ```
@@ -34,6 +34,7 @@ Custom sanity check example:
 ```python
 def my_check(response: str) -> bool:
     return "buy" in response.lower() or "hold" in response.lower() or "sell" in response.lower()
+
 
 result = bot.run_ai_simple_with_fallback(
     system_prompt="...",
@@ -60,16 +61,19 @@ For demanding flows that use the main LLM with tools (e.g. portfolio weights), y
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class MyBot(Bot):
     def __init__(self):
         super().__init__("MyBot", "QQQ", interval="1m", period="1d")
+
     def decisionFunction(self, row):
         return 0
+
 
 bot = MyBot()
 response = bot.run_ai(
     system_prompt="You are a trading assistant.",
-    user_message="Summarize my portfolio and recent trades including profit on sells."
+    user_message="Summarize my portfolio and recent trades including profit on sells.",
 )
 print(response)  # Model response as string
 ```
@@ -119,10 +123,12 @@ Subclasses can override **`Bot.get_ai_tools(self)`** to return a list of custom 
 class MyBot(Bot):
     def get_ai_tools(self):
         from langchain_core.tools import tool
+
         @tool
         def get_my_custom_data() -> str:
             """Returns custom data for this bot."""
             return "Custom data..."
+
         return [get_my_custom_data]
 ```
 

@@ -1,19 +1,19 @@
 import json
 import logging
 import os
+
 from dotenv import load_dotenv
-from livetrade.darwinex import DarwinexBroker
+
 from livetrade.copier import LiveTradeCopier
+from livetrade.darwinex import DarwinexBroker
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("livetrade_darwinex")
+
 
 def main():
     username = os.getenv("DARWINEX_USERNAME")
@@ -24,7 +24,7 @@ def main():
 
     account_id = os.getenv("DARWINEX_ACCOUNT_ID")
     demo = os.getenv("DARWINEX_DEMO", "true").lower() == "true"
-    
+
     bot_weights_str = os.getenv("LIVETRADE_BOT_WEIGHTS", '{"AdaptiveMeanReversionBot": 1.0}')
     try:
         bot_weights = json.loads(bot_weights_str)
@@ -33,7 +33,9 @@ def main():
         return
 
     # Validate bot names against the DB before the copier touches them.
-    from utils.db import get_db_session, Bot as BotModel
+    from utils.db import Bot as BotModel
+    from utils.db import get_db_session
+
     with get_db_session() as session:
         existing_names = {b.name for b in session.query(BotModel).all()}
     missing = [name for name in bot_weights if name not in existing_names]
@@ -46,7 +48,7 @@ def main():
 
     min_order = float(os.getenv("LIVETRADE_MIN_ORDER_USD", "50"))
     # Per user decision: Default to false (live from first successful run)
-    dry_run = os.getenv("LIVETRADE_DRY_RUN", "false").lower() == "true" 
+    dry_run = os.getenv("LIVETRADE_DRY_RUN", "false").lower() == "true"
 
     try:
         portfolio_fraction = float(os.getenv("LIVETRADE_PORTFOLIO_FRACTION", "1.0"))
@@ -59,26 +61,22 @@ def main():
 
     logger.info(f"Initializing Darwinex copier (Demo: {demo})")
     logger.info(f"Bot weights: {bot_weights} | Dry Run: {dry_run}")
-    
-    broker = DarwinexBroker(
-        username=username,
-        password=password,
-        account_id=account_id,
-        demo=demo
-    )
-    
+
+    broker = DarwinexBroker(username=username, password=password, account_id=account_id, demo=demo)
+
     copier = LiveTradeCopier(
         broker=broker,
         bot_weights=bot_weights,
         min_order_usd=min_order,
         dry_run=dry_run,
-        portfolio_fraction=portfolio_fraction
+        portfolio_fraction=portfolio_fraction,
     )
-    
+
     try:
         copier.sync()
     except Exception as e:
         logger.error(f"Error during sync: {e}", exc_info=True)
+
 
 if __name__ == "__main__":
     main()

@@ -17,7 +17,7 @@ Example:
     class MyBot(Bot):
         def __init__(self):
             super().__init__("MyBot", "QQQ", interval="1m", period="1d")
-        
+
         def decisionFunction(self, row):
             if row["momentum_rsi"] < 30:
                 return 1  # Buy
@@ -26,18 +26,17 @@ Example:
             return 0  # Hold
 """
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
 import logging
+from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
 
 from .bot_repository import BotRepository
+from .config import setup_logging
 from .data_service import DataService
 from .db import RunLog, get_db_session, init_db
-from .config import setup_logging
 from .portfolio_manager import PortfolioManager
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +44,10 @@ logger = logging.getLogger(__name__)
 class Bot:
     """
     Base class for trading bots.
-    
+
     Provides common functionality for data fetching, trading operations,
     portfolio management, and database interactions.
-    
+
     Data Caching:
     - Each Bot instance has its own DataService instance with per-instance caching.
     - For cross-run data reuse (e.g., hyperparameter tuning), data is persisted
@@ -56,16 +55,24 @@ class Bot:
       first and only call yfinance if data is missing or stale.
     - Best practice: Use saveToDB=True for historical backtests to enable efficient
       data reuse across multiple runs or parameter combinations.
-    
+
     Subclasses should implement either:
     - decisionFunction(row) -> int: Returns -1 (sell), 0 (hold), or 1 (buy)
     - makeOneIteration() -> int: Custom iteration logic
     """
-    
-    # Optional class attribute: subclasses can define their hyperparameter search space
-    param_grid: Optional[Dict[str, List[Any]]] = None
 
-    def __init__(self, name: str, symbol: Optional[str] = None, tickers: Optional[List[str]] = None, interval: str = "1m", period: str = "1d", **kwargs):
+    # Optional class attribute: subclasses can define their hyperparameter search space
+    param_grid: dict[str, list[Any]] | None = None
+
+    def __init__(
+        self,
+        name: str,
+        symbol: str | None = None,
+        tickers: list[str] | None = None,
+        interval: str = "1m",
+        period: str = "1d",
+        **kwargs,
+    ):
         """
         Initialize a trading bot.
 
@@ -89,8 +96,8 @@ class Bot:
             # Guard: accept a bare string as a single-element list
             if isinstance(tickers, str):
                 tickers = [tickers]
-            self.tickers: List[str] = list(tickers)
-            self.symbol: Optional[str] = None
+            self.tickers: list[str] = list(tickers)
+            self.symbol: str | None = None
         elif symbol is not None:
             self.tickers = [symbol]
             self.symbol = symbol
@@ -99,24 +106,24 @@ class Bot:
             self.symbol = None
         self.interval = interval
         self.period = period
-        
+
         # Store hyperparameters in a dictionary for flexible access
         self.params = kwargs.copy() if kwargs else {}
-        
+
         # Initialize services
         self._data_service = DataService()
-        self._bot_repository = BotRepository()
+        self._bot_repository = BotRepository  # staticmethod namespace, never instantiated
         self._portfolio_manager = PortfolioManager(
             bot=self.dbBot,
             bot_name=self.bot_name,
             data_service=self._data_service,
             bot_repository=self._bot_repository,
         )
-        
+
         # Maintain backward compatibility for data caching
-        self.data: Optional[pd.DataFrame] = None
-        self.datas: Dict[str, Optional[pd.DataFrame]] = {}  # per-ticker cache for multi-ticker bots
-        self.datasettings: Tuple[Optional[str], Optional[str]] = (None, None)
+        self.data: pd.DataFrame | None = None
+        self.datas: dict[str, pd.DataFrame | None] = {}  # per-ticker cache for multi-ticker bots
+        self.datasettings: tuple[str | None, str | None] = (None, None)
 
     @property
     def backtest_type(self) -> str:
@@ -161,55 +168,66 @@ class Bot:
             )
 
     # Data fetching methods - delegate to DataService
-    def _parsePeriodToDateRange(self, period: str) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    def _parsePeriodToDateRange(self, period: str) -> tuple[pd.Timestamp, pd.Timestamp]:
         """
         Convert yfinance period string to start and end datetime range.
-        
+
         Args:
             period: Period string (e.g., "1d", "5d", "1mo", "1y", "ytd", "max")
-            
+
         Returns:
             Tuple of (start_date, end_date) in UTC timezone-aware timestamps
         """
         from .helpers import parse_period_to_date_range
+
         return parse_period_to_date_range(period)
-    
+
     def getDataFromDB(
         self,
         symbol: str,
-        start_date: Optional[pd.Timestamp] = None,
-        end_date: Optional[pd.Timestamp] = None,
+        start_date: pd.Timestamp | None = None,
+        end_date: pd.Timestamp | None = None,
+        interval: str | None = None,
     ) -> pd.DataFrame:
         """
         Load data from database for a symbol.
-        
+
         Args:
             symbol: Trading symbol to query
             start_date: Optional start date (timezone-aware UTC)
             end_date: Optional end date (timezone-aware UTC)
-            
+            interval: Bar size to read; defaults to this bot's own interval.
+                      Rows stored at other bar sizes are never returned.
+
         Returns:
             DataFrame with columns: symbol, timestamp, open, high, low, close, volume
             Empty DataFrame if no data found
         """
-        return self._data_service.get_data_from_db(symbol, start_date, end_date)
-    
+        # Keyword args, not positional: get_data_from_db takes `interval` second,
+        # so a positional call would silently pass start_date as the interval.
+        return self._data_service.get_data_from_db(
+            symbol=symbol,
+            interval=interval or self.interval,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
     def getYFData(
         self,
-        symbol: Optional[str] = None,
+        symbol: str | None = None,
         interval: str = "1m",
         period: str = "1d",
         saveToDB: bool = False,
     ) -> pd.DataFrame:
         """
         Fetch market data from Yahoo Finance, checking database first.
-        
+
         Args:
             symbol: Trading symbol (defaults to self.symbol)
             interval: Data interval (e.g., "1m", "5m", "1h", "1d")
             period: Data period (e.g., "1d", "5d", "1mo", "1y")
             saveToDB: Whether to save fetched data to database
-            
+
         Returns:
             DataFrame with columns: symbol, timestamp, open, high, low, close, volume
         """
@@ -221,7 +239,7 @@ class Bot:
             is_primary = True
         elif symbol == self.symbol:
             is_primary = True
-        
+
         data = self._data_service.get_yf_data(
             symbol=symbol,
             interval=interval,
@@ -229,34 +247,33 @@ class Bot:
             save_to_db=saveToDB,
             use_cache=True,
         )
-        
+
         # Update cache for backward compatibility: only if it's the primary symbol
         # or it's a single-ticker bot.
-        if is_primary or len(self.tickers) <= 1:
-            if (interval, period) == self.datasettings:
-                self.data = data
-        
+        if (is_primary or len(self.tickers) <= 1) and (interval, period) == self.datasettings:
+            self.data = data
+
         return data
-    
+
     def getYFDataWithTA(
         self,
-        symbol: Optional[str] = None,
+        symbol: str | None = None,
         interval: str = "1m",
         period: str = "1d",
         saveToDB: bool = False,
-        features: Optional[List[str]] = None,
+        features: list[str] | None = None,
     ) -> pd.DataFrame:
         """
         Fetch market data with technical analysis indicators.
-        
+
         Data fetching strategy:
         - Checks database first for existing data
         - Only fetches from yfinance if data is missing or stale
         - If saveToDB=True, saves fetched data to database for future reuse
-        
+
         Note: For repeated backtests or hyperparameter tuning, set saveToDB=True
         to enable efficient data reuse.
-        
+
         Args:
             symbol: Trading symbol (defaults to self.symbol)
             interval: Data interval (e.g., "1m", "5m", "1h", "1d")
@@ -265,7 +282,7 @@ class Bot:
                      historical backtests to enable data reuse.
             features: Optional list of specific TA indicator column names to keep.
                       If provided, drops other TA columns to save memory.
-            
+
         Returns:
             DataFrame with market data and technical analysis features
         """
@@ -277,7 +294,7 @@ class Bot:
             is_primary = True
         elif symbol == self.symbol:
             is_primary = True
-        
+
         data = self._data_service.get_yf_data_with_ta(
             symbol=symbol,
             interval=interval,
@@ -285,15 +302,14 @@ class Bot:
             save_to_db=saveToDB,
             features=features,
         )
-        
+
         # Update cache for backward compatibility: only if it's the primary symbol
         # or it's a single-ticker bot.
-        if is_primary or len(self.tickers) <= 1:
-            if (interval, period) == self.datasettings:
-                self.data = data
-        
+        if (is_primary or len(self.tickers) <= 1) and (interval, period) == self.datasettings:
+            self.data = data
+
         return data
-    
+
     def getYFDataMultiple(
         self,
         symbols: list[str],
@@ -303,13 +319,13 @@ class Bot:
     ) -> pd.DataFrame:
         """
         Fetch market data for multiple symbols efficiently, checking database first.
-        
+
         Args:
             symbols: List of trading symbols to fetch
             interval: Data interval (e.g., "1m", "5m", "1h", "1d")
             period: Data period (e.g., "1d", "5d", "1mo", "3mo", "1y")
             saveToDB: Whether to save fetched data to database for each symbol
-            
+
         Returns:
             DataFrame with columns: symbol, timestamp, open, high, low, close, volume
             Combined data from all symbols in long format
@@ -320,7 +336,7 @@ class Bot:
             period=period,
             save_to_db=saveToDB,
         )
-    
+
     def convertToWideFormat(
         self,
         data_long: pd.DataFrame,
@@ -329,12 +345,12 @@ class Bot:
     ) -> pd.DataFrame:
         """
         Convert long-format DataFrame to wide format for portfolio optimization.
-        
+
         Args:
             data_long: DataFrame in long format with columns: symbol, timestamp, open, high, low, close, volume
             value_column: Column name to use as values (default: "close")
             fill_method: How to handle missing values - "forward", "backward", "both", or None
-            
+
         Returns:
             DataFrame with timestamp as index, symbols as columns, and specified value column as values
         """
@@ -343,47 +359,50 @@ class Bot:
             value_column=value_column,
             fill_method=fill_method,
         )
-    
-    def addPdDFToDb(self, df: pd.DataFrame) -> None:
+
+    def addPdDFToDb(self, df: pd.DataFrame, interval: str | None = None) -> None:
         """
         Add DataFrame rows to database, skipping duplicates.
-        
-        Only inserts rows with timestamps newer than the latest in database.
-        
+
+        Only inserts rows newer than the latest stored for this (symbol, interval).
+
         Args:
             df: DataFrame with columns: symbol, timestamp, open, high, low, close, volume
+            interval: Bar size these rows were fetched at; defaults to this bot's
+                      own interval. Filing rows under the wrong bar size corrupts
+                      every later read (see HistoricData's docstring).
         """
-        self._data_service.add_pd_df_to_db(df)
-    
+        self._data_service.add_pd_df_to_db(df, interval=interval or self.interval)
+
     def getLatestPrice(self, symbol: str) -> float:
         """
         Get the latest price for a symbol, using TTL cache and checking DB first.
-        
+
         Args:
             symbol: Trading symbol to get price for
-            
+
         Returns:
             Latest price as float
-            
+
         Raises:
             ValueError: If no price data is available
         """
         # Pass the per-ticker cache if available, else fallback to self.data
         cached = self.datas.get(symbol, self.data)
         return self._data_service.get_latest_price(symbol, cached_data=cached)
-    
+
     def getLatestPricesBatch(self, symbols: list[str]) -> dict[str, float]:
         """
         Get latest prices for multiple symbols in a single DB query.
-        
+
         Args:
             symbols: List of trading symbols to get prices for
-            
+
         Returns:
             Dictionary mapping symbol to latest price
         """
         return self._data_service.get_latest_prices_batch(symbols)
-    
+
     # Portfolio management methods - delegate to PortfolioManager
     def buy(self, symbol: str, quantity_usd: float = -1) -> None:
         """
@@ -398,7 +417,7 @@ class Bot:
         self._portfolio_manager.buy(symbol, quantity_usd=quantity_usd, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-    
+
     def sell(self, symbol: str, quantity_usd: float = -1) -> None:
         """
         Sell a quantity of the specified symbol.
@@ -412,47 +431,47 @@ class Bot:
         self._portfolio_manager.sell(symbol, quantity_usd=quantity_usd, cached_data=cached)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-    
+
     def rebalancePortfolio(self, targetPortfolio: dict[str, float], onlyOver50USD: bool = False) -> None:
         """
         Rebalance portfolio to match target weights.
-        
+
         Args:
             targetPortfolio: Dictionary mapping symbols to target weights (e.g., {"VWCE": 0.8, "GLD": 0.1, "USD": 0.1})
                            Weights must sum to 1.0 (100%)
             onlyOver50USD: If True, filter out assets with target value <= $50 and redistribute weights equally
                           among remaining assets (default: False)
-        
+
         Raises:
             ValueError: If weights don't sum to 1.0 (within tolerance)
         """
         self._portfolio_manager.rebalance_portfolio(targetPortfolio, only_over_50_usd=onlyOver50USD)
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-    
+
     # Decision and execution methods
     def decisionFunction(self, row: pd.Series) -> int:
         """
         Decision function that determines trading action based on market data row.
-        
+
         **Must be overridden by subclasses** (unless using makeOneIteration() instead).
-        
+
         This is the preferred approach for most bots. The base class will:
         1. Apply this function to each row in the DataFrame
         2. Average the last N decisions (default: 1)
         3. Execute trades based on the final decision
-        
+
         Args:
             row: Pandas Series containing:
                 - Market data: symbol, timestamp, open, high, low, close, volume
                 - Technical indicators: ~150+ indicators (e.g., momentum_rsi, trend_macd, etc.)
                 - Access via: row["indicator_name"]
-        
+
         Returns:
             -1: Sell signal (will sell holdings if any exist)
              0: Hold (no action taken)
              1: Buy signal (will buy if cash available)
-        
+
         Example:
             def decisionFunction(self, row):
                 if row["momentum_rsi"] < 30:
@@ -462,15 +481,15 @@ class Bot:
                 return 0  # Hold
         """
         raise NotImplementedError("You need to overwrite the decisionFunction!!!!")
-    
+
     def getLatestDecision(self, data: pd.DataFrame, nrMedianLatest: int = 1) -> int:
         """
         Get the latest trading decision by applying decisionFunction to data.
-        
+
         Args:
             data: DataFrame with market data
             nrMedianLatest: Number of latest rows to average (default: 1)
-            
+
         Returns:
             Averaged decision signal (-1, 0, or 1)
         """
@@ -478,24 +497,24 @@ class Bot:
             raise ValueError("Data must be a pandas DataFrame")
         if len(data) == 0:
             return 0  # No data, hold
-        
+
         # Work on a copy to avoid mutating the original DataFrame
         data_copy = data.copy()
         data_copy["signal"] = data_copy.apply(self.decisionFunction, axis=1)
-        
+
         # Ensure we don't try to access more rows than available
         nrMedianLatest = min(nrMedianLatest, len(data_copy))
         if nrMedianLatest <= 0:
             return 0
-        
+
         # Get the last nrMedianLatest signals and return their mean
         latest_signals = data_copy["signal"].iloc[-nrMedianLatest:]
         return int(latest_signals.mean())
-    
+
     def run(self) -> None:
         """
         Execute one iteration of the bot and log results.
-        
+
         Catches exceptions and logs them to the database before re-raising.
         """
         # Refresh dbBot to ensure it's attached to a session
@@ -507,7 +526,7 @@ class Bot:
             # Refresh again after makeOneIteration in case portfolio was updated
             self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
             cash = self.dbBot.portfolio.get("USD", 0)
-            
+
             # Handle multi-asset bots gracefully
             if self.symbol:
                 holding = self.dbBot.portfolio.get(self.symbol, 0)
@@ -516,7 +535,7 @@ class Bot:
                 # For multi-asset bots, show portfolio summary
                 non_usd_holdings = {k: v for k, v in self.dbBot.portfolio.items() if k != "USD" and v > 0}
                 holding_info = f"Holdings: {len(non_usd_holdings)} assets"
-            
+
             logger.info("Decision: %s", decision)
             with get_db_session() as session:
                 run = RunLog(
@@ -537,8 +556,8 @@ class Bot:
                 session.add(run)
                 # Context manager will commit automatically
             raise e
-    
-    def get_ai_tools(self) -> List[Any]:
+
+    def get_ai_tools(self) -> list[Any]:
         """
         Return custom LangChain tools for this bot. Override in subclasses to add
         bot-specific tools (e.g. get_tradeable_symbols, run_optimization).
@@ -550,10 +569,10 @@ class Bot:
         self,
         system_prompt: str,
         user_message: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         max_tool_rounds: int = 5,
-        extra_tools: Optional[List[Any]] = None,
-        tool_names: Optional[List[str]] = None,
+        extra_tools: list[Any] | None = None,
+        tool_names: list[str] | None = None,
     ) -> str:
         """
         Run the AI with tools (market data, portfolio, recent trades, plus any custom tools) bound to this bot.
@@ -562,10 +581,14 @@ class Bot:
         Optional tool_names= whitelists which base tools to include. Requires OPENROUTER_API_KEY.
         """
         from .aitools import run_ai_with_tools
+
         merged_extra = list(self.get_ai_tools()) + (extra_tools or [])
         return run_ai_with_tools(
-            system_prompt, user_message, self,
-            model=model, max_tool_rounds=max_tool_rounds,
+            system_prompt,
+            user_message,
+            self,
+            model=model,
+            max_tool_rounds=max_tool_rounds,
             extra_tools=merged_extra if merged_extra else None,
             tool_names=tool_names,
         )
@@ -574,7 +597,7 @@ class Bot:
         self,
         system_prompt: str,
         user_message: str,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> str:
         """
         Run the AI for a single-turn, no-tools task (summarization, extraction,
@@ -582,13 +605,14 @@ class Bot:
         default openrouter/free). Use run_ai() when you need tool access.
         """
         from .aitools import run_ai_simple as _run_ai_simple
+
         return _run_ai_simple(system_prompt, user_message, model=model)
 
     def run_ai_simple_with_fallback(
         self,
         system_prompt: str,
         user_message: str,
-        sanity_check: Optional[Callable[[str], bool]] = None,
+        sanity_check: Callable[[str], bool] | None = None,
         fallback_to_main: bool = True,
     ) -> str:
         """
@@ -601,8 +625,10 @@ class Bot:
         fallback_to_main: If True and sanity check fails, retry with main model.
         """
         from .aitools import run_ai_simple_with_fallback as _run_with_fallback
+
         return _run_with_fallback(
-            system_prompt, user_message,
+            system_prompt,
+            user_message,
             sanity_check=sanity_check,
             fallback_to_main=fallback_to_main,
         )
@@ -610,27 +636,27 @@ class Bot:
     def makeOneIteration(self) -> int:
         """
         Execute one iteration of the trading bot.
-        
+
         Default implementation:
         1. Fetches data with technical indicators
         2. Gets decision by applying decisionFunction() to data
         3. Executes buy/sell based on decision
-        
+
         **When to override:**
         - Multi-asset bots (must override if self.symbol is None)
         - External data sources (e.g., Fear & Greed Index API)
         - Portfolio optimization strategies
         - Custom data processing beyond row-by-row logic
-        
+
         **When NOT to override:**
         - Simple single-asset strategies (just implement decisionFunction() instead)
         - Strategies that only need different timeframes (set interval/period in __init__)
-        
+
         Returns:
             -1: Sold
              0: No action
              1: Bought
-        
+
         Raises:
             NotImplementedError: If self.symbol is None (multi-asset bot) and method not overridden
         """
@@ -656,10 +682,10 @@ class Bot:
         decision = self.getLatestDecision(data)
         cash = self.dbBot.portfolio.get("USD", 0)
         holding = self.dbBot.portfolio.get(self.symbol, 0)
-        if decision == 1 and cash > 0:
+        if decision == 1 and cash > 0 and self.symbol is not None:
             self.buy(self.symbol)
             return 1
-        elif decision == -1 and holding > 0:
+        elif decision == -1 and holding > 0 and self.symbol is not None:
             self.sell(self.symbol)
             return -1
         else:
@@ -678,7 +704,7 @@ class Bot:
         """
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         N = len(self.tickers)
-        decisions: Dict[str, int] = {}
+        decisions: dict[str, int] = {}
 
         # Phase 1: load all data so self.datas is fully populated before
         # any decisionFunction call (needed for cross-ticker strategies like
@@ -699,9 +725,7 @@ class Bot:
 
         prices = self.getLatestPricesBatch(self.tickers)
         portfolio = self.dbBot.portfolio
-        total_value = portfolio.get("USD", 0) + sum(
-            portfolio.get(t, 0) * prices.get(t, 0) for t in self.tickers
-        )
+        total_value = portfolio.get("USD", 0) + sum(portfolio.get(t, 0) * prices.get(t, 0) for t in self.tickers)
         target_per_ticker = total_value / N
 
         actions = 0
@@ -716,31 +740,31 @@ class Bot:
                 self.sell(ticker)
                 actions += 1
         return actions
-    
+
     def local_optimize(
         self,
-        param_grid: Optional[Dict[str, List[Any]]] = None,
+        param_grid: dict[str, list[Any]] | None = None,
         objective: str = "sharpe_ratio",
         initial_capital: float = 10000.0,
-        n_jobs: Optional[int] = None,
+        n_jobs: int | None = None,
         param_sample_ratio: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Local-only helper: run hyperparameter optimization for this bot's class.
-        
+
         Uses either the provided param_grid or self.param_grid (if defined as class attribute).
         Prints the best combination in a format easy to copy-paste into __init__ defaults.
-        
+
         Args:
             param_grid: Optional parameter grid to use. If None, uses self.param_grid or class attribute.
             objective: Metric to maximize ("sharpe_ratio" or "yearly_return")
             initial_capital: Starting capital for backtests
             n_jobs: Number of parallel jobs (None = auto-detect)
             param_sample_ratio: Fraction of param combinations to test (0.0–1.0). 1.0 = all (default).
-        
+
         Returns:
             Full optimization results dictionary
-        
+
         Raises:
             ValueError: If no param_grid is defined
         """
@@ -755,11 +779,11 @@ class Bot:
                 f"No param_grid defined for {self.__class__.__name__}. "
                 f"Either define param_grid as a class attribute or pass it to local_optimize()."
             )
-        
+
         logger.info("=" * 60)
         logger.info(f"Hyperparameter optimization for {self.__class__.__name__}")
         logger.info("=" * 60)
-        
+
         results = tune_hyperparameters(
             self.__class__,
             grid,
@@ -769,22 +793,22 @@ class Bot:
             n_jobs=n_jobs,
             param_sample_ratio=param_sample_ratio,
         )
-        
+
         logger.info("\n" + "=" * 60)
         logger.info("Best parameters (paste into __init__ defaults):")
         logger.info("=" * 60)
         for key, value in results["best_params"].items():
             logger.info(f"    {key}: {value},")
-        
+
         return results
-    
-    def local_backtest(self, initial_capital: float = 10000.0) -> Dict[str, Any]:
+
+    def local_backtest(self, initial_capital: float = 10000.0) -> dict[str, Any]:
         """
         Local-only helper: run a backtest with current instance parameters.
-        
+
         Args:
             initial_capital: Starting capital for backtest
-        
+
         Returns:
             Backtest results dictionary
         """
@@ -800,23 +824,23 @@ class Bot:
         logger.info(f"Number of Trades: {results['nrtrades']}")
         logger.info(f"Max Drawdown: {results['maxdrawdown']:.2%}")
         return results
-    
+
     def local_development(
         self,
-        param_grid: Optional[Dict[str, List[Any]]] = None,
+        param_grid: dict[str, list[Any]] | None = None,
         objective: str = "sharpe_ratio",
         initial_capital: float = 10000.0,
-        n_jobs: Optional[int] = None,
+        n_jobs: int | None = None,
         param_sample_ratio: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Convenience wrapper for the typical local development workflow:
-        
+
         1) Optimize hyperparameters for this bot's class
         2) Backtest a bot instance constructed with the best parameters
-        
+
         Does NOT modify __init__ defaults; you still paste them manually.
-        
+
         Args:
             param_grid: Optional parameter grid to use. If None, uses self.param_grid or class attribute.
             objective: Metric to maximize ("sharpe_ratio" or "yearly_return")
@@ -824,10 +848,10 @@ class Bot:
             n_jobs: Number of parallel jobs (None = auto-detect)
             param_sample_ratio: Fraction of param combinations to test (0.0–1.0). 1.0 = all (default).
                                e.g. 0.2 = randomly test 20% of the grid.
-        
+
         Returns:
             Optimization results dictionary with 'best_params' and performance metrics
-        
+
         Example:
             bot = MyBot()
             results = bot.local_development()
@@ -845,7 +869,7 @@ class Bot:
             n_jobs=n_jobs,
             param_sample_ratio=param_sample_ratio,
         )
-        
+
         # Step 2: Backtest with best parameters
         logger.info("\n" + "=" * 60)
         logger.info("Backtesting with best parameters...")
@@ -855,5 +879,5 @@ class Bot:
             logger.info(f"  {key}: {value}")
         best_bot = self.__class__(**best_params)
         best_bot.local_backtest(initial_capital=initial_capital)
-        
+
         return opt_results

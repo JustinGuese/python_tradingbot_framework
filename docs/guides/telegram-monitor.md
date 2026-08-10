@@ -63,9 +63,9 @@ from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
 from os import environ
 
-with TelegramClient(StringSession(environ["TELEGRAM_SESSION_STRING"]),
-                    int(environ["TELEGRAM_API_ID"]),
-                    environ["TELEGRAM_API_HASH"]) as c:
+with TelegramClient(
+    StringSession(environ["TELEGRAM_SESSION_STRING"]), int(environ["TELEGRAM_API_ID"]), environ["TELEGRAM_API_HASH"]
+) as c:
     for dialog in c.get_dialogs():
         print(f"{dialog.id:>20}  {dialog.name}")
 ```
@@ -193,11 +193,13 @@ The monitor stores results in the `telegram_messages` table:
 from tradingbot.utils.db import TelegramMessage, get_db_session
 
 with get_db_session() as session:
-    messages = (session.query(TelegramMessage)
-                .filter(TelegramMessage.symbol == "AAPL")
-                .order_by(TelegramMessage.published_at.desc())
-                .limit(10)
-                .all())
+    messages = (
+        session.query(TelegramMessage)
+        .filter(TelegramMessage.symbol == "AAPL")
+        .order_by(TelegramMessage.published_at.desc())
+        .limit(10)
+        .all()
+    )
 
     for msg in messages:
         print(f"{msg.published_at} | {msg.channel} | {msg.summary}")
@@ -207,11 +209,13 @@ with get_db_session() as session:
 
 ```python
 with get_db_session() as session:
-    messages = (session.query(TelegramMessage)
-                .filter(TelegramMessage.channel == "financial_news")
-                .order_by(TelegramMessage.published_at.desc())
-                .limit(20)
-                .all())
+    messages = (
+        session.query(TelegramMessage)
+        .filter(TelegramMessage.channel == "financial_news")
+        .order_by(TelegramMessage.published_at.desc())
+        .limit(20)
+        .all()
+    )
 ```
 
 ### Find Messages in a Time Range
@@ -222,10 +226,12 @@ from datetime import datetime, timedelta, timezone
 cutoff = datetime.now(timezone.utc) - timedelta(days=1)
 
 with get_db_session() as session:
-    messages = (session.query(TelegramMessage)
-                .filter(TelegramMessage.published_at >= cutoff)
-                .order_by(TelegramMessage.published_at.desc())
-                .all())
+    messages = (
+        session.query(TelegramMessage)
+        .filter(TelegramMessage.published_at >= cutoff)
+        .order_by(TelegramMessage.published_at.desc())
+        .all()
+    )
 ```
 
 ---
@@ -251,9 +257,11 @@ Add logging to see what's happening:
 
 ```python
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 from tradingbot.telegram_monitor import main
+
 main()
 ```
 
@@ -318,9 +326,7 @@ To modify the AI prompt, edit `summarize_message()` in `tradingbot/utils/telegra
 
 ```python
 def summarize_message(text: str) -> tuple[str | None, str | None]:
-    system = (
-        "Your custom prompt here..."
-    )
+    system = "Your custom prompt here..."
     raw = run_ai_simple(system_prompt=system, user_message=text)
     # ... rest of function
 ```

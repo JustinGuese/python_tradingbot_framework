@@ -50,18 +50,22 @@ Create a simple RSI Mean Reversion bot in seconds:
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class RSIBot(Bot):
     def __init__(self):
         super().__init__("RSIBot", "AAPL", interval="1m", period="1d")
 
     def decisionFunction(self, row):
-        if row["momentum_rsi"] < 30: return 1  # Buy
-        if row["momentum_rsi"] > 70: return -1 # Sell
+        if row["momentum_rsi"] < 30:
+            return 1  # Buy
+        if row["momentum_rsi"] > 70:
+            return -1  # Sell
         return 0
+
 
 if __name__ == "__main__":
     bot = RSIBot()
-    bot.run() # Single iteration
+    bot.run()  # Single iteration
 ```
 
 ### 4. Local Development & Testing
@@ -91,9 +95,12 @@ class RSIBot(Bot):
         self.rsi_sell = rsi_sell
 
     def decisionFunction(self, row):
-        if row["momentum_rsi"] < self.rsi_buy: return 1
-        if row["momentum_rsi"] > self.rsi_sell: return -1
+        if row["momentum_rsi"] < self.rsi_buy:
+            return 1
+        if row["momentum_rsi"] > self.rsi_sell:
+            return -1
         return 0
+
 
 # Optimize and backtest
 bot = RSIBot()
@@ -192,8 +199,10 @@ For single-row TA signals. The base class handles data fetching, `self.data` (fu
 
 ```python
 def decisionFunction(self, row):
-    if row["momentum_rsi"] < 30: return 1
-    if row["momentum_rsi"] > 70: return -1
+    if row["momentum_rsi"] < 30:
+        return 1
+    if row["momentum_rsi"] > 70:
+        return -1
     return 0
 ```
 
@@ -213,6 +222,7 @@ For strategies that trade multiple instruments. The framework calls `decisionFun
 def __init__(self):
     super().__init__("MyBot", tickers=["QQQ", "GLD", "TLT"], interval="1d", period="1y")
 
+
 def decisionFunction(self, row):
     ticker = self._current_ticker
     # self.datas[ticker] has history up to current bar for all tickers
@@ -225,7 +235,8 @@ def decisionFunction(self, row):
 ```python
 def makeOneIteration(self):
     fear_greed = get_fear_greed_index()  # External API — not backtestable
-    if fear_greed >= 70: self.buy("QQQ")
+    if fear_greed >= 70:
+        self.buy("QQQ")
     return 1
 ```
 
@@ -265,8 +276,7 @@ Two LLMs: **main** (OPENROUTER_MAIN_MODEL, default `deepseek/deepseek-v3.2`) for
 
 ```python
 response = bot.run_ai(
-    system_prompt="You are a trading assistant.",
-    user_message="Summarize my recent trades and portfolio."
+    system_prompt="You are a trading assistant.", user_message="Summarize my recent trades and portfolio."
 )
 print(response)  # Model response as string
 ```
@@ -274,10 +284,7 @@ print(response)  # Model response as string
 **Simple tasks, no tools (cheap LLM):** summarization, extraction, classification, rewriting:
 
 ```python
-summary = bot.run_ai_simple(
-    system_prompt="You summarize in one sentence.",
-    user_message="Summarize: ..."
-)
+summary = bot.run_ai_simple(system_prompt="You summarize in one sentence.", user_message="Summarize: ...")
 ```
 
 **Cheap-first with fallback:** Try cheap LLM first, validate output for sanity, and retry with main LLM if the result fails. Use for simple tasks when you want to save cost but guarantee sane results:
@@ -286,7 +293,7 @@ summary = bot.run_ai_simple(
 result = bot.run_ai_simple_with_fallback(
     system_prompt="You classify sentiment.",
     user_message="Classify as buy/hold/sell: ...",
-    sanity_check=None,   # optional; default rejects empty/refusal/error prefix
+    sanity_check=None,  # optional; default rejects empty/refusal/error prefix
     fallback_to_main=True,
 )
 ```
@@ -308,9 +315,9 @@ Portfolio is stored as JSON in the database:
 
 ```python
 portfolio = {
-    "USD": 10000.0,      # Cash
-    "QQQ": 5.5,          # Holdings (quantity, not value)
-    "AAPL": 10.0,        # More holdings
+    "USD": 10000.0,  # Cash
+    "QQQ": 5.5,  # Holdings (quantity, not value)
+    "AAPL": 10.0,  # More holdings
 }
 ```
 

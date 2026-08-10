@@ -36,7 +36,6 @@ Schedule: 30 21 * * 1-5  (9:30 PM UTC ≈ 30 min after US market close)
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -47,49 +46,50 @@ from utils.portfolio_utils import get_fear_greed_index
 logger = logging.getLogger(__name__)
 
 # ── Instruments ───────────────────────────────────────────────────────────────
-UNDERLYING = "QQQ"     # Nasdaq-100 proxy — used for stage analysis
-LONG_3X    = "TQQQ"   # 3× long Nasdaq
-SHORT_3X   = "SQQQ"   # 3× short Nasdaq
-SAFE_HAVEN = "IEF"    # 7-10yr Treasuries — hold during Stage 1 / 3 / crash
+UNDERLYING = "QQQ"  # Nasdaq-100 proxy — used for stage analysis
+LONG_3X = "TQQQ"  # 3× long Nasdaq
+SHORT_3X = "SQQQ"  # 3× short Nasdaq
+SAFE_HAVEN = "IEF"  # 7-10yr Treasuries — hold during Stage 1 / 3 / crash
 
 # ── Stage analysis ────────────────────────────────────────────────────────────
-SMA_WEEKS   = 30   # Weinstein's 30-week SMA
-SLOPE_WEEKS = 4    # compare SMA[now] vs SMA[N weeks ago] to judge slope
+SMA_WEEKS = 30  # Weinstein's 30-week SMA
+SLOPE_WEEKS = 4  # compare SMA[now] vs SMA[N weeks ago] to judge slope
 
 # ── BB / KC Squeeze ───────────────────────────────────────────────────────────
-BB_PERIOD  = 20
-BB_STDDEV  = 2.0
+BB_PERIOD = 20
+BB_STDDEV = 2.0
 ATR_PERIOD = 20
-ATR_MULT   = 1.5   # Keltner Channel = EMA ± 1.5 × ATR
+ATR_MULT = 1.5  # Keltner Channel = EMA ± 1.5 × ATR
 
 # ── VIX trend ─────────────────────────────────────────────────────────────────
-VIX_MA_PERIOD = 20   # VIX < 20-day SMA → declining (bullish for longs)
+VIX_MA_PERIOD = 20  # VIX < 20-day SMA → declining (bullish for longs)
 
 # ── Sentiment (Fear & Greed) ──────────────────────────────────────────────────
-FG_EXTREME_GREED = 75   # delay / reduce TQQQ entry at euphoria peaks
-FG_EXTREME_FEAR  = 25   # close SQQQ early at capitulation troughs
+FG_EXTREME_GREED = 75  # delay / reduce TQQQ entry at euphoria peaks
+FG_EXTREME_FEAR = 25  # close SQQQ early at capitulation troughs
 
 # ── Black Swan circuit breaker ────────────────────────────────────────────────
-CB_TQQQ_DROP = -0.20   # single-day TQQQ drawdown threshold
-CB_QQQ_DROP  = -0.07   # single-day QQQ drawdown threshold (market halt proxy)
+CB_TQQQ_DROP = -0.20  # single-day TQQQ drawdown threshold
+CB_QQQ_DROP = -0.07  # single-day QQQ drawdown threshold (market halt proxy)
 
 # ── Position sizing (Vol-of-Vol Kelly) ────────────────────────────────────────
 BASE_KELLY = 0.50
-MAX_KELLY  = 0.80
-MIN_KELLY  = 0.25
+MAX_KELLY = 0.80
+MIN_KELLY = 0.25
 # Relative-ATR scaling: 1% vol → MAX_KELLY; 4%+ vol → MIN_KELLY
-VOL_LOW  = 0.01
+VOL_LOW = 0.01
 VOL_HIGH = 0.04
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _sorted_df(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values("timestamp").reset_index(drop=True)
 
 
 def _compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
-    h  = df["high"]
+    h = df["high"]
     lo = df["low"]
     pc = df["close"].shift(1)
     tr = pd.concat([(h - lo), (h - pc).abs(), (lo - pc).abs()], axis=1).max(axis=1)
@@ -114,24 +114,24 @@ def _detect_stage(weekly_df: pd.DataFrame) -> str:
     close = df["close"]
     sma = close.rolling(SMA_WEEKS).mean()
 
-    sma_now  = float(sma.iloc[-1])
+    sma_now = float(sma.iloc[-1])
     sma_prev = float(sma.iloc[-(SLOPE_WEEKS + 1)])
-    price    = float(close.iloc[-1])
+    price = float(close.iloc[-1])
 
     if pd.isna(sma_now) or pd.isna(sma_prev):
         return "unknown"
 
-    sma_rising  = sma_now > sma_prev
+    sma_rising = sma_now > sma_prev
     price_above = price > sma_now
 
     if price_above and sma_rising:
-        return "stage2"    # Advancing — primary long zone
+        return "stage2"  # Advancing — primary long zone
     elif not price_above and not sma_rising:
-        return "stage4"    # Declining — short or cash
+        return "stage4"  # Declining — short or cash
     elif price_above and not sma_rising:
-        return "stage3"    # Topping — SMA rolling over, exit longs
+        return "stage3"  # Topping — SMA rolling over, exit longs
     else:
-        return "stage1"    # Basing — price below a flat/rising SMA, wait
+        return "stage1"  # Basing — price below a flat/rising SMA, wait
 
 
 def _detect_bbkc_squeeze(df: pd.DataFrame) -> bool:
@@ -144,19 +144,19 @@ def _detect_bbkc_squeeze(df: pd.DataFrame) -> bool:
     if len(df) < max(BB_PERIOD, ATR_PERIOD) + 2:
         return False
 
-    close  = df["close"]
+    close = df["close"]
 
     # Bollinger Bands
-    bb_mid  = close.rolling(BB_PERIOD).mean()
-    bb_std  = close.rolling(BB_PERIOD).std()
+    bb_mid = close.rolling(BB_PERIOD).mean()
+    bb_std = close.rolling(BB_PERIOD).std()
     bb_high = bb_mid + BB_STDDEV * bb_std
-    bb_low  = bb_mid - BB_STDDEV * bb_std
+    bb_low = bb_mid - BB_STDDEV * bb_std
 
     # Keltner Channels (EMA ± ATR_MULT × ATR)
-    ema     = close.ewm(span=ATR_PERIOD, adjust=False).mean()
-    atr     = _compute_atr(df, ATR_PERIOD)
+    ema = close.ewm(span=ATR_PERIOD, adjust=False).mean()
+    atr = _compute_atr(df, ATR_PERIOD)
     kc_high = ema + ATR_MULT * atr
-    kc_low  = ema - ATR_MULT * atr
+    kc_low = ema - ATR_MULT * atr
 
     bh = float(bb_high.iloc[-1])
     bl = float(bb_low.iloc[-1])
@@ -166,10 +166,10 @@ def _detect_bbkc_squeeze(df: pd.DataFrame) -> bool:
     if any(pd.isna(x) for x in [bh, bl, kh, kl]):
         return False
 
-    return bh < kh and bl > kl   # BBands fully inside KChannels
+    return bh < kh and bl > kl  # BBands fully inside KChannels
 
 
-def _vix_declining(vix_df: pd.DataFrame) -> Optional[bool]:
+def _vix_declining(vix_df: pd.DataFrame) -> bool | None:
     """
     Returns True if the latest VIX close is below its 20-day SMA (declining
     trend → dealers unwinding hedges, bullish for TQQQ gamma).
@@ -180,16 +180,16 @@ def _vix_declining(vix_df: pd.DataFrame) -> Optional[bool]:
         return None
 
     close = df["close"]
-    ma    = close.rolling(VIX_MA_PERIOD).mean()
-    v     = float(close.iloc[-1])
-    ma_v  = float(ma.iloc[-1])
+    ma = close.rolling(VIX_MA_PERIOD).mean()
+    v = float(close.iloc[-1])
+    ma_v = float(ma.iloc[-1])
 
     if pd.isna(ma_v):
         return None
     return v < ma_v
 
 
-def _daily_return(df: pd.DataFrame) -> Optional[float]:
+def _daily_return(df: pd.DataFrame) -> float | None:
     """Last bar's return vs prior close. None if insufficient data."""
     df = _sorted_df(df)
     if len(df) < 2:
@@ -212,7 +212,7 @@ def _kelly_fraction(df: pd.DataFrame) -> float:
         return BASE_KELLY
 
     atr_val = float(_compute_atr(df, ATR_PERIOD).iloc[-1])
-    price   = float(df["close"].iloc[-1])
+    price = float(df["close"].iloc[-1])
 
     if price <= 0 or pd.isna(atr_val):
         return BASE_KELLY
@@ -223,6 +223,7 @@ def _kelly_fraction(df: pd.DataFrame) -> float:
 
 
 # ── Bot ───────────────────────────────────────────────────────────────────────
+
 
 class SynthesizedHyperConvexityBot(Bot):
     """
@@ -239,39 +240,38 @@ class SynthesizedHyperConvexityBot(Bot):
     def makeOneIteration(self) -> int:
         # ── 1. Data fetching ─────────────────────────────────────────────────
         # 2 years of weekly QQQ data → enough for 30-week SMA + slope buffer
-        qqq_weekly = self.getYFData(UNDERLYING, interval="1wk", period="2y",  saveToDB=True)
+        qqq_weekly = self.getYFData(UNDERLYING, interval="1wk", period="2y", saveToDB=True)
         # Short daily window for circuit-breaker last-bar return check
-        qqq_daily  = self.getYFData(UNDERLYING, interval="1d",  period="5d")
+        qqq_daily = self.getYFData(UNDERLYING, interval="1d", period="5d")
         # 3 months of TQQQ daily for squeeze detection and Kelly sizing
-        tqqq_daily = self.getYFData(LONG_3X,    interval="1d",  period="3mo")
+        tqqq_daily = self.getYFData(LONG_3X, interval="1d", period="3mo")
         # VIX daily for trend detection
-        vix_daily  = self.getYFData("^VIX",     interval="1d",  period="3mo")
+        vix_daily = self.getYFData("^VIX", interval="1d", period="3mo")
 
         # ── 2. Fear & Greed ──────────────────────────────────────────────────
         fg_raw = get_fear_greed_index()
-        fg     = fg_raw if fg_raw is not None else 50
+        fg = fg_raw if fg_raw is not None else 50
         logger.info("Fear & Greed index: %d", fg)
 
         # ── 3. Portfolio state ───────────────────────────────────────────────
         portfolio = self.dbBot.portfolio
-        cash      = portfolio.get("USD",        0.0)
-        tqqq_pos  = portfolio.get(LONG_3X,      0.0)
-        sqqq_pos  = portfolio.get(SHORT_3X,     0.0)
-        ief_pos   = portfolio.get(SAFE_HAVEN,   0.0)
+        cash = portfolio.get("USD", 0.0)
+        tqqq_pos = portfolio.get(LONG_3X, 0.0)
+        sqqq_pos = portfolio.get(SHORT_3X, 0.0)
+        ief_pos = portfolio.get(SAFE_HAVEN, 0.0)
 
         # ── 4. Black Swan circuit breaker ────────────────────────────────────
         tqqq_ret = _daily_return(tqqq_daily) if not tqqq_daily.empty else None
-        qqq_ret  = _daily_return(qqq_daily)  if not qqq_daily.empty  else None
+        qqq_ret = _daily_return(qqq_daily) if not qqq_daily.empty else None
 
-        cb_triggered = (
-            (tqqq_ret is not None and tqqq_ret <= CB_TQQQ_DROP) or
-            (qqq_ret  is not None and qqq_ret  <= CB_QQQ_DROP)
+        cb_triggered = (tqqq_ret is not None and tqqq_ret <= CB_TQQQ_DROP) or (
+            qqq_ret is not None and qqq_ret <= CB_QQQ_DROP
         )
         if cb_triggered:
             logger.warning(
                 "BLACK SWAN CB triggered — TQQQ return=%.1f%%, QQQ return=%.1f%%",
                 (tqqq_ret or 0) * 100,
-                (qqq_ret  or 0) * 100,
+                (qqq_ret or 0) * 100,
             )
             logger.warning(
                 f"BLACK SWAN CIRCUIT BREAKER: TQQQ={tqqq_ret:.1%} QQQ={qqq_ret:.1%} "
@@ -289,10 +289,10 @@ class SynthesizedHyperConvexityBot(Bot):
             return -1
 
         # ── 5. Compute signals ───────────────────────────────────────────────
-        stage     = _detect_stage(qqq_weekly) if not qqq_weekly.empty else "unknown"
-        squeeze   = _detect_bbkc_squeeze(tqqq_daily) if not tqqq_daily.empty else False
-        vix_down  = _vix_declining(vix_daily) if not vix_daily.empty else None
-        kelly     = _kelly_fraction(tqqq_daily) if not tqqq_daily.empty else BASE_KELLY
+        stage = _detect_stage(qqq_weekly) if not qqq_weekly.empty else "unknown"
+        squeeze = _detect_bbkc_squeeze(tqqq_daily) if not tqqq_daily.empty else False
+        vix_down = _vix_declining(vix_daily) if not vix_daily.empty else None
+        kelly = _kelly_fraction(tqqq_daily) if not tqqq_daily.empty else BASE_KELLY
 
         logger.info(
             f"SHCE | Stage={stage}  Squeeze={squeeze}  VIX_declining={vix_down}"
@@ -326,9 +326,7 @@ class SynthesizedHyperConvexityBot(Bot):
                 else:
                     # Stage 2 confirmed but no secondary trigger — partial entry
                     buy_usd = cash * MIN_KELLY
-                    logger.info(
-                        f"Stage 2 partial entry (no squeeze/VIX trigger) — buying {LONG_3X} ${buy_usd:.0f}"
-                    )
+                    logger.info(f"Stage 2 partial entry (no squeeze/VIX trigger) — buying {LONG_3X} ${buy_usd:.0f}")
                 self.buy(LONG_3X, quantity_usd=buy_usd)
                 return 1
 
@@ -372,7 +370,6 @@ class SynthesizedHyperConvexityBot(Bot):
             return 0
 
 
-
 bot = SynthesizedHyperConvexityBot()
-bot.run() # EVENT DRIVEN, no backtest possible
+bot.run()  # EVENT DRIVEN, no backtest possible
 # bot.local_development()

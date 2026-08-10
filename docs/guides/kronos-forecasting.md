@@ -111,18 +111,19 @@ kubectl patch secret tradingbot-secrets -n tradingbots-2025 \
 ```python
 from tradingbot.utils.core import KronosClient
 
+
 class MyBot(Bot):
     def decisionFunction(self, row):
         client = KronosClient()
         pred = client.predict(self.symbol, horizon=5)
-        
+
         if pred is not None:
             next_close = pred.iloc[0]["close"]
             current = row["close"]
-            
+
             if next_close > current * 1.03:
                 return 1  # Buy if model forecasts 3%+ upside
-        
+
         return 0
 ```
 
@@ -135,21 +136,22 @@ from tradingbot.utils.core import get_db_session
 from tradingbot.utils.db import KronosPrediction
 from datetime import datetime, timedelta
 
+
 def get_kronos_signal(symbol, days_ahead=1):
     with get_db_session() as session:
         target_date = datetime.utcnow() + timedelta(days=days_ahead)
-        
+
         pred = (
             session.query(KronosPrediction)
             .filter_by(symbol=symbol)
             .filter(
                 KronosPrediction.target_date >= target_date.replace(hour=0, minute=0, second=0),
-                KronosPrediction.target_date < target_date.replace(hour=23, minute=59, second=59)
+                KronosPrediction.target_date < target_date.replace(hour=23, minute=59, second=59),
             )
             .order_by(KronosPrediction.prediction_made_at.desc())
             .first()
         )
-        
+
         if pred:
             # Compare predicted close to current close
             return pred.predicted_close

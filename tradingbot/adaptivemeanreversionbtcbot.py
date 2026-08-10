@@ -35,6 +35,7 @@ copier (livetrade_hyperliquid.py) runs at 00:05 UTC, 15 minutes later.
 """
 
 import logging
+from typing import ClassVar
 
 from adaptivemeanreversionbot import AdaptiveMeanReversionBot
 
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 class AdaptiveMeanReversionBTCBot(AdaptiveMeanReversionBot):
     """Trend-holding strategy on BTC-USD. The Hyperliquid vault strategy."""
 
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         # How calm must volatility be for entry?  Higher = more permissive.
         "atr_multiplier": [1.5, 2.0, 3.0, 5.0],
         # How far below SMA-200 before exiting?  Crypto needs a much wider band

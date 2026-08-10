@@ -1,29 +1,87 @@
 """Repository for bot database operations."""
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from .db import Bot as BotModel
-from .db import Trade, get_db_session
+from .db import RunLog, Trade, get_db_session
 
 
 class BotRepository:
     """Handles database operations for Bot entities."""
 
     @staticmethod
-    def create_or_get_bot(name: str, session: Optional[Session] = None) -> BotModel:
+    def read_portfolio(name: str, session: Session | None = None) -> dict | None:
         """
-        Create or retrieve bot from database.
-        
+        Read another bot's portfolio WITHOUT creating it.
+
+        create_or_get_bot() would happily materialise a fresh $10k bot row for a
+        typo'd name, which a reader must never do — meta-bots that mirror a parent
+        need to tell "parent is all cash" apart from "parent does not exist".
+
         Args:
             name: Bot name
             session: Optional existing database session
-            
+
+        Returns:
+            A plain dict copy of the portfolio, or None if the bot has no row.
+        """
+
+        def _read(sess: Session) -> dict | None:
+            bot = sess.query(BotModel).filter_by(name=name).first()
+            return dict(bot.portfolio or {}) if bot else None
+
+        if session:
+            return _read(session)
+
+        with get_db_session() as session:
+            return _read(session)
+
+    @staticmethod
+    def last_successful_run(name: str, session: Session | None = None) -> datetime | None:
+        """
+        Timestamp of a bot's most recent successful run, or None if it never had one.
+
+        Used to detect a parent whose CronJob has died: its portfolio row keeps
+        returning the last state it traded into, which looks like a live signal.
+
+        Args:
+            name: Bot name
+            session: Optional existing database session
+
+        Returns:
+            Naive UTC datetime of the last RunLog row with success=True, or None.
+        """
+
+        def _read(sess: Session) -> datetime | None:
+            row = (
+                sess.query(RunLog.start_time)
+                .filter(RunLog.bot_name == name, RunLog.success.is_(True))
+                .order_by(RunLog.start_time.desc())
+                .first()
+            )
+            return row[0] if row else None
+
+        if session:
+            return _read(session)
+
+        with get_db_session() as session:
+            return _read(session)
+
+    @staticmethod
+    def create_or_get_bot(name: str, session: Session | None = None) -> BotModel:
+        """
+        Create or retrieve bot from database.
+
+        Args:
+            name: Bot name
+            session: Optional existing database session
+
         Returns:
             BotModel instance
         """
+
         def _get_or_create(sess: Session):
             bot = sess.query(BotModel).filter_by(name=name).first()
             if not bot:
@@ -47,25 +105,25 @@ class BotRepository:
         """
         Get a bot by name with a row-level lock (FOR UPDATE).
         MUST be called within an active transaction.
-        
+
         Args:
             session: Active database session
             name: Bot name
-            
+
         Returns:
             Bot model instance
         """
         return session.query(BotModel).filter_by(name=name).with_for_update().one()
-    
+
     @staticmethod
-    def update_bot(bot: BotModel, session: Optional[Session] = None) -> BotModel:
+    def update_bot(bot: BotModel, session: Session | None = None) -> BotModel:
         """
         Update bot state in database.
-        
+
         Args:
             bot: BotModel instance to update
             session: Optional existing database session
-            
+
         Returns:
             Updated BotModel instance
         """
@@ -77,7 +135,7 @@ class BotRepository:
         with get_db_session() as session:
             session.merge(bot)
             return bot
-    
+
     @staticmethod
     def log_trade(
         bot_name: str,
@@ -85,12 +143,12 @@ class BotRepository:
         quantity: float,
         price: float,
         is_buy: bool,
-        profit: Optional[float] = None,
-        session: Optional[Session] = None,
+        profit: float | None = None,
+        session: Session | None = None,
     ) -> Trade:
         """
         Log a trade to the database.
-        
+
         Args:
             bot_name: Name of the bot executing the trade
             symbol: Trading symbol
@@ -99,10 +157,11 @@ class BotRepository:
             is_buy: True for buy, False for sell
             profit: Profit from the trade (for sells)
             session: Optional existing database session
-            
+
         Returns:
             Created Trade object
         """
+
         def _create_trade(sess: Session):
             trade = Trade(
                 bot_name=bot_name,
@@ -123,5 +182,3 @@ class BotRepository:
 
         with get_db_session() as session:
             return _create_trade(session)
-
-

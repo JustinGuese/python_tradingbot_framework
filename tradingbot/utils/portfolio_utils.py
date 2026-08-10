@@ -7,11 +7,10 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime
-from typing import Dict, Optional
 
+import fear_and_greed
 import numpy as np
 import pandas as pd
-import fear_and_greed
 from pypfopt import EfficientFrontier, expected_returns, risk_models
 
 from .data_service import DataService
@@ -25,31 +24,32 @@ logger = logging.getLogger(__name__)
 # Portfolio Worth Calculations
 # ------------------------------------------------------------------
 
+
 def calculate_portfolio_worth(
     bot: BotModel,
     data_service: DataService,
-    date: Optional[datetime] = None,
+    date: datetime | None = None,
 ) -> float:
     """
     Calculate portfolio worth for a bot at a specific date (or current).
-    
+
     Args:
         bot: BotModel instance
         data_service: DataService instance for fetching prices
         date: Optional date to calculate worth at (uses historic prices if provided)
-        
+
     Returns:
         Total portfolio worth in USD
     """
     portfolio = bot.portfolio
     cash = portfolio.get("USD", 0)
-    
+
     # Get all non-USD holdings
     holdings = {symbol: quantity for symbol, quantity in portfolio.items() if symbol != "USD" and quantity > 0}
-    
+
     if not holdings:
         return cash
-    
+
     # If date is provided, use historic prices; otherwise use latest prices
     if date:
         # Use historic prices from database
@@ -58,6 +58,9 @@ def calculate_portfolio_worth(
             # Get price at or before the specified date
             historic_data = data_service.get_data_from_db(
                 symbol=symbol,
+                # Daily bars: this values a portfolio as of a calendar date, so a
+                # 1-minute bar from that day would be an arbitrary intraday print.
+                interval="1d",
                 start_date=None,
                 end_date=ensure_utc_timestamp(pd.Timestamp(date)),
             )
@@ -73,58 +76,60 @@ def calculate_portfolio_worth(
         # Use latest prices
         symbols = list(holdings.keys())
         prices = data_service.get_latest_prices_batch(symbols)
-        
+
         total_value = cash
         for symbol, quantity in holdings.items():
             if symbol in prices:
                 total_value += quantity * prices[symbol]
             else:
                 logger.warning(f"Could not get price for {symbol}")
-        
+
         return total_value
+
 
 def get_portfolio_worth_history(bot_name: str) -> pd.DataFrame:
     """
     Retrieve portfolio worth time series from database.
-    
+
     Args:
         bot_name: Name of the bot
-        
+
     Returns:
         DataFrame with columns: date, portfolio_worth, holdings
         Empty DataFrame if no data found
     """
     with get_db_session() as session:
-        results = (
-            session.query(PortfolioWorth)
-            .filter_by(bot_name=bot_name)
-            .order_by(PortfolioWorth.date)
-            .all()
-        )
-        
+        results = session.query(PortfolioWorth).filter_by(bot_name=bot_name).order_by(PortfolioWorth.date).all()
+
         if not results:
             return pd.DataFrame()
-        
-        data = pd.DataFrame([{
-            "date": r.date,
-            "portfolio_worth": r.portfolio_worth,
-            "holdings": r.holdings,
-        } for r in results])
-        
+
+        data = pd.DataFrame(
+            [
+                {
+                    "date": r.date,
+                    "portfolio_worth": r.portfolio_worth,
+                    "holdings": r.holdings,
+                }
+                for r in results
+            ]
+        )
+
         # Ensure date is timezone-aware (UTC)
         if "date" in data.columns:
             data["date"] = pd.to_datetime(data["date"])
             data["date"] = ensure_utc_series(data["date"])
-        
+
         return data
+
 
 def calculate_performance_metrics(worth_series: pd.Series) -> dict:
     """
     Calculate performance metrics using quantstats.
-    
+
     Args:
         worth_series: Series with portfolio worth over time (index should be dates)
-        
+
     Returns:
         Dictionary with performance metrics
     """
@@ -138,7 +143,7 @@ def calculate_performance_metrics(worth_series: pd.Series) -> dict:
             "sharpe_ratio": None,
             "max_drawdown": None,
         }
-    
+
     if len(worth_series) < 2:
         return {
             "total_return": 0.0,
@@ -146,10 +151,10 @@ def calculate_performance_metrics(worth_series: pd.Series) -> dict:
             "sharpe_ratio": 0.0,
             "max_drawdown": 0.0,
         }
-    
+
     # Calculate daily returns
     returns = worth_series.pct_change().dropna()
-    
+
     if len(returns) == 0:
         return {
             "total_return": 0.0,
@@ -157,28 +162,28 @@ def calculate_performance_metrics(worth_series: pd.Series) -> dict:
             "sharpe_ratio": 0.0,
             "max_drawdown": 0.0,
         }
-    
+
     # Calculate metrics
     total_return = (worth_series.iloc[-1] / worth_series.iloc[0] - 1) * 100
-    
+
     # Annualized return
     days = (worth_series.index[-1] - worth_series.index[0]).days
     if days > 0:
         annualized_return = ((worth_series.iloc[-1] / worth_series.iloc[0]) ** (365.25 / days) - 1) * 100
     else:
         annualized_return = 0.0
-    
+
     # Sharpe ratio (assuming risk-free rate of 0)
     sharpe_ratio = qs.stats.sharpe(returns, periods=252) if len(returns) > 1 else 0.0
-    
+
     # Max drawdown
     max_drawdown = qs.stats.max_drawdown(returns) * 100 if len(returns) > 1 else 0.0
-    
+
     # Additional metrics
     sortino_ratio = qs.stats.sortino(returns, periods=252) if len(returns) > 1 else 0.0
     calmar_ratio = qs.stats.calmar(returns) if len(returns) > 1 else 0.0
     volatility = qs.stats.volatility(returns, periods=252) * 100 if len(returns) > 1 else 0.0
-    
+
     # Helper function to clean NaN/inf values
     def clean_value(val):
         if val is None:
@@ -192,7 +197,7 @@ def calculate_performance_metrics(worth_series: pd.Series) -> dict:
                 return 0.0
             return float(val)
         return 0.0
-    
+
     return {
         "total_return": round(clean_value(total_return), 2),
         "annualized_return": round(clean_value(annualized_return), 2),
@@ -203,11 +208,13 @@ def calculate_performance_metrics(worth_series: pd.Series) -> dict:
         "volatility": round(clean_value(volatility), 2),
     }
 
+
 # ------------------------------------------------------------------
 # Portfolio Optimization
 # ------------------------------------------------------------------
 
-def sharpe_compute_weights(df: pd.DataFrame) -> Dict[str, float]:
+
+def sharpe_compute_weights(df: pd.DataFrame) -> dict[str, float]:
     """
     Compute Sharpe-optimal weights from a wide-format price DataFrame.
 
@@ -230,9 +237,7 @@ def sharpe_compute_weights(df: pd.DataFrame) -> Dict[str, float]:
     cleaned_weights = ef.clean_weights()
 
     # Sort dict descending by value and remove zero weights
-    cleaned_weights = dict(
-        sorted(cleaned_weights.items(), key=lambda item: item[1], reverse=True)
-    )
+    cleaned_weights = dict(sorted(cleaned_weights.items(), key=lambda item: item[1], reverse=True))
     cleaned_weights = {k: v for k, v in cleaned_weights.items() if v != 0}
 
     if not cleaned_weights:
@@ -245,11 +250,13 @@ def sharpe_compute_weights(df: pd.DataFrame) -> Dict[str, float]:
 
     return {k: v / total_weight for k, v in cleaned_weights.items()}
 
+
 # ------------------------------------------------------------------
 # Sentiment Adapters
 # ------------------------------------------------------------------
 
-def get_fear_greed_index() -> Optional[int]:
+
+def get_fear_greed_index() -> int | None:
     """
     Return the current Fear & Greed index as an integer, or None on failure.
 

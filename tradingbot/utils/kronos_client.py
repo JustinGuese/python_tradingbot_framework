@@ -14,14 +14,14 @@ LangChain integration:
   Import `kronos_forecast` and pass it to run_ai_with_tools(extra_tools=[kronos_forecast])
   so AI bots can call Kronos as a tool when making trading decisions.
 """
+
 from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 import pandas as pd
-import requests
+import requests  # type: ignore[import-untyped]
 from langchain_core.tools import tool
 
 from .data_service import DataService
@@ -44,7 +44,7 @@ class KronosClient:
     Returns None and logs a warning on any error so callers can degrade gracefully.
     """
 
-    def __init__(self, space_url: Optional[str] = None) -> None:
+    def __init__(self, space_url: str | None = None) -> None:
         self.space_url = (space_url or _SPACE_URL).rstrip("/")
         if not self.space_url:
             logger.warning("KronosClient: KRONOS_SPACE_URL not set — predictions will be skipped")
@@ -65,7 +65,7 @@ class KronosClient:
         horizon: int = 5,
         interval: str = "1d",
         period: str = "2y",
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """Fetch OHLCV for *symbol* and return a Kronos forecast DataFrame.
 
         Args:
@@ -92,8 +92,7 @@ class KronosClient:
 
         if df is None or len(df) < 50:
             logger.warning(
-                f"KronosClient: insufficient data for {symbol} "
-                f"({len(df) if df is not None else 0} rows, need ≥50)"
+                f"KronosClient: insufficient data for {symbol} ({len(df) if df is not None else 0} rows, need ≥50)"
             )
             return None
 
@@ -106,14 +105,16 @@ class KronosClient:
         # Serialise to JSON-friendly list of records
         ohlcv_rows = []
         for _, row in df.iterrows():
-            ohlcv_rows.append({
-                "timestamp": str(row["timestamp"]),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row.get("volume", 0) or 0),
-            })
+            ohlcv_rows.append(
+                {
+                    "timestamp": str(row["timestamp"]),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row.get("volume", 0) or 0),
+                }
+            )
 
         payload = {
             "symbol": symbol,
@@ -149,6 +150,7 @@ class KronosClient:
 # ---------------------------------------------------------------------------
 # LangChain tool — drop-in for run_ai_with_tools(extra_tools=[kronos_forecast])
 # ---------------------------------------------------------------------------
+
 
 @tool
 def kronos_forecast(symbol: str, horizon: int = 5) -> str:

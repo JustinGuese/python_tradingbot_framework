@@ -1,52 +1,50 @@
-from typing import Optional
-
 import logging
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from .bot_repository import BotRepository
+from .config import PORTFOLIO_CONFIG
 from .data_service import DataService
 from .db import Bot as BotModel
 from .db import get_db_session
-from .config import PORTFOLIO_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
 class PortfolioManager:
     """Manages portfolio operations including buying, selling, and rebalancing."""
-    
-    def __init__(self, bot: BotModel, bot_name: str, data_service: DataService, bot_repository: BotRepository):
+
+    def __init__(self, bot: BotModel, bot_name: str, data_service: DataService, bot_repository: type[BotRepository]):
         """
         Initialize portfolio manager.
-        
+
         Args:
             bot: BotModel instance representing the bot's portfolio
             bot_name: Name of the bot (passed separately to avoid DetachedInstanceError)
             data_service: DataService instance for fetching prices
-            bot_repository: BotRepository instance for database operations
+            bot_repository: BotRepository class (used via its staticmethods, never instantiated)
         """
         self.bot = bot
         self.bot_name = bot_name
         self.data_service = data_service
         self.bot_repository = bot_repository
 
-    def _refresh_bot(self, session: Optional[Session] = None) -> None:
+    def _refresh_bot(self, session: Session | None = None) -> None:
         """Ensure the Bot instance is attached to an active session."""
         self.bot = self.bot_repository.create_or_get_bot(self.bot_name, session=session)
-    
+
     def buy(
         self,
         symbol: str,
         quantity_usd: float = -1,
-        cached_data: Optional[pd.DataFrame] = None,
+        cached_data: pd.DataFrame | None = None,
         refresh: bool = True,
-        session: Optional[Session] = None,
+        session: Session | None = None,
     ) -> None:
         """
         Buy a quantity of the specified symbol.
-        
+
         Args:
             symbol: Trading symbol to buy
             quantity_usd: Amount in USD to spend (-1 means use all available cash)
@@ -54,6 +52,7 @@ class PortfolioManager:
             refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
         """
+
         def _execute_buy(sess: Session):
             if sess:
                 # Lock row if in transaction
@@ -65,7 +64,9 @@ class PortfolioManager:
             qty_usd = cash if quantity_usd == -1 else quantity_usd
 
             if qty_usd > cash:
-                logger.warning(f"Insufficient cash to buy {symbol}: have ${cash:.2f}, need ${qty_usd:.2f}. Using available cash.")
+                logger.warning(
+                    f"Insufficient cash to buy {symbol}: have ${cash:.2f}, need ${qty_usd:.2f}. Using available cash."
+                )
                 qty_usd = cash
 
             if qty_usd <= 0:
@@ -93,27 +94,25 @@ class PortfolioManager:
                 is_buy=True,
                 session=sess,
             )
-            logger.info(
-                "BOUGHT %.6f of %s at %.4f for cost %.2f", quantity, symbol, price, qty_usd
-            )
+            logger.info("BOUGHT %.6f of %s at %.4f for cost %.2f", quantity, symbol, price, qty_usd)
 
         if session:
             _execute_buy(session)
         else:
             with get_db_session() as sess:
                 _execute_buy(sess)
-    
+
     def sell(
         self,
         symbol: str,
         quantity_usd: float = -1,
-        cached_data: Optional[pd.DataFrame] = None,
+        cached_data: pd.DataFrame | None = None,
         refresh: bool = True,
-        session: Optional[Session] = None,
+        session: Session | None = None,
     ) -> None:
         """
         Sell a quantity of the specified symbol.
-        
+
         Args:
             symbol: Trading symbol to sell
             quantity_usd: Amount in USD to sell (-1 means sell all holdings)
@@ -121,6 +120,7 @@ class PortfolioManager:
             refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
         """
+
         def _execute_sell(sess: Session):
             if sess:
                 # Lock row if in transaction
@@ -182,11 +182,11 @@ class PortfolioManager:
         else:
             with get_db_session() as sess:
                 _execute_sell(sess)
-    
+
     def rebalance_portfolio(self, target_portfolio: dict[str, float], only_over_50_usd: bool = False) -> None:
         """
         Rebalance portfolio to match target weights in a single transaction with row locking.
-        
+
         Args:
             target_portfolio: Dictionary mapping symbols to target weights (e.g., {"VWCE": 0.8, "GLD": 0.1, "USD": 0.1})
                            Weights must sum to 1.0 (100%)
@@ -200,21 +200,21 @@ class PortfolioManager:
         with get_db_session() as session:
             # Lock bot row for the entire duration of rebalance
             self.bot = self.bot_repository.get_bot_locked(session, self.bot_name)
-            
+
             # Step 2: Calculate current portfolio value
             current_usd = self.bot.portfolio.get("USD", 0)
-            
+
             # Get all symbols involved
             all_involved_symbols = list(set(list(target_portfolio.keys()) + list(self.bot.portfolio.keys())))
             all_involved_symbols = [s for s in all_involved_symbols if s != "USD"]
-            
+
             # Batch fetch prices
             prices = self.data_service.get_latest_prices_batch(all_involved_symbols)
-            
+
             # Calculate total portfolio value
             total_portfolio_value = current_usd
             current_values = {"USD": current_usd}
-            
+
             for symbol in all_involved_symbols:
                 qty = self.bot.portfolio.get(symbol, 0)
                 if qty > 0:
@@ -226,7 +226,7 @@ class PortfolioManager:
                     else:
                         logger.warning(f"Could not get price for {symbol}, assuming zero value")
                         current_values[symbol] = 0
-            
+
             if total_portfolio_value <= 0:
                 logger.warning("Portfolio worth is zero, cannot rebalance")
                 return
@@ -235,14 +235,14 @@ class PortfolioManager:
             actual_targets = target_portfolio.copy()
             if only_over_50_usd:
                 filtered_weights = {}
-                excluded_weight = 0
-                
+                excluded_weight = 0.0
+
                 for sym, weight in actual_targets.items():
                     if sym == "USD" or (weight * total_portfolio_value) > PORTFOLIO_CONFIG.min_asset_value_usd:
                         filtered_weights[sym] = weight
                     else:
                         excluded_weight += weight
-                
+
                 if excluded_weight > 0:
                     # Redistribute to remaining non-USD assets
                     non_usd_remaining = [s for s in filtered_weights if s != "USD"]
@@ -257,30 +257,30 @@ class PortfolioManager:
 
             # Step 4: Calculate target values and differences
             target_values = {s: total_portfolio_value * w for s, w in actual_targets.items()}
-            
-            trades_to_sell = {} # symbol -> USD amount
+
+            trades_to_sell = {}  # symbol -> USD amount
             trades_to_buy = {}
-            
+
             for symbol in all_involved_symbols:
                 target_val = target_values.get(symbol, 0)
                 current_val = current_values.get(symbol, 0)
                 diff = target_val - current_val
-                
-                if diff < -1.0: # Sell
+
+                if diff < -1.0:  # Sell
                     trades_to_sell[symbol] = abs(diff)
-                elif diff > 1.0: # Buy
+                elif diff > 1.0:  # Buy
                     trades_to_buy[symbol] = diff
 
-            logger.info(f"Rebalancing {self.bot_name}: Total Value ${total_portfolio_value:.2f}, {len(trades_to_sell)} sells, {len(trades_to_buy)} buys")
+            logger.info(
+                f"Rebalancing {self.bot_name}: Total Value ${total_portfolio_value:.2f}, {len(trades_to_sell)} sells, {len(trades_to_buy)} buys"
+            )
 
             # Step 5: Execute trades (Sells first)
             for symbol, usd_amt in trades_to_sell.items():
                 self.sell(symbol, quantity_usd=usd_amt, refresh=False, session=session)
-            
+
             # Re-read cash after sells
             for symbol, usd_amt in trades_to_buy.items():
                 self.buy(symbol, quantity_usd=usd_amt, refresh=False, session=session)
-            
+
             logger.info("Rebalance complete")
-
-

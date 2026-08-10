@@ -1,9 +1,11 @@
+from typing import ClassVar
+
 from utils.core import Bot
 
 
 class XAUZenbotTreeBot(Bot):
     # Define the hyperparameter search space for this bot
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         "ichimoku_b_threshold": [310, 325, 345],
         "atr_threshold": [0.06, 0.08, 0.10],
         "roc_threshold": [0.25, 0.29, 0.33],
@@ -18,11 +20,11 @@ class XAUZenbotTreeBot(Bot):
         roc_threshold: float = 0.29,
         adx_threshold: float = 11.80,
         dcl_threshold: float = 325,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize the XAU Zenbot Tree Bot with configurable thresholds.
-        
+
         Args:
             ichimoku_b_threshold: Threshold for trend_visual_ichimoku_b indicator (default: 204.56)
             atr_threshold: Threshold for volatility_atr indicator (default: 0.08)
@@ -39,7 +41,7 @@ class XAUZenbotTreeBot(Bot):
             roc_threshold=roc_threshold,
             adx_threshold=adx_threshold,
             dcl_threshold=dcl_threshold,
-            **kwargs
+            **kwargs,
         )
         # Store parameters as instance variables for easy access
         self.ichimoku_b_threshold = ichimoku_b_threshold
@@ -69,10 +71,13 @@ class XAUZenbotTreeBot(Bot):
             return -1
 
 
-bot = XAUZenbotTreeBot()
-
-# bot.local_development()
-bot.run()
+# Guarded so XAUZenCarryBot's backtest can import this decision tree instead of
+# copying it. The Helm CronJob invokes `python xauzenbot.py`, so
+# __name__ == "__main__" and behaviour is unchanged.
+if __name__ == "__main__":
+    bot = XAUZenbotTreeBot()
+    # bot.local_development()
+    bot.run()
 # 2026-03-26 12:28:01 - utils.botclass - INFO - Yearly Return: 0.80%
 # 2026-03-26 12:28:01 - utils.botclass - INFO - Buy & Hold Return: -9.73%
 # 2026-03-26 12:28:01 - utils.botclass - INFO - Outperformance vs B&H: +10.53%

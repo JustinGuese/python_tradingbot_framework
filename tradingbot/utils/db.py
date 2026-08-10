@@ -1,9 +1,8 @@
 import logging
-import time
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
 from os import environ
-from typing import Generator
 from urllib.parse import quote_plus
 
 from sqlalchemy import (
@@ -20,10 +19,8 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +41,7 @@ def _database_url() -> str:
         password_esc = quote_plus(password)
         uri = f"{user_esc}:{password_esc}@{host}:{port}/{database}"
         return "postgresql+psycopg2://" + uri
-    raise KeyError(
-        "Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection"
-    )
+    raise KeyError("Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection")
 
 
 DATABASE_URL = _database_url()
@@ -64,14 +59,16 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 ### MODELS
 class Bot(Base):
     """
     Bot model representing a trading bot instance.
-    
+
     Attributes:
         name: Unique bot name (primary key)
         description: Optional description of the bot
@@ -80,6 +77,7 @@ class Bot(Base):
         created_at: Timestamp when bot was created
         updated_at: Timestamp when bot was last updated
     """
+
     __tablename__ = "bots"
 
     name = Column(String, primary_key=True)
@@ -92,7 +90,7 @@ class Bot(Base):
 class Trade(Base):
     """
     Trade model representing a single trade execution.
-    
+
     Attributes:
         id: Auto-incrementing trade ID (primary key)
         bot_name: Name of the bot that executed the trade (foreign key to Bot.name)
@@ -103,6 +101,7 @@ class Trade(Base):
         timestamp: Timestamp when trade was executed
         profit: Profit from the trade (for sells, nullable)
     """
+
     __tablename__ = "trades"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -118,9 +117,18 @@ class Trade(Base):
 class HistoricData(Base):
     """
     Historic market data model for storing OHLCV data.
-    
+
+    `interval` is part of the primary key, and must stay that way. Without it the
+    key is (symbol, timestamp), which lets a symbol's 1-minute and daily bars
+    collide in one pile: xauzenbot writes ^XAU at 1m every 5 minutes, so a later
+    request for interval="1d" silently returned 74k one-minute rows and every TA
+    indicator computed on top of them was meaningless. Reads MUST filter on
+    interval, and writes MUST set it.
+
     Attributes:
         symbol: Trading symbol (primary key, part of composite key)
+        interval: Bar size the row was fetched at, e.g. "1m", "1d", "1wk"
+                  (primary key, part of composite key)
         timestamp: Timestamp of the data point (primary key, part of composite key)
         open: Opening price
         high: Highest price
@@ -128,9 +136,11 @@ class HistoricData(Base):
         close: Closing price
         volume: Trading volume
     """
+
     __tablename__ = "historic_data"
 
     symbol = Column(String, primary_key=True)
+    interval = Column(String, primary_key=True)
     timestamp = Column(DateTime, primary_key=True)
     open = Column(Float)
     high = Column(Float)
@@ -142,7 +152,7 @@ class HistoricData(Base):
 class RunLog(Base):
     """
     Run log model for tracking bot execution history.
-    
+
     Attributes:
         id: Auto-incrementing log ID (primary key)
         bot_name: Name of the bot (foreign key to Bot.name)
@@ -150,6 +160,7 @@ class RunLog(Base):
         success: Whether the run completed successfully
         result: Result message (nullable, contains decision/error info)
     """
+
     __tablename__ = "run_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -170,6 +181,7 @@ class PortfolioWorth(Base):
         holdings: JSON dictionary of holdings at this date
         created_at: Timestamp when this record was created
     """
+
     __tablename__ = "portfolio_worth"
 
     bot_name = Column(String, ForeignKey("bots.name"), primary_key=True)
@@ -193,6 +205,7 @@ class StockNews(Base):
         related_tickers: JSON array of related tickers (nullable)
         created_at: When this record was created
     """
+
     __tablename__ = "stock_news"
     __table_args__ = (
         UniqueConstraint("symbol", "link", name="uq_stock_news_symbol_link"),
@@ -224,10 +237,9 @@ class StockEarnings(Base):
         fiscal_period: Fiscal period if available (nullable)
         created_at: When this record was created
     """
+
     __tablename__ = "stock_earnings"
-    __table_args__ = (
-        UniqueConstraint("symbol", "report_date", name="uq_stock_earnings_symbol_report_date"),
-    )
+    __table_args__ = (UniqueConstraint("symbol", "report_date", name="uq_stock_earnings_symbol_report_date"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     symbol = Column(String, nullable=False, index=True)
@@ -252,6 +264,7 @@ class StockInsiderTrade(Base):
         value: Transaction value if available (nullable)
         created_at: When this record was created
     """
+
     __tablename__ = "stock_insider_trades"
     __table_args__ = (
         UniqueConstraint(
@@ -277,9 +290,7 @@ class StockInsiderTrade(Base):
 
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
-    __table_args__ = (
-        UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),
-    )
+    __table_args__ = (UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     bot_name = Column(String, nullable=False, index=True)
@@ -297,7 +308,7 @@ class BacktestResult(Base):
     calmar_ratio = Column(Float, nullable=True)
     win_rate = Column(Float, nullable=True)  # fraction 0.0–1.0
     volatility = Column(Float, nullable=True)  # annualized
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class KronosPrediction(Base):
@@ -321,6 +332,7 @@ class KronosPrediction(Base):
         predicted_volume: Predicted volume (nullable — may be zero for some symbols)
         horizon_days: Steps ahead this row represents (1 = tomorrow, 5 = five days out)
     """
+
     __tablename__ = "kronos_predictions"
     __table_args__ = (
         UniqueConstraint("symbol", "target_date", "model_name", name="uq_kronos_predictions_key"),
@@ -355,6 +367,7 @@ class TelegramMessage(Base):
         published_at: When the message was posted in Telegram (UTC)
         created_at: When this record was created
     """
+
     __tablename__ = "telegram_messages"
     __table_args__ = (
         UniqueConstraint("channel", "message_id", name="uq_telegram_messages_channel_message_id"),
@@ -395,6 +408,7 @@ class LiveEquity(Base):
         bot_weights: JSON string of the LIVETRADE_BOT_WEIGHTS that were live
         is_testnet: Keeps testnet validation runs out of the published curve
     """
+
     __tablename__ = "live_equity"
     __table_args__ = (
         UniqueConstraint("broker", "account_id", "date", name="uq_live_equity_broker_account_date"),
@@ -423,15 +437,55 @@ def _migrate_schema() -> None:
     new *columns* on *existing* tables belong below.
     """
     with engine.connect() as conn:
-        conn.execute(text(
-            "ALTER TABLE stock_news "
-            "ADD COLUMN IF NOT EXISTS acted_on BOOLEAN NOT NULL DEFAULT FALSE"
-        ))
+        conn.execute(text("ALTER TABLE stock_news ADD COLUMN IF NOT EXISTS acted_on BOOLEAN NOT NULL DEFAULT FALSE"))
         # BacktestResult new metrics
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS sortino_ratio FLOAT"))
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio FLOAT"))
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS win_rate FLOAT"))
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS volatility FLOAT"))
+
+        # historic_data.interval: add the column, infer it for pre-existing rows,
+        # and widen the primary key. Guarded on the PK still being the 2-column
+        # form, so this is a no-op on an already-migrated or freshly-created DB.
+        #
+        # The interval of a legacy row is inferred from the smallest gap to an
+        # adjacent bar of the same symbol. Time-of-day does NOT work: many daily
+        # bars are stamped at session open rather than midnight.
+        conn.execute(text("ALTER TABLE historic_data ADD COLUMN IF NOT EXISTS interval VARCHAR"))
+        conn.execute(
+            text("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'historic_data'::regclass AND contype = 'p'
+                  AND pg_get_constraintdef(oid) = 'PRIMARY KEY (symbol, "timestamp")'
+            ) THEN
+                WITH g AS (
+                    SELECT symbol, timestamp,
+                           EXTRACT(EPOCH FROM (timestamp - lag(timestamp) OVER w))::bigint AS prev_gap,
+                           EXTRACT(EPOCH FROM (lead(timestamp) OVER w - timestamp))::bigint AS next_gap
+                    FROM historic_data
+                    WINDOW w AS (PARTITION BY symbol ORDER BY timestamp)
+                ), c AS (
+                    SELECT symbol, timestamp,
+                           LEAST(COALESCE(prev_gap, 999999999),
+                                 COALESCE(next_gap, 999999999)) AS min_gap
+                    FROM g
+                )
+                UPDATE historic_data h SET interval = CASE
+                        WHEN c.min_gap <= 300 THEN '1m'
+                        ELSE '1d'
+                    END
+                FROM c WHERE h.symbol = c.symbol AND h.timestamp = c.timestamp;
+
+                ALTER TABLE historic_data ALTER COLUMN interval SET NOT NULL;
+                ALTER TABLE historic_data DROP CONSTRAINT historic_data_pkey;
+                ALTER TABLE historic_data ADD PRIMARY KEY (symbol, interval, timestamp);
+            END IF;
+        END $$;
+        """)
+        )
         conn.commit()
 
 
@@ -445,12 +499,12 @@ def init_db() -> None:
 def get_db_session() -> Generator[Session, None, None]:
     """
     Simple context manager for database sessions.
-    
+
     Ensures proper session cleanup and rollback on exceptions.
     NOTE: We intentionally avoid internal retry loops here because a
     @contextmanager generator must yield exactly once; retry logic is
     better handled at call sites if needed.
-    
+
     Usage:
         with get_db_session() as session:
             # Use session here
@@ -463,15 +517,11 @@ def get_db_session() -> Generator[Session, None, None]:
         session.commit()
     except Exception as e:
         if session:
-            try:
+            with suppress(Exception):
                 session.rollback()
-            except Exception:
-                pass
         logger.error(f"Unexpected error in database session: {type(e).__name__}: {e}")
         raise
     finally:
         if session:
-            try:
+            with suppress(Exception):
                 session.close()
-            except Exception:
-                pass

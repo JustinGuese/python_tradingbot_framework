@@ -2,12 +2,12 @@
 Recursive Decay Harvest Bot (Diamond-Hysteresis Edition)
 
 Optimized for TQQQ.
-Uses a wide hysteresis gap between panic-exits and calm-entries to avoid 
+Uses a wide hysteresis gap between panic-exits and calm-entries to avoid
 whipsaws in trending bull markets.
 """
 
 import logging
-import math
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ class RecursiveDecayHarvestBot(Bot):
     TQQQ regime-switching strategy with wide hysteresis filters.
     """
 
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         "rsi_exit": [75, 80, 85],
         "sma_period": [50, 100, 200],
         "rsi_entry_gap": [15, 20, 25],
@@ -109,22 +109,21 @@ class RecursiveDecayHarvestBot(Bot):
             return 0
 
         # --- EXIT LOGIC (Panic or Trend Break) ---
-        
+
         # 1. Extreme Volatility Panic
         if uvxy_rsi > self.rsi_exit:
             return -1
-            
+
         # 2. Clear Trend Breakdown (2% buffer below SMA)
         if qqq_close < qqq_sma * 0.98:
             return -1
 
         # --- ENTRY LOGIC (Hysteresis Gap) ---
-        
+
         # Bullish Regime AND Volatility has settled significantly
         # The 'gap' ensures we don't buy during a volatile bounce
-        if qqq_close > qqq_sma:
-            if uvxy_rsi < (self.rsi_exit - self.rsi_entry_gap):
-                return 1
+        if qqq_close > qqq_sma and uvxy_rsi < (self.rsi_exit - self.rsi_entry_gap):
+            return 1
 
         # Otherwise: Hold existing position (Cash or TQQQ)
         return 0

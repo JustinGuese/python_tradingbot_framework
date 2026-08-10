@@ -1,6 +1,10 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Literal, Dict, Optional
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from tradingbot.livetrade.symbol_map import SymbolMapper
+    from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -8,15 +12,15 @@ logger = logging.getLogger(__name__)
 class LiveBroker(ABC):
     # Subclasses must set these before any get_latest_price call.
     name: str
-    symbol_mapper: object  # SymbolMapper
-    data_service: object  # DataService
+    symbol_mapper: "SymbolMapper"
+    data_service: "DataService"
 
     @abstractmethod
     def get_cash(self) -> float:
         """Return the current cash balance in USD."""
 
     @abstractmethod
-    def get_positions(self) -> Dict[str, float]:
+    def get_positions(self) -> dict[str, float]:
         """Return current open positions as a dict: broker_symbol -> quantity."""
 
     @abstractmethod
@@ -46,7 +50,9 @@ class LiveBroker(ABC):
             return 0.0
 
     @abstractmethod
-    def place_order(self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: Optional[str] = None) -> None:
+    def place_order(
+        self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
+    ) -> None:
         """Place a market order."""
 
     @abstractmethod

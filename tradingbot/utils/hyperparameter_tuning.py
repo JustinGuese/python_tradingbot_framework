@@ -5,23 +5,29 @@ import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 try:
     from tqdm import tqdm
+
     TQDM_AVAILABLE = True
 except ImportError:
     TQDM_AVAILABLE = False
+
     # Create a dummy tqdm class if not available
-    class tqdm:
+    class tqdm:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             pass
+
         def __enter__(self):
             return self
+
         def __exit__(self, *args):
             pass
+
         def update(self, n=1):
             pass
+
 
 from .backtest import _get_backtest_period, backtest_bot
 from .botclass import Bot
@@ -30,19 +36,19 @@ logger = logging.getLogger(__name__)
 
 
 def _evaluate_params(
-    bot_class: Type[Bot],
-    params: Dict[str, Any],
+    bot_class: type[Bot],
+    params: dict[str, Any],
     initial_capital: float,
     objective: str,
-    shared_data: Optional[Any],
+    shared_data: Any | None,
     idx: int,
     total: int,
     verbose: bool,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Helper function to evaluate a single parameter combination.
     Used for parallel execution in hyperparameter tuning.
-    
+
     Args:
         bot_class: Bot class to instantiate
         params: Parameter combination to test
@@ -52,17 +58,17 @@ def _evaluate_params(
         idx: Index of this parameter combination (for progress tracking)
         total: Total number of combinations (for progress tracking)
         verbose: Whether to print progress information
-    
+
     Returns:
         Dictionary with results (params, score, metrics) or None if evaluation failed
     """
     try:
         if verbose:
             logger.info(f"[{idx}/{total}] Testing params: {params}")
-        
+
         # Create bot instance with these parameters
         bot = bot_class(**params)
-        
+
         # Backtest with pre-fetched data if available
         results = backtest_bot(
             bot,
@@ -72,7 +78,7 @@ def _evaluate_params(
             data=shared_data,
         )
         score = results[objective]
-        
+
         result_entry = {
             "params": params.copy(),
             "score": score,
@@ -81,34 +87,35 @@ def _evaluate_params(
             "nrtrades": results["nrtrades"],
             "maxdrawdown": results["maxdrawdown"],
         }
-        
+
         if verbose:
-            logger.info(f"[{idx}/{total}] Score ({objective}): {score:.4f}, "
-                  f"Return: {results['yearly_return']:.2%}, "
-                  f"Trades: {results['nrtrades']}, "
-                  f"Drawdown: {results['maxdrawdown']:.2%}")
-        
+            logger.info(
+                f"[{idx}/{total}] Score ({objective}): {score:.4f}, "
+                f"Return: {results['yearly_return']:.2%}, "
+                f"Trades: {results['nrtrades']}, "
+                f"Drawdown: {results['maxdrawdown']:.2%}"
+            )
+
         return result_entry
-    
+
     except Exception as e:
         if verbose:
             logger.error(f"[{idx}/{total}] Error: {e}")
         return None
 
 
-
 def tune_hyperparameters(
-    bot_class: Type[Bot],
-    param_grid: Dict[str, List[Any]],
+    bot_class: type[Bot],
+    param_grid: dict[str, list[Any]],
     objective: str = "sharpe_ratio",
     initial_capital: float = 10000.0,
     verbose: bool = True,
-    n_jobs: Optional[int] = None,
+    n_jobs: int | None = None,
     param_sample_ratio: float = 1.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Tune hyperparameters for a trading bot using grid search.
-    
+
     Args:
         bot_class: Bot class (not instance) to tune. Must be a subclass of Bot.
         param_grid: Dictionary mapping parameter names to lists of values to try.
@@ -122,7 +129,7 @@ def tune_hyperparameters(
                 Set to 1 for sequential execution (default: None = auto-detect)
         param_sample_ratio: Fraction of parameter combinations to test, in [0.0, 1.0].
                            1.0 = test all (default). e.g. 0.2 = randomly test 20% of the grid.
-    
+
     Returns:
         Dictionary with keys:
         - best_params: Best parameter combination found
@@ -134,11 +141,11 @@ def tune_hyperparameters(
           - sharpe_ratio: Sharpe ratio
           - nrtrades: Number of trades
           - maxdrawdown: Maximum drawdown
-    
+
     Raises:
         ValueError: If objective is not recognized or param_grid is empty
         TypeError: If bot_class is not a Bot subclass
-    
+
     Example:
         >>> from tradingbot.gptbasedstrategytabased import gptbasedstrategytabased
         >>> param_grid = {
@@ -156,13 +163,13 @@ def tune_hyperparameters(
     # Validate inputs
     if not issubclass(bot_class, Bot):
         raise TypeError(f"bot_class must be a subclass of Bot, got {type(bot_class)}")
-    
+
     if objective not in ["sharpe_ratio", "yearly_return"]:
         raise ValueError(f"objective must be 'sharpe_ratio' or 'yearly_return', got '{objective}'")
-    
+
     if not param_grid:
         raise ValueError("param_grid cannot be empty")
-    
+
     # Generate all parameter combinations
     param_names = list(param_grid.keys())
     param_values = list(param_grid.values())
@@ -187,21 +194,24 @@ def tune_hyperparameters(
     if n_jobs is None:
         n_jobs = os.cpu_count() or 1
     n_jobs = max(1, int(n_jobs))  # Ensure at least 1
-    
+
     if verbose:
         logger.info(f"Testing {total_combinations} parameter combinations...")
         logger.info(f"Objective: {objective}")
         logger.info(f"Parameter grid: {param_grid}")
         logger.info(f"Parallel jobs: {n_jobs}")
-    
+
     # Pre-fetch historical data once to avoid repeated yfinance downloads
     # Create a temporary bot instance with default parameters to fetch data
     if verbose:
         logger.info("Pre-fetching historical data (this will be reused for all parameter combinations)...")
-    
+
     try:
         # Create a temporary bot with default parameters to get tickers/interval/period
-        temp_bot = bot_class()
+        # `bot_class` is typed as `type[Bot]`, but callers always pass a concrete Bot
+        # subclass whose own __init__ supplies `name` internally (see Bot's docstring
+        # example) -- mypy can't express "subclass with a no-arg __init__" here.
+        temp_bot = bot_class()  # type: ignore[call-arg]
         is_multi = len(getattr(temp_bot, "tickers", [])) > 1
 
         # Determine appropriate period based on interval (respects Yahoo Finance limits)
@@ -242,23 +252,22 @@ def tune_hyperparameters(
             logger.warning(f"Could not pre-fetch data: {e}")
             logger.info("Will fetch data individually for each parameter combination (slower)")
         shared_data = None
-    
-    best_score = float('-inf')
+
+    best_score = float("-inf")
     best_params = None
     all_results = []
-    
+
     # Prepare parameter combinations with indices
     param_combinations = [
-        (idx + 1, dict(zip(param_names, combo)))
-        for idx, combo in enumerate(combinations)
+        (idx + 1, dict(zip(param_names, combo, strict=True))) for idx, combo in enumerate(combinations)
     ]
-    
+
     # Execute in parallel or sequentially
     if n_jobs > 1:
         # Parallel execution
         if verbose:
             logger.info(f"Running {total_combinations} backtests in parallel ({n_jobs} workers)...")
-        
+
         # Create progress bar
         progress_bar = tqdm(
             total=total_combinations,
@@ -266,7 +275,7 @@ def tune_hyperparameters(
             unit="combination",
             disable=not verbose or not TQDM_AVAILABLE,
         )
-        
+
         with ThreadPoolExecutor(max_workers=n_jobs) as executor:
             # Submit all tasks
             future_to_params = {
@@ -283,7 +292,7 @@ def tune_hyperparameters(
                 ): (idx, params)
                 for idx, params in param_combinations
             }
-            
+
             # Collect results as they complete
             for future in as_completed(future_to_params):
                 idx, params = future_to_params[future]
@@ -291,22 +300,19 @@ def tune_hyperparameters(
                     result_entry = future.result()
                     if result_entry is not None:
                         all_results.append(result_entry)
-                        
+
                         if result_entry["score"] > best_score:
                             best_score = result_entry["score"]
                             best_params = result_entry["params"].copy()
                             if verbose:
-                                progress_bar.set_postfix({
-                                    "best_score": f"{best_score:.4f}",
-                                    "best_idx": idx
-                                })
-                    
+                                progress_bar.set_postfix({"best_score": f"{best_score:.4f}", "best_idx": idx})
+
                     progress_bar.update(1)
                 except Exception as e:
                     if verbose:
                         progress_bar.write(f"[{idx}/{total_combinations}] Error: {e}")
                     progress_bar.update(1)
-        
+
         progress_bar.close()
     else:
         # Sequential execution (original behavior)
@@ -317,7 +323,7 @@ def tune_hyperparameters(
             unit="combination",
             disable=not verbose or not TQDM_AVAILABLE,
         )
-        
+
         for idx, params in param_combinations:
             result_entry = _evaluate_params(
                 bot_class,
@@ -329,35 +335,32 @@ def tune_hyperparameters(
                 total_combinations,
                 verbose,
             )
-            
+
             if result_entry is not None:
                 all_results.append(result_entry)
-                
+
                 if result_entry["score"] > best_score:
                     best_score = result_entry["score"]
                     best_params = result_entry["params"].copy()
                     if verbose:
-                        progress_bar.set_postfix({
-                            "best_score": f"{best_score:.4f}",
-                            "best_idx": idx
-                        })
-            
+                        progress_bar.set_postfix({"best_score": f"{best_score:.4f}", "best_idx": idx})
+
             progress_bar.update(1)
-            
+
         progress_bar.close()
-    
+
     if best_params is None:
         raise ValueError(
             f"No valid parameter combinations found (all {total_combinations} failed). "
             "Check your param_grid and bot_class; run with n_jobs=1 and verbose=True to see per-combination errors."
         )
-    
+
     if verbose:
         logger.info("=" * 60)
         logger.info(f"Best parameters: {best_params}")
         logger.info(f"Best {objective}: {best_score:.4f}")
         logger.info("=" * 60)
-    
+
     return {
         "best_params": best_params,
         "best_score": best_score,
@@ -365,20 +368,20 @@ def tune_hyperparameters(
     }
 
 
-def get_default_param_grid(bot_name: Optional[str] = None) -> Dict[str, List[Any]]:
+def get_default_param_grid(bot_name: str | None = None) -> dict[str, list[Any]]:
     """
     Get a default parameter grid for common bots.
-    
+
     This provides reasonable search spaces for hyperparameter tuning.
     Can be customized or extended for specific bots.
-    
+
     Args:
         bot_name: Optional bot name to get bot-specific defaults.
                   If None, returns a generic grid.
-    
+
     Returns:
         Dictionary mapping parameter names to lists of values.
-    
+
     Example:
         >>> grid = get_default_param_grid("gptbasedstrategytabased")
         >>> # Customize the grid
@@ -394,7 +397,7 @@ def get_default_param_grid(bot_name: Optional[str] = None) -> Dict[str, List[Any
             "mfi_buy": [75, 80, 85],
             "mfi_sell": [15, 20, 25],
         }
-    
+
     # Generic/default grid
     return {
         "adx_threshold": [15, 20, 25],

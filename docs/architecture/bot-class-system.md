@@ -48,8 +48,7 @@ class MyBot(Bot):
 ```python
 class MyMultiBot(Bot):
     def __init__(self):
-        super().__init__("MyMultiBot", tickers=["SPY", "QQQ", "GLD"],
-                         interval="1d", period="1y")
+        super().__init__("MyMultiBot", tickers=["SPY", "QQQ", "GLD"], interval="1d", period="1y")
 
     def decisionFunction(self, row):
         if row["momentum_rsi"] < 30:

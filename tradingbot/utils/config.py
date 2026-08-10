@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Optional
 
 # ------------------------------------------------------------------
 # Constants
@@ -40,22 +39,81 @@ REQUIRED_DATA_COLUMNS = [
 
 # Canonical tradeable symbol universe shared by Sharpe, earnings-insider, regime, and AI tool bots.
 TRADEABLE = [
-    "GLD", "AAPL", "MSFT", "GOOG", "TSLA", "AMD", "AMZN", "DG", "KDP", "LLY",
-    "NOC", "NVDA", "PGR", "TEAM", "UNH", "WM", "URTH", "IWDA.AS", "EEM",
-    "XAIX.DE", "BTEC.L", "L0CK.DE", "2B76.DE", "W1TA.DE", "RENW.DE", "BNXG.DE",
-    "BTC-USD", "ETH-USD", "AVAX-USD", "TMF", "FAS", "TQQQ", "QQQ", "UUP",
-    "META", "PYPL", "ADBE", "UPRO", "BSV", "SQQQ", "NTSX", "DBMF", "VDE", "VNQ",
-    "VHT", "VFH", "VOX", "VPU", "VAW", "VGT", "VIS", "VDC", "VCR", "VLUE",
-    "FNDX", "VTV", "RWL", "DBA", "SHV", "DBB", "DBO", "URA", "WOOD", "DBE",
+    "GLD",
+    "AAPL",
+    "MSFT",
+    "GOOG",
+    "TSLA",
+    "AMD",
+    "AMZN",
+    "DG",
+    "KDP",
+    "LLY",
+    "NOC",
+    "NVDA",
+    "PGR",
+    "TEAM",
+    "UNH",
+    "WM",
+    "URTH",
+    "IWDA.AS",
+    "EEM",
+    "XAIX.DE",
+    "BTEC.L",
+    "L0CK.DE",
+    "2B76.DE",
+    "W1TA.DE",
+    "RENW.DE",
+    "BNXG.DE",
+    "BTC-USD",
+    "ETH-USD",
+    "AVAX-USD",
+    "TMF",
+    "FAS",
+    "TQQQ",
+    "QQQ",
+    "UUP",
+    "META",
+    "PYPL",
+    "ADBE",
+    "UPRO",
+    "BSV",
+    "SQQQ",
+    "NTSX",
+    "DBMF",
+    "VDE",
+    "VNQ",
+    "VHT",
+    "VFH",
+    "VOX",
+    "VPU",
+    "VAW",
+    "VGT",
+    "VIS",
+    "VDC",
+    "VCR",
+    "VLUE",
+    "FNDX",
+    "VTV",
+    "RWL",
+    "DBA",
+    "SHV",
+    "DBB",
+    "DBO",
+    "URA",
+    "WOOD",
+    "DBE",
 ]
 
 # ------------------------------------------------------------------
 # Configuration Objects
 # ------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class DataConfig:
     """Configuration for data freshness and caching."""
+
     freshness_tolerance_minutes: int = FRESHNESS_TOLERANCE_MINUTES
     price_cache_maxsize: int = PRICE_CACHE_MAXSIZE
     price_cache_ttl: int = PRICE_CACHE_TTL
@@ -64,6 +122,7 @@ class DataConfig:
 @dataclass(frozen=True)
 class PortfolioConfig:
     """Configuration for portfolio management thresholds."""
+
     min_asset_value_usd: float = MIN_ASSET_VALUE_USD
 
 
@@ -75,14 +134,11 @@ PORTFOLIO_CONFIG = PortfolioConfig()
 # Logging Setup
 # ------------------------------------------------------------------
 
-def setup_logging(
-    level: int = logging.INFO,
-    log_file: Optional[str] = None,
-    include_timestamp: bool = True
-) -> None:
+
+def setup_logging(level: int = logging.INFO, log_file: str | None = None, include_timestamp: bool = True) -> None:
     """
     Setup centralized logging for the trading bot framework.
-    
+
     Args:
         level: Logging level (default: logging.INFO)
         log_file: Optional path to a log file
@@ -98,11 +154,11 @@ def setup_logging(
 
     # Configure root logger
     root_logger = logging.getLogger()
-    
+
     # Avoid duplicate handlers if setup_logging is called multiple times
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
-        
+
     root_logger.setLevel(level)
 
     # Console handler

@@ -131,11 +131,12 @@ This document summarizes the Kronos financial forecasting integration added to t
 ```python
 from tradingbot.utils.core import Bot, KronosClient
 
+
 class MyBot(Bot):
     def decisionFunction(self, row):
         client = KronosClient()
         pred = client.predict(self.symbol, horizon=5)
-        
+
         if pred is not None:
             next_close = pred.iloc[0]["close"]
             if next_close > row["close"] * 1.05:
@@ -164,11 +165,12 @@ from datetime import datetime, timedelta
 
 with get_db_session() as session:
     tomorrow = datetime.utcnow() + timedelta(days=1)
-    pred = session.query(KronosPrediction).filter_by(
-        symbol="SPY",
-        target_date=tomorrow.replace(hour=0, minute=0, second=0)
-    ).first()
-    
+    pred = (
+        session.query(KronosPrediction)
+        .filter_by(symbol="SPY", target_date=tomorrow.replace(hour=0, minute=0, second=0))
+        .first()
+    )
+
     if pred:
         print(f"SPY predicted close: {pred.predicted_close}")
 ```

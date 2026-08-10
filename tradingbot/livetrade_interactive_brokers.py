@@ -1,19 +1,19 @@
 import json
 import logging
 import os
+
 from dotenv import load_dotenv
-from livetrade.interactive_brokers import InteractiveBrokersBroker
+
 from livetrade.copier import LiveTradeCopier
+from livetrade.interactive_brokers import InteractiveBrokersBroker
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("livetrade_ib")
+
 
 def main():
     account_id = os.getenv("IB_ACCOUNT_ID")
@@ -29,7 +29,9 @@ def main():
         return
 
     # Validate bot names against the DB before the copier touches them.
-    from utils.db import get_db_session, Bot as BotModel
+    from utils.db import Bot as BotModel
+    from utils.db import get_db_session
+
     with get_db_session() as session:
         existing_names = {b.name for b in session.query(BotModel).all()}
     missing = [name for name in bot_weights if name not in existing_names]
@@ -41,7 +43,7 @@ def main():
         return
 
     min_order = float(os.getenv("LIVETRADE_MIN_ORDER_USD", "50"))
-    dry_run = os.getenv("LIVETRADE_DRY_RUN", "true").lower() == "true" # Default to true for IB safety
+    dry_run = os.getenv("LIVETRADE_DRY_RUN", "true").lower() == "true"  # Default to true for IB safety
 
     try:
         portfolio_fraction = float(os.getenv("LIVETRADE_PORTFOLIO_FRACTION", "1.0"))
@@ -56,15 +58,15 @@ def main():
     logger.info(f"Bot weights: {bot_weights} | Dry Run: {dry_run}")
 
     broker = InteractiveBrokersBroker(account_id=account_id)
-    
+
     copier = LiveTradeCopier(
         broker=broker,
         bot_weights=bot_weights,
         min_order_usd=min_order,
         dry_run=dry_run,
-        portfolio_fraction=portfolio_fraction
+        portfolio_fraction=portfolio_fraction,
     )
-    
+
     try:
         broker.connect()
         copier.sync()
@@ -72,6 +74,7 @@ def main():
         logger.error(f"Error during sync: {e}", exc_info=True)
     finally:
         broker.disconnect()
+
 
 if __name__ == "__main__":
     main()

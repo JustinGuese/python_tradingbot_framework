@@ -5,12 +5,10 @@ Inputs: VIX series or value; index close series (e.g. QQQ) for trend; Fear & Gre
 No Bot or db dependency; pure functions.
 """
 
-from typing import Union
-
 import pandas as pd
 
 
-def vix_series_from_long_df(data_long: pd.DataFrame) -> Union[pd.Series, None]:
+def vix_series_from_long_df(data_long: pd.DataFrame) -> pd.Series | None:
     """
     Extract a VIX close-price series from a long-format DataFrame.
 
@@ -28,9 +26,7 @@ def vix_series_from_long_df(data_long: pd.DataFrame) -> Union[pd.Series, None]:
     return vix_df.set_index("timestamp")["close"].sort_index()
 
 
-def index_close_series_from_wide(
-    wide_close_df: pd.DataFrame, index_symbol: str = "QQQ"
-) -> Union[pd.Series, None]:
+def index_close_series_from_wide(wide_close_df: pd.DataFrame, index_symbol: str = "QQQ") -> pd.Series | None:
     """
     Extract an index close-price series (e.g. QQQ) from a wide-format DataFrame.
 
@@ -45,9 +41,9 @@ def index_close_series_from_wide(
 
 
 def classify_regime(
-    vix_series_or_value: Union[pd.Series, float, None],
-    index_close_series: Union[pd.Series, None],
-    fear_greed_value: Union[int, None],
+    vix_series_or_value: pd.Series | float | None,
+    index_close_series: pd.Series | None,
+    fear_greed_value: int | None,
     *,
     vix_high: float = 25,
     fg_fear: int = 25,
@@ -96,10 +92,7 @@ def classify_regime(
         ma50 = index_close_series.rolling(50, min_periods=50).mean()
         last_close = index_close_series.iloc[-1]
         last_ma = ma50.iloc[-1]
-        if pd.isna(last_ma):
-            uptrend = None
-        else:
-            uptrend = last_close > last_ma
+        uptrend = None if pd.isna(last_ma) else last_close > last_ma
         # Downtrend → defensive
         if uptrend is False:
             return "defensive"
@@ -205,18 +198,18 @@ def apply_regime_tilt(
     else:
         return {s: w / total_base for s, w in base_weights.items()}
 
-    s = sum(tilted.values())
-    if s <= 0:
+    total_tilted = sum(tilted.values())
+    if total_tilted <= 0:
         return {sym: 1.0 / len(base_weights) for sym in base_weights}
-    return {sym: v / s for sym, v in tilted.items()}
+    return {sym: v / total_tilted for sym, v in tilted.items()}
 
 
 def regime_compute_weights(
     symbols: list[str],
-    vix_series_or_value: Union[pd.Series, float, None],
-    index_close_series: Union[pd.Series, None],
+    vix_series_or_value: pd.Series | float | None,
+    index_close_series: pd.Series | None,
     wide_close_df: pd.DataFrame,
-    fear_greed_value: Union[int, None],
+    fear_greed_value: int | None,
 ) -> dict[str, float]:
     """
     Compute regime-tilted weights for a symbol universe.
@@ -227,6 +220,6 @@ def regime_compute_weights(
     if not symbols:
         return {}
     n = len(symbols)
-    base_weights = {s: 1.0 / n for s in symbols}
+    base_weights = dict.fromkeys(symbols, 1.0 / n)
     reg = classify_regime(vix_series_or_value, index_close_series, fear_greed_value)
     return apply_regime_tilt(reg, base_weights, wide_close_df)

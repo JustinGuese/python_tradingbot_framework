@@ -15,11 +15,13 @@ For backwards compatibility, the most common core symbols are still re-exported 
 the `utils` package root, but new code should prefer the subpackages above.
 """
 
-from .botclass import Bot
 from .bot_repository import BotRepository
+from .botclass import Bot
 from .data_service import DataService
 from .db import (
     Bot as BotModel,
+)
+from .db import (
     HistoricData,
     RunLog,
     SessionLocal,
@@ -40,4 +42,3 @@ __all__ = [
     "Trade",
     "get_db_session",
 ]
-

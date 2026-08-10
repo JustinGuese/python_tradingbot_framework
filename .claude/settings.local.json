@@ -5,7 +5,8 @@
       "WebFetch(domain:skills.bullaware.com)",
       "WebSearch",
       "mcp__plugin_claude-mem_mcp-search__get_observations",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(.venv/bin/ruff check *)"
     ]
   }
 }

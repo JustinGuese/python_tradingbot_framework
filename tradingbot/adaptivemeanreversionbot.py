@@ -41,6 +41,7 @@ Research:
 
 import logging
 import math
+from typing import ClassVar
 
 import pandas as pd
 
@@ -65,7 +66,7 @@ class AdaptiveMeanReversionBot(Bot):
     the buffered sell exit protects against sustained bear markets.
     """
 
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         # How calm must volatility be for entry?  Higher = more permissive.
         "atr_multiplier": [1.5, 2.0, 3.0, 5.0],
         # How far below SMA-200 before exiting?  Wider = more time invested.
@@ -155,8 +156,7 @@ class AdaptiveMeanReversionBot(Bot):
         atr_ma = float(row.get("atr_ma20", 0.0))
 
         # Guard: skip warmup rows with insufficient data
-        if not (close > 0 and sma_200 > 0 and not math.isnan(sma_200)
-                and atr_ma > 0 and not math.isnan(atr_ma)):
+        if not (close > 0 and sma_200 > 0 and not math.isnan(sma_200) and atr_ma > 0 and not math.isnan(atr_ma)):
             return 0
 
         # --- SELL: price has broken down well below trend ---------------
@@ -191,7 +191,7 @@ if __name__ == "__main__":
 # 2026-03-22 11:51:07 - utils.botclass - INFO -   atr_multiplier: 1.5
 # 2026-03-22 11:51:07 - utils.botclass - INFO -   sell_buffer: 0.03
 
-# 2026-03-22 11:51:13 - utils.botclass - INFO - 
+# 2026-03-22 11:51:13 - utils.botclass - INFO -
 # --- Backtest Results: AdaptiveMeanReversionBot ---
 # 2026-03-22 11:51:13 - utils.botclass - INFO - Yearly Return: 25.25%
 # 2026-03-22 11:51:13 - utils.botclass - INFO - Buy & Hold Return: 21.67%

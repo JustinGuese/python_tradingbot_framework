@@ -28,6 +28,7 @@ class EarningsInsiderTiltBot(Bot):
         self.rebalancePortfolio(weights, onlyOver50USD=True)
         return 0
 
+
 if __name__ == "__main__":
     bot = EarningsInsiderTiltBot()
     bot.run()

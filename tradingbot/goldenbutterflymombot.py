@@ -34,7 +34,6 @@ Research:
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -46,15 +45,16 @@ logger = logging.getLogger(__name__)
 UNIVERSE = ["VTI", "IJS", "TLT", "SHY", "IAU"]
 BENCHMARK = "SPY"
 
-LOOKBACK_12M = 252   # ~trading days in 12 months
-LOOKBACK_1M = 21     # ~trading days in 1 month
-OBV_WINDOW = 10      # OBV trend lookback (days)
-CMF_PERIOD = 20      # Chaikin Money Flow rolling window
+LOOKBACK_12M = 252  # ~trading days in 12 months
+LOOKBACK_1M = 21  # ~trading days in 1 month
+OBV_WINDOW = 10  # OBV trend lookback (days)
+CMF_PERIOD = 20  # Chaikin Money Flow rolling window
 
 
 # ------------------------------------------------------------------
 # Volume / money-flow helpers  (computed from raw OHLCV)
 # ------------------------------------------------------------------
+
 
 def _compute_obv(df: pd.DataFrame) -> pd.Series:
     """On-Balance Volume: cumulative signed volume."""
@@ -74,7 +74,7 @@ def _compute_cmf(df: pd.DataFrame, period: int = CMF_PERIOD) -> float:
     return float(cmf_series.iloc[-1]) if len(cmf_series) >= period else 0.0
 
 
-def _safe_log_return(df: pd.DataFrame, lookback: int) -> Optional[float]:
+def _safe_log_return(df: pd.DataFrame, lookback: int) -> float | None:
     """Log return over the last `lookback` bars; None if insufficient data."""
     if len(df) < lookback + 1:
         return None
@@ -94,6 +94,7 @@ def _zscore(arr: np.ndarray) -> np.ndarray:
 # Bot
 # ------------------------------------------------------------------
 
+
 class GoldenButterflyMomBot(Bot):
     """
     Golden Butterfly five-asset portfolio with RRG momentum overlay (Pattern B).
@@ -110,9 +111,9 @@ class GoldenButterflyMomBot(Bot):
     def __init__(self):
         super().__init__(
             "GoldenButterflyMomBot",
-            tickers=UNIVERSE + [BENCHMARK],
+            tickers=[*UNIVERSE, BENCHMARK],
             interval="1d",
-            period="2y",        # ~504 bars — enough for LOOKBACK_12M=252 + buffer
+            period="2y",  # ~504 bars — enough for LOOKBACK_12M=252 + buffer
         )
 
     # ------------------------------------------------------------------
@@ -127,10 +128,7 @@ class GoldenButterflyMomBot(Bot):
         keys = []
         for sym, df in self.datas.items():
             if df is not None and not df.empty:
-                if hasattr(df, "index") and not isinstance(df.index, pd.RangeIndex):
-                    ts = df.index[-1]
-                else:
-                    ts = len(df)
+                ts = df.index[-1] if hasattr(df, "index") and not isinstance(df.index, pd.RangeIndex) else len(df)
                 keys.append((sym, ts))
         return tuple(sorted(keys))
 
@@ -217,7 +215,9 @@ class GoldenButterflyMomBot(Bot):
                 sig = -1
 
             signals[sym] = sig
-            logger.info(f"{sym:4s}  {quadrant:10s}  {rr:+6.2f}  {rm:+6.2f}  {cmf_val:+6.2f}  {str(obv_rising):>4s}  {sig:>3d}")
+            logger.info(
+                f"{sym:4s}  {quadrant:10s}  {rr:+6.2f}  {rm:+6.2f}  {cmf_val:+6.2f}  {obv_rising!s:>4s}  {sig:>3d}"
+            )
 
         return signals
 
@@ -249,6 +249,10 @@ class GoldenButterflyMomBot(Bot):
         return self._rrg_signals.get(ticker, 0)
 
 
-bot = GoldenButterflyMomBot()
-bot.run()
-# bot.local_backtest()
+# Guarded so XAUZenCarryBot's backtest can import the RRG logic instead of
+# copying it. The Helm CronJob invokes `python goldenbutterflymombot.py`, so
+# __name__ == "__main__" and behaviour is unchanged.
+if __name__ == "__main__":
+    bot = GoldenButterflyMomBot()
+    bot.run()
+    # bot.local_backtest()

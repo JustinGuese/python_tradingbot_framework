@@ -1,7 +1,8 @@
 """Backtesting functionality for trading bots."""
 
+import contextlib
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,6 @@ import pandas as pd
 from .botclass import Bot
 
 logger = logging.getLogger(__name__)
-
 
 
 def _get_periods_per_year(interval: str) -> float:
@@ -93,29 +93,26 @@ def _upload_quantstats_report(
         return
 
     import boto3
-    from botocore.config import Config
     import quantstats as qs
+    from botocore.config import Config
+
     bucket = os.environ.get("GCS_BUCKET_NAME", "tradingbotrunresults")
 
     tmp_path = None
     try:
         if all(t is not None for t in portfolio_timestamps):
-            idx = pd.DatetimeIndex(
-                pd.to_datetime(portfolio_timestamps, utc=True).tz_convert(None).normalize()
-            )
+            idx = pd.DatetimeIndex(pd.to_datetime(portfolio_timestamps, utc=True).tz_convert(None).normalize())
         else:
             idx = None
         returns = pd.Series(portfolio_values, index=idx)
         returns = returns[~returns.index.duplicated(keep="last")].pct_change().dropna()
         close = data["close"].dropna()
         if "timestamp" in data.columns:
-            ts_idx = pd.to_datetime(
-                data.loc[close.index, "timestamp"], utc=True
-            ).dt.tz_convert(None).dt.normalize()
+            ts_idx = pd.to_datetime(data.loc[close.index, "timestamp"], utc=True).dt.tz_convert(None).dt.normalize()
             close = pd.Series(close.values, index=ts_idx)
         else:
             close = close.reset_index(drop=True)
-            close.index = returns.index[:len(close)]
+            close.index = returns.index[: len(close)]
         close = close[~close.index.duplicated(keep="last")]
         benchmark = close.pct_change().dropna()
         benchmark.name = "Benchmark"
@@ -124,15 +121,19 @@ def _upload_quantstats_report(
             tmp_path = f.name
 
         try:
-            qs.reports.html(returns, benchmark=benchmark, output=tmp_path,
-                            title=f"{bot_name} – {metric_folder}",
-                            download_filename="report.html")
+            qs.reports.html(
+                returns,
+                benchmark=benchmark,
+                output=tmp_path,
+                title=f"{bot_name} – {metric_folder}",
+                download_filename="report.html",
+            )
         except (ValueError, TypeError):
             # Benchmark alignment failed (e.g. no overlap or zero variance);
             # fall back to a report without benchmark.
-            qs.reports.html(returns, output=tmp_path,
-                            title=f"{bot_name} – {metric_folder}",
-                            download_filename="report.html")
+            qs.reports.html(
+                returns, output=tmp_path, title=f"{bot_name} – {metric_folder}", download_filename="report.html"
+            )
 
         client = boto3.client(
             "s3",
@@ -157,17 +158,15 @@ def _upload_quantstats_report(
         raise
     finally:
         if tmp_path:
-            try:
+            with contextlib.suppress(Exception):
                 os.unlink(tmp_path)
-            except Exception:
-                pass
 
 
 def _compute_backtest_metrics(
     portfolio_values: list,
     interval: str,
     risk_free_rate: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Shared metrics computation for single- and multi-ticker backtests."""
     if len(portfolio_values) < 2:
         raise ValueError(
@@ -250,10 +249,12 @@ def _save_backtest_to_db(
     data_for_qs: pd.DataFrame,
 ) -> None:
     """Persist best backtest result to DB and upload QuantStats report."""
-    updated_metrics: List[str] = []
+    updated_metrics: list[str] = []
     try:
         from sqlalchemy import and_
+
         from .db import BacktestResult, get_db_session
+
         _bot_name = bot.bot_name
         _interval = getattr(bot, "interval", None)
         with get_db_session() as session:
@@ -261,46 +262,57 @@ def _save_backtest_to_db(
                 ("best_sharpe", result["sharpe_ratio"], "sharpe_ratio"),
                 ("best_yearly_return", result["yearly_return"], "yearly_return"),
             ]:
-                existing = session.query(BacktestResult).filter(
-                    and_(
-                        BacktestResult.bot_name == _bot_name,
-                        BacktestResult.symbol == symbol_key,
-                        BacktestResult.interval == _interval,
-                        BacktestResult.metric == metric,
+                existing = (
+                    session.query(BacktestResult)
+                    .filter(
+                        and_(
+                            BacktestResult.bot_name == _bot_name,
+                            BacktestResult.symbol == symbol_key,
+                            BacktestResult.interval == _interval,
+                            BacktestResult.metric == metric,
+                        )
                     )
-                ).first()
+                    .first()
+                )
                 existing_val = getattr(existing, compare_col, None)
                 new_params = dict(getattr(bot, "params", {}) or {})
-                
+
                 # Only write if it's better, or if it's the same score but different in params/return/sharpe
                 is_different = (
-                    existing is None or
-                    existing.params != new_params or
-                    existing.yearly_return != result["yearly_return"] or
-                    existing.sharpe_ratio != result["sharpe_ratio"]
+                    existing is None
+                    or existing.params != new_params
+                    or existing.yearly_return != result["yearly_return"]
+                    or existing.sharpe_ratio != result["sharpe_ratio"]
                 )
-                
-                if existing is None or existing_val is None or new_value > existing_val or (new_value == existing_val and is_different):
+
+                if (
+                    existing is None
+                    or existing_val is None
+                    or new_value > existing_val
+                    or (new_value == existing_val and is_different)
+                ):
                     if existing is not None:
                         session.delete(existing)
                         session.flush()
-                    session.add(BacktestResult(
-                        bot_name=_bot_name,
-                        symbol=symbol_key,
-                        interval=_interval,
-                        period=getattr(bot, "period", None),
-                        metric=metric,
-                        params=new_params,
-                        yearly_return=result["yearly_return"],
-                        sharpe_ratio=result["sharpe_ratio"],
-                        nrtrades=result["nrtrades"],
-                        maxdrawdown=result["maxdrawdown"],
-                        buy_hold_return=result["buy_hold_return"],
-                        sortino_ratio=result.get("sortino_ratio"),
-                        calmar_ratio=result.get("calmar_ratio"),
-                        win_rate=result.get("win_rate"),
-                        volatility=result.get("volatility"),
-                    ))
+                    session.add(
+                        BacktestResult(
+                            bot_name=_bot_name,
+                            symbol=symbol_key,
+                            interval=_interval,
+                            period=getattr(bot, "period", None),
+                            metric=metric,
+                            params=new_params,
+                            yearly_return=result["yearly_return"],
+                            sharpe_ratio=result["sharpe_ratio"],
+                            nrtrades=result["nrtrades"],
+                            maxdrawdown=result["maxdrawdown"],
+                            buy_hold_return=result["buy_hold_return"],
+                            sortino_ratio=result.get("sortino_ratio"),
+                            calmar_ratio=result.get("calmar_ratio"),
+                            win_rate=result.get("win_rate"),
+                            volatility=result.get("volatility"),
+                        )
+                    )
                     updated_metrics.append(metric)
     except Exception as e:
         logger.warning(f"Failed to save backtest result to DB: {e}")
@@ -321,7 +333,7 @@ def backtest_bot(
     bot: Bot,
     initial_capital: float = 10000.0,
     save_to_db: bool = True,
-    data: Optional[Union[pd.DataFrame, Dict[str, pd.DataFrame]]] = None,
+    data: pd.DataFrame | dict[str, pd.DataFrame] | None = None,
     slippage_pct: float = 0.0005,
     commission_pct: float = 0.0,
     risk_free_rate: float = 0.0,
@@ -371,14 +383,13 @@ def backtest_bot(
     # ------------------------------------------------------------------ #
     if N > 1:
         backtest_period = None
-        data_dict: Dict[str, pd.DataFrame] = {}
+        data_dict: dict[str, pd.DataFrame] = {}
 
         if isinstance(data, dict):
             data_dict = data
         elif data is not None:
             raise ValueError(
-                "For multi-ticker bots, 'data' must be a dict[str, pd.DataFrame]. "
-                "Pass None to fetch automatically."
+                "For multi-ticker bots, 'data' must be a dict[str, pd.DataFrame]. Pass None to fetch automatically."
             )
         else:
             backtest_period = _get_backtest_period(bot.interval)
@@ -392,10 +403,10 @@ def backtest_bot(
                     )
                     data_dict[ticker] = df
                 except Exception as e:
-                    raise ValueError(f"Failed to fetch data for {ticker}: {e}")
+                    raise ValueError(f"Failed to fetch data for {ticker}: {e}") from e
 
         # Sort and index each DataFrame by timestamp
-        indexed: Dict[str, pd.DataFrame] = {}
+        indexed: dict[str, pd.DataFrame] = {}
         for ticker, df in data_dict.items():
             if df.empty or len(df) < 2:
                 raise ValueError(f"Insufficient data for ticker {ticker}")
@@ -415,13 +426,11 @@ def backtest_bot(
             common_ts = common_ts.intersection(indexed[t].index)
         common_ts = sorted(common_ts)
         if len(common_ts) < 2:
-            raise ValueError(
-                "Insufficient common timestamps across tickers for multi-ticker backtest."
-            )
+            raise ValueError("Insufficient common timestamps across tickers for multi-ticker backtest.")
 
         has_ta_columns = all("trend_adx" in indexed[t].columns for t in tickers)
 
-        portfolio: Dict[str, float] = {"USD": initial_capital}
+        portfolio: dict[str, float] = {"USD": initial_capital}
         portfolio_values: list = []
         portfolio_timestamps: list = []
         nrtrades = 0
@@ -434,7 +443,7 @@ def backtest_bot(
             bot.datas = {t: indexed[t].loc[:ts] for t in tickers}
 
             # Validate prices for all tickers
-            prices: Dict[str, float] = {}
+            prices: dict[str, float] = {}
             valid = True
             for ticker, row in rows.items():
                 try:
@@ -453,9 +462,7 @@ def backtest_bot(
             if has_ta_columns and any(rows[t]["trend_adx"] == 0.0 for t in tickers):
                 continue
 
-            total_value = portfolio.get("USD", 0.0) + sum(
-                portfolio.get(t, 0.0) * prices[t] for t in tickers
-            )
+            total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tickers)
             target = total_value / N
 
             for ticker in tickers:
@@ -492,9 +499,7 @@ def backtest_bot(
                     portfolio[ticker] = 0.0
                     nrtrades += 1
 
-            current_total = portfolio.get("USD", 0.0) + sum(
-                portfolio.get(t, 0.0) * prices[t] for t in tickers
-            )
+            current_total = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tickers)
             portfolio_values.append(current_total)
             portfolio_timestamps.append(ts)
 
@@ -502,7 +507,7 @@ def backtest_bot(
 
         # Buy-and-hold: equal-weight mean of individual B&H returns across tickers
         bh_returns = []
-        for ticker, df in data_dict.items():
+        for _ticker, df in data_dict.items():
             close = df["close"].dropna()
             if len(close) >= 2:
                 first = float(close.iloc[0])
@@ -531,16 +536,7 @@ def backtest_bot(
     symbol = tickers[0]
     backtest_period = None
 
-    if data is not None:
-        if isinstance(data, dict):
-            # Unwrap single-ticker dict (e.g., passed from hyperparameter tuner)
-            data = data.get(symbol, next(iter(data.values())))
-        if "close" not in data.columns or "timestamp" not in data.columns:
-            raise ValueError(
-                "Provided data must have 'close' and 'timestamp' columns. "
-                "It should also include all TA indicators required by decisionFunction."
-            )
-    else:
+    if data is None:
         backtest_period = _get_backtest_period(bot.interval)
         try:
             data = bot.getYFDataWithTA(
@@ -550,7 +546,18 @@ def backtest_bot(
                 saveToDB=save_to_db,
             )
         except Exception as e:
-            raise ValueError(f"Failed to fetch historical data: {e}")
+            raise ValueError(f"Failed to fetch historical data: {e}") from e
+    elif isinstance(data, dict):
+        # Unwrap single-ticker dict (e.g., passed from hyperparameter tuner)
+        data = cast(pd.DataFrame, data.get(symbol, next(iter(data.values()))))
+
+    # Narrow type: assert data is not a dict (helps mypy)
+    assert not isinstance(data, dict)
+    if "close" not in data.columns or "timestamp" not in data.columns:
+        raise ValueError(
+            "Provided data must have 'close' and 'timestamp' columns. "
+            "It should also include all TA indicators required by decisionFunction."
+        )
 
     if data.empty:
         raise ValueError("No historical data available for backtesting")
@@ -565,6 +572,9 @@ def backtest_bot(
     if backtest_period:
         bot.datasettings = (bot.interval, backtest_period)
 
+    # Final type narrowing for mypy
+    assert not isinstance(data, dict), "data should be a DataFrame at this point"
+
     # trend_adx has ~26-bar warmup; warmup rows have trend_adx == 0.0 after fillna.
     has_ta_columns = "trend_adx" in data.columns
 
@@ -576,7 +586,7 @@ def backtest_bot(
     for idx, row in data.iterrows():
         # Update bot's data cache with current slice to prevent look-ahead bias
         # if the bot uses self.data inside decisionFunction.
-        bot.data = data.iloc[:idx+1]
+        bot.data = data.iloc[: idx + 1]
 
         try:
             current_price = float(row["close"])
@@ -605,15 +615,14 @@ def backtest_bot(
                 portfolio["USD"] = 0.0
                 portfolio[symbol] = holdings + quantity
                 nrtrades += 1
-        elif decision == -1:
-            if holdings > 0:
-                execution_price = current_price * (1 - slippage_pct)
-                cash_proceeds = holdings * execution_price
-                commission_cost = cash_proceeds * commission_pct
-                net_proceeds = cash_proceeds - commission_cost
-                portfolio["USD"] = cash + net_proceeds
-                portfolio[symbol] = 0.0
-                nrtrades += 1
+        elif decision == -1 and holdings > 0:
+            execution_price = current_price * (1 - slippage_pct)
+            cash_proceeds = holdings * execution_price
+            commission_cost = cash_proceeds * commission_pct
+            net_proceeds = cash_proceeds - commission_cost
+            portfolio["USD"] = cash + net_proceeds
+            portfolio[symbol] = 0.0
+            nrtrades += 1
 
         current_cash = portfolio.get("USD", 0.0)
         current_holdings = portfolio.get(symbol, 0.0)

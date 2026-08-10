@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Literal, Optional
+from typing import Literal
 
 from ibind import IbkrClient, OrderRequest, QuestionType
 
@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 # answer True to all of them so a market order goes through unattended in the
 # cron job. QuestionType members are str subclasses.
 _ORDER_ANSWERS = {
-    getattr(QuestionType, name): True
-    for name in dir(QuestionType)
-    if name.isupper() and not name.startswith("_")
+    getattr(QuestionType, name): True for name in dir(QuestionType) if name.isupper() and not name.startswith("_")
 }
 
 
@@ -40,7 +38,7 @@ class InteractiveBrokersBroker(LiveBroker):
         self.account_id = account_id
         self.symbol_mapper = symbol_mapper or SymbolMapper()
         self.data_service = data_service or DataService()
-        self.client: Optional[IbkrClient] = None
+        self.client: IbkrClient | None = None
         self._connected = False
 
     # ------------------------------------------------------------------ #
@@ -56,9 +54,7 @@ class InteractiveBrokersBroker(LiveBroker):
         """
         if self._connected:
             return
-        logger.info(
-            f"Connecting to IBKR Web API via OAuth 1.0a (account={self.account_id or '(default)'})"
-        )
+        logger.info(f"Connecting to IBKR Web API via OAuth 1.0a (account={self.account_id or '(default)'})")
         try:
             self.client = IbkrClient(use_oauth=True, account_id=self.account_id or None)
             # Confirm the session is live; raises if auth failed.
@@ -88,7 +84,7 @@ class InteractiveBrokersBroker(LiveBroker):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    def _acct(self) -> Optional[str]:
+    def _acct(self) -> str | None:
         """The account id to pass to per-account endpoints. ibind falls back to
         its own selected account when None, but we prefer the explicit one."""
         return self.account_id or None
@@ -100,13 +96,15 @@ class InteractiveBrokersBroker(LiveBroker):
         """Read a value from the portfolio ledger, preferring the USD sub-ledger
         then BASE. The ledger is keyed by currency: {"USD": {...}, "BASE": {...}}."""
         self.connect(readonly=True)
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         try:
             ledger = self.client.get_ledger(self._acct()).data or {}
         except Exception as e:
             logger.error(f"get_ledger failed: {e}")
             return 0.0
 
-        def _pick(entry) -> Optional[float]:
+        def _pick(entry) -> float | None:
             if not isinstance(entry, dict):
                 return None
             for k in keys:
@@ -153,7 +151,9 @@ class InteractiveBrokersBroker(LiveBroker):
         """Fetch all positions, paging until a short page is returned.
         The Web API returns up to 100 positions per page."""
         self.connect(readonly=True)
-        out = []
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
+        out: list[dict] = []
         page = 0
         while True:
             rows = self.client.positions(self._acct(), page=page).data or []
@@ -163,8 +163,8 @@ class InteractiveBrokersBroker(LiveBroker):
             page += 1
         return out
 
-    def get_positions(self) -> Dict[str, float]:
-        result: Dict[str, float] = {}
+    def get_positions(self) -> dict[str, float]:
+        result: dict[str, float] = {}
         for p in self._raw_positions():
             qty = float(p.get("position", 0.0) or 0.0)
             if qty == 0.0:
@@ -183,10 +183,12 @@ class InteractiveBrokersBroker(LiveBroker):
     # ------------------------------------------------------------------ #
     # Orders
     # ------------------------------------------------------------------ #
-    def _resolve_conid(self, broker_symbol: str) -> Optional[int]:
+    def _resolve_conid(self, broker_symbol: str) -> int | None:
         """Resolve a US-listed stock/ETF symbol to a single conid. Returns None
         if IBKR has no unambiguous US listing for the ticker."""
         self.connect(readonly=True)
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         try:
             data = self.client.stock_conid_by_symbol(broker_symbol).data or {}
             return data.get(broker_symbol)
@@ -199,12 +201,10 @@ class InteractiveBrokersBroker(LiveBroker):
         broker_symbol: str,
         quantity: float,
         side: Literal["BUY", "SELL"],
-        symbol_type: Optional[str] = None,
+        symbol_type: str | None = None,
     ) -> None:
         self.connect(readonly=False)
-        meta = self.map_symbol(
-            self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
-        )
+        meta = self.map_symbol(self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name))
         if not meta:
             raise ValueError(f"Could not map {broker_symbol} to IB contract metadata")
 
@@ -220,9 +220,7 @@ class InteractiveBrokersBroker(LiveBroker):
 
         conid = self._resolve_conid(broker_symbol)
         if conid is None:
-            logger.warning(
-                f"No unambiguous US conid for {broker_symbol}; skipping {side} order"
-            )
+            logger.warning(f"No unambiguous US conid for {broker_symbol}; skipping {side} order")
             return
 
         # Stocks must be integer-quantity; floor residuals.
@@ -245,6 +243,8 @@ class InteractiveBrokersBroker(LiveBroker):
         )
 
         logger.info(f"Submitting IB {side} order for {final_qty} {broker_symbol} (conid={conid})")
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         try:
             result = self.client.place_order(order, _ORDER_ANSWERS, self._acct()).data
             logger.info(f"IB Order response: {result}")
@@ -255,6 +255,8 @@ class InteractiveBrokersBroker(LiveBroker):
     def cancel_open_orders(self) -> int:
         """Cancel this account's live (working) orders."""
         self.connect(readonly=False)
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         try:
             orders = self.client.live_orders().data or {}
         except Exception as e:
@@ -308,6 +310,8 @@ class InteractiveBrokersBroker(LiveBroker):
 
     def search_symbol(self, query: str) -> list[dict]:
         self.connect(readonly=True)
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         try:
             results = self.client.security_stocks_by_symbol(query).data or {}
         except Exception as e:
@@ -329,6 +333,8 @@ class InteractiveBrokersBroker(LiveBroker):
 
     def print_account_summary(self) -> None:
         self.connect(readonly=True)
+        if self.client is None:
+            raise RuntimeError("IBKR client not connected — call connect() first")
         accounts = self.client.portfolio_accounts().data
         print(f"Portfolio accounts: {accounts}")
         print(f"Configured account: {self.account_id or '(none — using default)'}")
@@ -347,20 +353,16 @@ class InteractiveBrokersBroker(LiveBroker):
         print(f"  {'Symbol':<12} {'Qty':>12} {'Mkt Value':>15}")
         for p in positions:
             sym = p.get("ticker") or p.get("contractDesc") or "?"
-            print(
-                f"  {sym:<12} {float(p.get('position', 0) or 0):>12.4f} "
-                f"{float(p.get('mktValue', 0) or 0):>15.2f}"
-            )
+            print(f"  {sym:<12} {float(p.get('position', 0) or 0):>12.4f} {float(p.get('mktValue', 0) or 0):>15.2f}")
 
 
 if __name__ == "__main__":
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     broker = InteractiveBrokersBroker(account_id=os.getenv("IB_ACCOUNT_ID", ""))
     try:

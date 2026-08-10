@@ -16,7 +16,7 @@ ticker (e.g. "^GSPC" for US500, "BTC-USD" for BTC, "GC=F" for XAUUSD).
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from utils.botclass import Bot
 from utils.db import TelegramMessage, get_db_session
@@ -24,7 +24,7 @@ from utils.db import TelegramMessage, get_db_session
 logger = logging.getLogger(__name__)
 
 CHANNEL_ID = "-1001998690333"
-LOOKBACK_DAYS = 3       # Only consider signals from the last N days
+LOOKBACK_DAYS = 3  # Only consider signals from the last N days
 POSITION_SIZE_PCT = 0.2  # Spend 20% of available cash per signal
 
 
@@ -46,9 +46,9 @@ def _classify_signal(text: str, summary: str) -> dict | None:
         "take-profit / stop-loss hit notifications, performance recaps, "
         "market analysis without a concrete entry, or general commentary.\n\n"
         "If it is a signal, also return the correct Yahoo Finance ticker symbol. "
-        "Examples: US500/US500.c → \"^GSPC\", DJ30/DJ30.c → \"^DJI\", "
-        "BTC → \"BTC-USD\", XAUUSD → \"GC=F\", XAGUSD → \"SI=F\", "
-        "EURUSD → \"EURUSD=X\", CADJPY → \"CADJPY=X\", GBPUSD → \"GBPUSD=X\".\n\n"
+        'Examples: US500/US500.c → "^GSPC", DJ30/DJ30.c → "^DJI", '
+        'BTC → "BTC-USD", XAUUSD → "GC=F", XAGUSD → "SI=F", '
+        'EURUSD → "EURUSD=X", CADJPY → "CADJPY=X", GBPUSD → "GBPUSD=X".\n\n'
         "Respond with valid JSON only: "
         '{"is_signal": true/false, "direction": "BUY" or "SELL" or null, '
         '"yf_ticker": "<yahoo_finance_symbol>" or null}'
@@ -74,7 +74,7 @@ class TelegramSignalsBankBot(Bot):
         super().__init__("TelegramSignalsBankBot", symbol=None)
 
     def makeOneIteration(self) -> int:
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=LOOKBACK_DAYS)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=LOOKBACK_DAYS)
 
         with get_db_session() as session:
             messages = (
@@ -89,10 +89,7 @@ class TelegramSignalsBankBot(Bot):
                 .all()
             )
             # Detach: snapshot the data we need before closing the session
-            pending = [
-                (m.id, m.message_id, m.symbol or "", m.text or "", m.summary or "")
-                for m in messages
-            ]
+            pending = [(m.id, m.message_id, m.symbol or "", m.text or "", m.summary or "") for m in messages]
 
         logger.info(f">> {len(pending)} unacted message(s) to evaluate.")
         if not pending:
@@ -129,9 +126,7 @@ class TelegramSignalsBankBot(Bot):
                 logger.info(f"    >> SELL {yf_symbol} (holding: {holding})")
                 self.sell(yf_symbol)
             else:
-                logger.info(f"    >> {direction} {yf_symbol}: nothing to act on "
-                      f"(cash={cash:.2f}, holding={holding})")
-
+                logger.info(f"    >> {direction} {yf_symbol}: nothing to act on (cash={cash:.2f}, holding={holding})")
 
         return 0
 

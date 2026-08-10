@@ -36,6 +36,7 @@ Does your signal fit in a single row of data or self.data history?
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class RSIMeanReversionBot(Bot):
     def __init__(self):
         super().__init__("RSIMeanReversionBot", "SPY", interval="1d", period="1y")
@@ -47,6 +48,7 @@ class RSIMeanReversionBot(Bot):
         elif rsi > 70:
             return -1  # Sell overbought
         return 0  # Hold
+
 
 if __name__ == "__main__":
     bot = RSIMeanReversionBot()
@@ -61,6 +63,7 @@ If your signal needs the full historical slice (e.g., Hurst exponent, rolling z-
 
 ```python
 import numpy as np
+
 
 class HurstMeanReversionBot(Bot):
     def __init__(self):
@@ -158,6 +161,7 @@ class GoldenButterflyMomBot(Bot):
 ```python
 from utils.portfolio import get_fear_greed_index
 
+
 class FearGreedBot(Bot):
     def __init__(self):
         super().__init__("FearGreedBot", "QQQ", interval="1d", period="1y")
@@ -183,6 +187,7 @@ class FearGreedBot(Bot):
             return -1
         return 0
 
+
 # Cannot call: bot.local_backtest() ← RuntimeError
 # Can only run: bot.run()  # Live execution
 ```
@@ -193,6 +198,7 @@ class FearGreedBot(Bot):
 
 ```python
 from utils.portfolio import TRADEABLE, sharpe_compute_weights
+
 
 class SharpePortfolioOptBot(Bot):
     def __init__(self):
@@ -219,6 +225,7 @@ class SharpePortfolioOptBot(Bot):
         # Rebalance to optimal allocation
         self.rebalancePortfolio(weights, onlyOver50USD=True)
         return 0
+
 
 # Cannot call: bot.local_backtest() ← will use equal-weight, not Sharpe weights
 # Can only run: bot.run()  # Live rebalancing
@@ -251,6 +258,7 @@ class AIResearchBot(Bot):
             self.buy("QQQ")
             return 1
         return 0
+
 
 # Cannot call: bot.local_backtest() ← AI model behavior is not reproducible
 # Can only run: bot.run()  # Live AI execution
@@ -294,7 +302,7 @@ def makeOneIteration(self):
     self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
     data = self.getYFDataWithTA(...)
     self.data = data  # ← not needed anymore!
-    self.datasettings = (...)  # ← not needed anymore!
+    self.datasettings = ...  # ← not needed anymore!
     decision = self.getLatestDecision(data)
     # ... buy/sell ...
 ```

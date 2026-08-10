@@ -34,10 +34,11 @@ Create a trading bot by simply implementing a `decisionFunction()`:
 ```python
 from tradingbot.utils.botclass import Bot
 
+
 class MyBot(Bot):
     def __init__(self):
         super().__init__("MyBot", "QQQ", interval="1m", period="1d")
-    
+
     def decisionFunction(self, row):
         if row["momentum_rsi"] < 30:
             return 1  # Buy - oversold
@@ -86,8 +87,7 @@ Run the AI with a system prompt and user message; the model can use tools to acc
 
 ```python
 response = bot.run_ai(
-    system_prompt="You are a trading assistant.",
-    user_message="Summarize my portfolio and recent trades."
+    system_prompt="You are a trading assistant.", user_message="Summarize my portfolio and recent trades."
 )
 ```
 

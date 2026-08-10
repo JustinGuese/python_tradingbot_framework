@@ -8,9 +8,9 @@ Stores bot configuration and portfolio state.
 
 ```python
 class Bot(Base):
-    name: str                    # Primary key
-    description: str             # Optional description
-    portfolio: dict              # JSON: {"USD": 10000, "QQQ": 5.5, ...}
+    name: str  # Primary key
+    description: str  # Optional description
+    portfolio: dict  # JSON: {"USD": 10000, "QQQ": 5.5, ...}
     created_at: datetime
     updated_at: datetime
 ```
@@ -23,14 +23,14 @@ Logs all trade executions.
 
 ```python
 class Trade(Base):
-    id: int                      # Auto-increment primary key
-    bot_name: str                # Foreign key to Bot.name
-    symbol: str                  # Trading symbol
-    isBuy: bool                  # True for buy, False for sell
-    quantity: float              # Number of shares/units
-    price: float                 # Price per unit
-    timestamp: datetime           # Execution time
-    profit: float                 # Profit (for sells, nullable)
+    id: int  # Auto-increment primary key
+    bot_name: str  # Foreign key to Bot.name
+    symbol: str  # Trading symbol
+    isBuy: bool  # True for buy, False for sell
+    quantity: float  # Number of shares/units
+    price: float  # Price per unit
+    timestamp: datetime  # Execution time
+    profit: float  # Profit (for sells, nullable)
 ```
 
 ## HistoricData Model
@@ -39,8 +39,8 @@ Caches market data for performance.
 
 ```python
 class HistoricData(Base):
-    symbol: str                  # Primary key (part of composite)
-    timestamp: datetime           # Primary key (part of composite)
+    symbol: str  # Primary key (part of composite)
+    timestamp: datetime  # Primary key (part of composite)
     open: float
     high: float
     low: float
@@ -54,11 +54,11 @@ Tracks bot execution history.
 
 ```python
 class RunLog(Base):
-    id: int                      # Auto-increment primary key
-    bot_name: str                # Foreign key to Bot.name
-    start_time: datetime         # When run started
-    success: bool                 # Whether run succeeded
-    result: str                  # Result message (nullable)
+    id: int  # Auto-increment primary key
+    bot_name: str  # Foreign key to Bot.name
+    start_time: datetime  # When run started
+    success: bool  # Whether run succeeded
+    result: str  # Result message (nullable)
 ```
 
 ## PortfolioWorth Model
@@ -67,10 +67,10 @@ Historical portfolio valuations.
 
 ```python
 class PortfolioWorth(Base):
-    bot_name: str                # Primary key (part of composite)
-    date: datetime               # Primary key (part of composite)
-    portfolio_worth: float        # Total value in USD
-    holdings: dict                # JSON snapshot of holdings
+    bot_name: str  # Primary key (part of composite)
+    date: datetime  # Primary key (part of composite)
+    portfolio_worth: float  # Total value in USD
+    holdings: dict  # JSON snapshot of holdings
     created_at: datetime
 ```
 
@@ -80,14 +80,14 @@ News articles per symbol from yfinance (loaded daily with portfolio worth).
 
 ```python
 class StockNews(Base):
-    id: int                      # Auto-increment primary key
-    symbol: str                  # Trading symbol (indexed)
-    title: str                   # Article title
-    link: str                    # Article URL
-    publisher: str               # Publisher name (nullable)
-    publisher_url: str           # Publisher URL (nullable)
-    published_at: datetime       # When the article was published (UTC)
-    related_tickers: list        # JSON array of related tickers (nullable)
+    id: int  # Auto-increment primary key
+    symbol: str  # Trading symbol (indexed)
+    title: str  # Article title
+    link: str  # Article URL
+    publisher: str  # Publisher name (nullable)
+    publisher_url: str  # Publisher URL (nullable)
+    published_at: datetime  # When the article was published (UTC)
+    related_tickers: list  # JSON array of related tickers (nullable)
     created_at: datetime
 ```
 
@@ -99,13 +99,13 @@ Earnings dates and results per symbol from yfinance (loaded daily with portfolio
 
 ```python
 class StockEarnings(Base):
-    id: int                      # Auto-increment primary key
-    symbol: str                  # Trading symbol (indexed)
-    report_date: datetime        # Earnings report date
-    eps_estimate: float          # Estimated EPS (nullable)
-    reported_eps: float          # Reported EPS (nullable)
-    surprise_pct: float          # Surprise percentage (nullable)
-    fiscal_period: str           # Fiscal period if available (nullable)
+    id: int  # Auto-increment primary key
+    symbol: str  # Trading symbol (indexed)
+    report_date: datetime  # Earnings report date
+    eps_estimate: float  # Estimated EPS (nullable)
+    reported_eps: float  # Reported EPS (nullable)
+    surprise_pct: float  # Surprise percentage (nullable)
+    fiscal_period: str  # Fiscal period if available (nullable)
     created_at: datetime
 ```
 
@@ -117,13 +117,13 @@ Insider transactions per symbol from yfinance (loaded daily with portfolio worth
 
 ```python
 class StockInsiderTrade(Base):
-    id: int                      # Auto-increment primary key
-    symbol: str                  # Trading symbol (indexed)
-    transaction_date: datetime   # Date of the transaction
-    insider_name: str            # Name of the insider (nullable)
-    transaction_type: str        # Type e.g. Purchase, Sale (nullable)
-    shares: float                # Number of shares (nullable)
-    value: float                 # Transaction value if available (nullable)
+    id: int  # Auto-increment primary key
+    symbol: str  # Trading symbol (indexed)
+    transaction_date: datetime  # Date of the transaction
+    insider_name: str  # Name of the insider (nullable)
+    transaction_type: str  # Type e.g. Purchase, Sale (nullable)
+    shares: float  # Number of shares (nullable)
+    value: float  # Transaction value if available (nullable)
     created_at: datetime
 ```
 
@@ -135,14 +135,14 @@ Monitored Telegram channel messages with AI summaries (written by the Telegram m
 
 ```python
 class TelegramMessage(Base):
-    id: int                  # Auto-increment primary key
-    channel: str             # Channel username or ID (indexed)
-    message_id: int          # Telegram message ID (unique per channel)
-    text: str                # Original message text (nullable, max 4000 chars)
-    summary: str             # AI-generated 1-3 sentence summary (nullable)
-    symbol: str              # Primary ticker extracted by AI e.g. "AAPL" (nullable, indexed)
-    acted_on: bool           # True once the signals bot has evaluated this message (default False)
-    published_at: datetime   # When the message was posted in Telegram (UTC)
+    id: int  # Auto-increment primary key
+    channel: str  # Channel username or ID (indexed)
+    message_id: int  # Telegram message ID (unique per channel)
+    text: str  # Original message text (nullable, max 4000 chars)
+    summary: str  # AI-generated 1-3 sentence summary (nullable)
+    symbol: str  # Primary ticker extracted by AI e.g. "AAPL" (nullable, indexed)
+    acted_on: bool  # True once the signals bot has evaluated this message (default False)
+    published_at: datetime  # When the message was posted in Telegram (UTC)
     created_at: datetime
 ```
 

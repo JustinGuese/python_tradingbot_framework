@@ -300,6 +300,95 @@ The `Bot` class (`tradingbot/utils/botclass.py`) is the foundation. All trading 
    └── Executes trade if decision != 0
 ```
 
+### Position-sizing semantics (easy to get wrong)
+
+Anything that reasons about what a bot *holds* — a meta-bot, a live-trade copier,
+a backtest, an analysis script — has to reproduce these three rules exactly.
+They are not conventions; they are what the live code does.
+
+**1. `decisionFunction` returning `0` means "hold", not "go to target".**
+`_run_multi_ticker_iteration` only acts on `1` (buy up to target) and `-1` (sell
+everything). A `0` leg is skipped entirely, so its position carries over from
+whatever the previous bar left there. Multi-asset portfolios are therefore
+**path-dependent**: you cannot recompute a bot's holdings for a given date from
+that date's signals alone, you have to simulate forward from the start.
+
+**2. Multi-ticker equal-weighting divides by `len(self.tickers)`, including
+tickers the bot never trades.** Several bots put a benchmark in `tickers` purely
+so its history lands in `self.datas` (GoldenButterflyMomBot carries SPY for its
+RRG computation and returns `0` for it forever). `target_per_ticker =
+total_value / N` still uses `N = 6`, so that bot tops out at 5/6 invested and
+permanently holds >=17% cash. Dividing by the count of *tradeable* tickers would
+silently lever every such bot up.
+
+**3. Single-asset bots are all-in / all-out.** The default `makeOneIteration`
+calls `buy(symbol)` with no amount (spends all cash) or `sell(symbol)` with no
+amount (dumps the whole position). There is no partial sizing, so a non-zero
+holding always means "fully invested". `PortfolioManager.sell` deletes holdings
+below `1e-6`, so any surviving quantity is a real position rather than rounding
+residue — `qty > 1e-6` is the correct "is this bot in the market?" test.
+
+### `historic_data` is keyed by interval — keep it that way
+
+`HistoricData`'s primary key is **`(symbol, interval, timestamp)`**. Every read
+must filter on interval and every write must set it. `HistoricDataRepository`
+enforces this: `get_range` and `get_latest_timestamp` require an interval, and
+`bulk_insert_ohlcv` rejects rows without one.
+
+This was not always so. The key used to be `(symbol, timestamp)`, so every bar
+size a bot ever fetched for a symbol landed in one pile. `^XAU` was the worst
+case: xauzenbot runs `1m` every 5 minutes with `saveToDB=True`, so the table held
+~74k one-minute rows for it and, verifiably, **zero** daily rows. Asking for
+`interval="1d", period="10y"` returned those 1-minute bars merged with whatever
+yfinance sent — mixed granularity, wrong window. Nothing raised; the TA
+indicators were simply computed across the mixture. A 10-year "daily" backtest of
+xauzenbot came back with 76,093 bars and a 93% in-market rate against a recorded
+~10%, which is how it was found. Two paths were broken at once, and the second is
+the subtle one: `add_pd_df_to_db` only inserts bars newer than the stored
+high-water mark, and unscoped that mark was the newest *1-minute* bar — always
+minutes old — so every daily bar looked stale and was silently dropped. That is
+why no daily row ever accumulated.
+
+Legacy rows were backfilled by inferring each row's bar size from the smallest
+gap to an adjacent bar of the same symbol. Time-of-day does **not** work as a
+proxy: 69 symbols carry daily bars stamped at session open rather than midnight.
+`_migrate_schema()` in `db.py` replays that same inference, guarded on the PK
+still being the old 2-column form, so it is a no-op on a migrated or fresh DB.
+
+Regression tests: `tests/test_historic_interval.py`.
+
+### Interval and backtestability are strategy properties, not settings
+
+A bot's thresholds are calibrated to the bar size it was tuned on, so running its
+`decisionFunction` on a different interval yields a different strategy wearing
+the same name. XAUZenbotTreeBot defaults to `interval="1m"` (it passes no
+interval to `super().__init__`) and its `atr_threshold=0.08` sits just under
+^XAU's ~0.21 median 1-minute ATR. On daily bars the median ATR is ~3.8, so that
+branch can never fire and the tree collapses into a mostly-always-long rule.
+
+The practical consequence: **a bot on a 1m interval cannot be backtested beyond
+yfinance's ~7-day intraday window** (`_get_backtest_period` returns `"7d"` for
+minute intervals for exactly this reason). Any strategy combining a 1m bot with
+one needing long daily history — as XAUZenCarryBot does, since
+GoldenButterflyMomBot's RRG needs 252 daily bars — has **no shared timeframe on
+which a joint backtest exists**. Evaluate those from recorded live holdings
+instead (`scripts/onetime_simulate_zencarry.py`), and be patient about sample
+size rather than manufacturing a long history that measures something else.
+
+### Reading another bot's state
+
+Bots persist their portfolio to `bots.portfolio` on every run, which makes a
+parent's live signal readable without recomputing it. Two rules:
+
+- Use `BotRepository.read_portfolio(name)`, **not** `create_or_get_bot(name)` —
+  the latter materialises a fresh $10k bot row for a name that does not exist,
+  so a typo turns into a silent all-cash "signal".
+- Check `BotRepository.last_successful_run(name)` before trusting it. A parent
+  whose CronJob has died leaves its last traded position in the row forever, and
+  a fossil position is indistinguishable from a live one. See
+  `tradingbot/xauzencarrybot.py` for the pattern (abort loudly on a stale parent
+  rather than trading it).
+
 ### Key Bot Class Methods
 
 #### Data Fetching
@@ -336,6 +425,7 @@ def decisionFunction(self, row: pd.Series) -> int:
     elif row["rsi"] > 70:
         return -1  # Overbought, sell
     return 0
+
 
 # The base class then:
 # 1. Applies decisionFunction to each row: data.apply(self.decisionFunction, axis=1)
@@ -431,14 +521,14 @@ Falls back to raw response as summary if JSON parsing fails. `symbol` is `null` 
 
 ```python
 class TelegramMessage(Base):
-    id: int                  # Auto-increment primary key
-    channel: str             # Channel username or numeric ID (indexed)
-    message_id: int          # Telegram message ID — unique per channel
-    text: str                # Original text (nullable, max 4000 chars)
-    summary: str             # AI summary (nullable)
-    symbol: str              # Primary ticker extracted by AI (nullable, indexed)
-    acted_on: bool           # Set True before any trade action — prevents duplicate processing
-    published_at: datetime   # UTC posting time
+    id: int  # Auto-increment primary key
+    channel: str  # Channel username or numeric ID (indexed)
+    message_id: int  # Telegram message ID — unique per channel
+    text: str  # Original text (nullable, max 4000 chars)
+    summary: str  # AI summary (nullable)
+    symbol: str  # Primary ticker extracted by AI (nullable, indexed)
+    acted_on: bool  # Set True before any trade action — prevents duplicate processing
+    published_at: datetime  # UTC posting time
     created_at: datetime
     # Unique constraint: (channel, message_id)
 ```
@@ -572,6 +662,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from os import environ
 
+
 def _get_other_database_session(self):
     """Create a separate connection to another database."""
     # Read POSTGRES_URI but don't modify the environment variable
@@ -589,6 +680,7 @@ def _get_other_database_session(self):
     engine = create_engine(database_url, pool_pre_ping=True, pool_recycle=3600)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return SessionLocal()
+
 
 # Usage with raw SQL
 session = self._get_other_database_session()
@@ -614,6 +706,7 @@ Create `tradingbot/{botname}bot.py`:
 ```python
 from utils.botclass import Bot
 
+
 class MyNewBot(Bot):
     # Optional: Define hyperparameter search space for tuning
     param_grid = {
@@ -621,12 +714,7 @@ class MyNewBot(Bot):
         "rsi_sell": [25, 30, 35],
     }
 
-    def __init__(
-        self,
-        rsi_buy: float = 70.0,
-        rsi_sell: float = 30.0,
-        **kwargs
-    ):
+    def __init__(self, rsi_buy: float = 70.0, rsi_sell: float = 30.0, **kwargs):
         # Symbol like "QQQ", "EURUSD=X", "^XAU"
         # Optional: interval="1d", period="1mo" for daily/weekly strategies
         super().__init__("MyNewBot", "SYMBOL", interval="1m", period="1d", **kwargs)
@@ -644,6 +732,7 @@ class MyNewBot(Bot):
         elif row["momentum_rsi"] > self.rsi_sell:
             return -1  # Overbought, sell
         return 0  # Hold
+
 
 # Standard entry point for local development
 bot = MyNewBot()
@@ -707,8 +796,8 @@ columns = ["symbol", "timestamp", "open", "high", "low", "close", "volume"]
 
 ```python
 portfolio = {
-    "USD": 10000.0,      # Cash
-    "QQQ": 5.5,          # Holdings (quantity, not value)
+    "USD": 10000.0,  # Cash
+    "QQQ": 5.5,  # Holdings (quantity, not value)
     "EURUSD=X": 1000.0,  # More holdings
 }
 ```
@@ -770,6 +859,7 @@ import os
 from telethon.sessions import StringSession
 from utils.telegram_monitor import monitor_channels
 
+
 def main():
     api_id = int(os.environ["TELEGRAM_API_ID"])
     api_hash = os.environ["TELEGRAM_API_HASH"]
@@ -777,6 +867,7 @@ def main():
     channels = [c.strip() for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",") if c.strip()]
 
     monitor_channels(api_id, api_hash, StringSession(session_string), channels)
+
 
 if __name__ == "__main__":
     main()
@@ -1086,6 +1177,7 @@ class MyBot(Bot):
     def decisionFunction(self, row):
         # Trading logic
         return 0
+
 
 # Local development: optimize and backtest
 bot = MyBot()

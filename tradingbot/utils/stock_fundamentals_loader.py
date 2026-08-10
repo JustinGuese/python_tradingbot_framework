@@ -1,9 +1,9 @@
 """Loader for stock news, earnings, and insider trades from yfinance."""
 
+import contextlib
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Set
+from datetime import UTC, datetime
 
 import pandas as pd
 import yfinance as yf
@@ -26,7 +26,7 @@ EARNINGS_LIMIT = 24
 SYMBOL_DELAY_SECONDS = 0.5
 
 
-def get_portfolio_symbols(session) -> Set[str]:
+def get_portfolio_symbols(session) -> set[str]:
     """
     Return the set of all trading symbols from every bot's portfolio, excluding USD.
 
@@ -40,7 +40,7 @@ def get_portfolio_symbols(session) -> Set[str]:
     symbols = set()
     for bot in bots:
         if bot.portfolio:
-            for key in bot.portfolio.keys():
+            for key in bot.portfolio:
                 if key and key != "USD":
                     symbols.add(key)
     return symbols
@@ -49,13 +49,13 @@ def get_portfolio_symbols(session) -> Set[str]:
 def _published_at_from_unix(ts) -> datetime:
     """Convert yfinance Unix timestamp to UTC datetime."""
     if ts is None:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if isinstance(ts, (int, float)):
-        return datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        return datetime.fromtimestamp(int(ts), tz=UTC)
     return ensure_utc_timestamp(pd.Timestamp(ts)).to_pydatetime()
 
 
-def _load_news_for_symbol(symbol: str, existing_links: Set[tuple]) -> list:
+def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
     """Fetch news for one symbol and return list of StockNews to insert (new only)."""
     try:
         ticker = yf.Ticker(symbol)
@@ -79,10 +79,7 @@ def _load_news_for_symbol(symbol: str, existing_links: Set[tuple]) -> list:
         title = item.get("title") or ""
         published_at = _published_at_from_unix(item.get("date"))
         related = item.get("related_tickers")
-        if isinstance(related, list):
-            related_tickers = related
-        else:
-            related_tickers = None
+        related_tickers = related if isinstance(related, list) else None
 
         to_add.append(
             StockNews(
@@ -100,7 +97,7 @@ def _load_news_for_symbol(symbol: str, existing_links: Set[tuple]) -> list:
     return to_add
 
 
-def _load_earnings_for_symbol(symbol: str, existing_dates: Set[tuple]) -> list:
+def _load_earnings_for_symbol(symbol: str, existing_dates: set[tuple]) -> list:
     """Fetch earnings for one symbol and return list of StockEarnings to insert (new only)."""
     try:
         ticker = yf.Ticker(symbol)
@@ -130,20 +127,14 @@ def _load_earnings_for_symbol(symbol: str, existing_dates: Set[tuple]) -> list:
         for k, v in row_dict.items():
             k_lower = (k or "").lower()
             if "estimate" in k_lower and "eps" in k_lower:
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     eps_estimate = float(v) if v is not None and not pd.isna(v) else None
-                except (TypeError, ValueError):
-                    pass
             elif "reported" in k_lower and "eps" in k_lower:
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     reported_eps = float(v) if v is not None and not pd.isna(v) else None
-                except (TypeError, ValueError):
-                    pass
             elif "surprise" in k_lower:
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     surprise_pct = float(v) if v is not None and not pd.isna(v) else None
-                except (TypeError, ValueError):
-                    pass
 
         to_add.append(
             StockEarnings(
@@ -171,7 +162,7 @@ def _insider_key(symbol: str, transaction_date: datetime, insider_name, transact
     )
 
 
-def _load_insider_for_symbol(symbol: str, existing_insider_keys: Set[tuple]) -> list:
+def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> list:
     """Fetch insider transactions for one symbol and return list of StockInsiderTrade to insert (new only)."""
     try:
         ticker = yf.Ticker(symbol)
@@ -221,18 +212,14 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: Set[tuple]) -> 
         shares = None
         if shares_col and shares_col in row.index:
             v = row[shares_col]
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 shares = float(v) if v is not None and not pd.isna(v) else None
-            except (TypeError, ValueError):
-                pass
 
         value = None
         if value_col and value_col in row.index:
             v = row[value_col]
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 value = float(v) if v is not None and not pd.isna(v) else None
-            except (TypeError, ValueError):
-                pass
 
         key = _insider_key(symbol, transaction_date, insider_name, transaction_type, shares)
         if key in existing_insider_keys:
@@ -253,7 +240,7 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: Set[tuple]) -> 
     return to_add
 
 
-def load_stock_news_earnings_insider(symbols: Set[str]) -> None:
+def load_stock_news_earnings_insider(symbols: set[str]) -> None:
     """
     Fetch news, earnings, and insider trades from yfinance for the given symbols
     and persist only new rows (deduplicated) to the database.
@@ -270,25 +257,31 @@ def load_stock_news_earnings_insider(symbols: Set[str]) -> None:
 
     with get_db_session() as session:
         # Bulk load existing keys for deduplication
-        existing_news = set(
-            (r.symbol, r.link) for r in session.query(StockNews.symbol, StockNews.link).filter(
-                StockNews.symbol.in_(symbols)
-            ).all()
-        )
-        existing_earnings = set(
-            (r.symbol, r.report_date) for r in session.query(StockEarnings.symbol, StockEarnings.report_date).filter(
-                StockEarnings.symbol.in_(symbols)
-            ).all()
-        )
+        existing_news = {
+            (r.symbol, r.link)
+            for r in session.query(StockNews.symbol, StockNews.link).filter(StockNews.symbol.in_(symbols)).all()
+        }
+        existing_earnings = {
+            (r.symbol, r.report_date)
+            for r in session.query(StockEarnings.symbol, StockEarnings.report_date)
+            .filter(StockEarnings.symbol.in_(symbols))
+            .all()
+        }
         existing_insider = set()
-        for r in session.query(
-            StockInsiderTrade.symbol,
-            StockInsiderTrade.transaction_date,
-            StockInsiderTrade.insider_name,
-            StockInsiderTrade.transaction_type,
-            StockInsiderTrade.shares,
-        ).filter(StockInsiderTrade.symbol.in_(symbols)).all():
-            existing_insider.add(_insider_key(r.symbol, r.transaction_date, r.insider_name, r.transaction_type, r.shares))
+        for r in (
+            session.query(
+                StockInsiderTrade.symbol,
+                StockInsiderTrade.transaction_date,
+                StockInsiderTrade.insider_name,
+                StockInsiderTrade.transaction_type,
+                StockInsiderTrade.shares,
+            )
+            .filter(StockInsiderTrade.symbol.in_(symbols))
+            .all()
+        ):
+            existing_insider.add(
+                _insider_key(r.symbol, r.transaction_date, r.insider_name, r.transaction_type, r.shares)
+            )
 
         news_added = 0
         earnings_added = 0

@@ -63,5 +63,56 @@ imbalanced-learn = { git = "https://github.com/scikit-learn-contrib/imbalanced-l
 [dependency-groups]
 dev = [
     "debugpy>=1.8.20",
+    "mypy>=2.3.0",
     "openpyxl>=3.1.5",
+    "ruff>=0.16.2",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [
+    ".claude",
+    "exploration",
+    "scripts/nilsson_submission",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = [
+    "E501",    # line length is handled by `ruff format`; remaining long lines
+               # are intentional (LLM prompt strings, error-message f-strings)
+    "RUF001", "RUF002", "RUF003",  # ambiguous-unicode: internal codebase uses
+                                    # em-dashes/curly quotes intentionally
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tradingbot", "utils", "livetrade"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
+exclude = [
+    "^exploration/",
+    "^kronos_space/",
+    "^scripts/nilsson_submission/",
+]
+
+[[tool.mypy.overrides]]
+module = ["utils", "utils.*", "livetrade", "livetrade.*", "adaptivemeanreversionbot"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "ta.*", "yfinance.*", "hyperliquid.*", "ibind.*", "telethon.*", "pypfopt.*",
+    "sklearn.*", "boto3.*", "botocore.*", "psycopg2.*", "pandas.*",
+    "fear_and_greed", "cachetools.*", "scipy.*", "tqdm.*",
+]
+ignore_missing_imports = true

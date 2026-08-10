@@ -1,34 +1,36 @@
 import logging
-from typing import Dict, Literal, Optional
+from typing import Literal
+
 import httpx
+
 from livetrade.broker import LiveBroker
 from livetrade.symbol_map import SymbolMapper
 from utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
+
 class Collective2Broker(LiveBroker):
     # C2 API v4 base URL
     BASE_URL = "https://api4-general.collective2.com"
 
-    def __init__(self, api_key: str, system_id: str, symbol_mapper: SymbolMapper = None, data_service: DataService = None):
+    def __init__(
+        self, api_key: str, system_id: str, symbol_mapper: SymbolMapper = None, data_service: DataService = None
+    ):
         self.name = "collective2"
         self.api_key = api_key
         self.system_id = system_id
         self.symbol_mapper = symbol_mapper or SymbolMapper()
-        self.client = httpx.Client(
-            timeout=30.0,
-            headers={"Authorization": f"Bearer {self.api_key}"}
-        )
+        self.client = httpx.Client(timeout=30.0, headers={"Authorization": f"Bearer {self.api_key}"})
         self.data_service = data_service or DataService()
 
-    def _get(self, endpoint: str, params: dict = None) -> dict:
+    def _get(self, endpoint: str, params: dict | None = None) -> dict:
         url = f"{self.BASE_URL}/{endpoint}"
         response = self.client.get(url, params=params)
         response.raise_for_status()
         return response.json()
 
-    def _post(self, endpoint: str, json_data: dict = None) -> dict:
+    def _post(self, endpoint: str, json_data: dict | None = None) -> dict:
         url = f"{self.BASE_URL}/{endpoint}"
         response = self.client.post(url, json=json_data)
         if response.status_code >= 400:
@@ -61,7 +63,7 @@ class Collective2Broker(LiveBroker):
     def get_total_equity(self) -> float:
         return self._money(self._strategy_details(), "ModelAccountValue")
 
-    def get_positions(self) -> Dict[str, float]:
+    def get_positions(self) -> dict[str, float]:
         """Returns broker_symbol -> quantity."""
         data = self._get("Strategies/GetStrategyOpenPositions", {"StrategyIds": [int(self.system_id)]})
         positions = {}
@@ -74,18 +76,16 @@ class Collective2Broker(LiveBroker):
 
     # C2 API v4 has no native quote endpoint — base class falls back to yfinance.
 
-    def place_order(self, 
-                    broker_symbol: str, 
-                    quantity: float, 
-                    side: Literal["BUY", "SELL"],
-                    symbol_type: Optional[str] = None) -> None:
-        
+    def place_order(
+        self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
+    ) -> None:
+
         # Determine precision based on type
         precision = 0
         if symbol_type == "crypto":
-            precision = 4 # Allow 4 decimals for crypto
+            precision = 4  # Allow 4 decimals for crypto
         elif symbol_type == "forex":
-            precision = 0 # C2 forex is usually integer units
+            precision = 0  # C2 forex is usually integer units
 
         rounded_qty = round(quantity, precision)
         if rounded_qty == 0:
@@ -94,8 +94,8 @@ class Collective2Broker(LiveBroker):
 
         # C2 v4 uses "forex", "crypto", "stock", "future", "option"
         if not symbol_type:
-            symbol_type = "stock" # default
-            
+            symbol_type = "stock"  # default
+
         if symbol_type == "index":
             symbol_type = "stock"
 
@@ -109,13 +109,10 @@ class Collective2Broker(LiveBroker):
                 "Side": 1 if side == "BUY" else 2,
                 "OrderQuantity": abs(rounded_qty),
                 "TIF": 1,
-                "C2Symbol": {
-                    "FullSymbol": broker_symbol,
-                    "SymbolType": symbol_type
-                }
+                "C2Symbol": {"FullSymbol": broker_symbol, "SymbolType": symbol_type},
             }
         }
-        
+
         logger.info(f"Submitting C2 order: {payload}")
         try:
             result = self._post("Strategies/NewStrategyOrder", payload)
@@ -145,13 +142,15 @@ class Collective2Broker(LiveBroker):
             candidates = []
             # v4 returns { "Results": [ ... ] }
             for item in data.get("Results", []):
-                candidates.append({
-                    "symbol": item.get("Symbol"),
-                    "description": item.get("Description"),
-                    "type": item.get("SymbolType", "stock"),
-                    "exchange": item.get("Exchange"),
-                    "score": 100
-                })
+                candidates.append(
+                    {
+                        "symbol": item.get("Symbol"),
+                        "description": item.get("Description"),
+                        "type": item.get("SymbolType", "stock"),
+                        "exchange": item.get("Exchange"),
+                        "score": 100,
+                    }
+                )
             return candidates
         except Exception as e:
             logger.error(f"C2 symbol search failed: {e}")
@@ -174,14 +173,17 @@ class Collective2Broker(LiveBroker):
             return
         print(f"  {'Symbol':<14} {'Type':<8} {'Qty':>12} {'AvgPrice':>12} {'OpenPnL':>12}")
         for p in results:
-            print(f"  {str(p.get('Symbol','')):<14} {str(p.get('SymbolType','')):<8} "
-                  f"{float(p.get('Quantity', 0)):>12.4f} "
-                  f"{float(p.get('OpenPrice', 0) or 0):>12.4f} "
-                  f"{float(p.get('OpenPnL', 0) or 0):>12.2f}")
+            print(
+                f"  {p.get('Symbol', '')!s:<14} {p.get('SymbolType', '')!s:<8} "
+                f"{float(p.get('Quantity', 0)):>12.4f} "
+                f"{float(p.get('OpenPrice', 0) or 0):>12.4f} "
+                f"{float(p.get('OpenPnL', 0) or 0):>12.2f}"
+            )
 
 
 if __name__ == "__main__":
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()

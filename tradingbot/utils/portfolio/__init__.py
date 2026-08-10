@@ -11,6 +11,7 @@ provides a clearer, domain-oriented API surface under
 `utils.portfolio.*`.
 """
 
+from ..config import TRADEABLE
 from ..earnings_insider import (
     earnings_insider_compute_weights,
     score_symbols_earnings_insider,
@@ -19,39 +20,31 @@ from ..earnings_insider import (
 from ..portfolio_utils import (
     calculate_performance_metrics,
     calculate_portfolio_worth,
+    get_fear_greed_index,
     get_portfolio_worth_history,
     sharpe_compute_weights,
-    get_fear_greed_index,
 )
-from ..config import TRADEABLE
 from ..regime import (
-    vix_series_from_long_df,
-    index_close_series_from_wide,
-    classify_regime,
     apply_regime_tilt,
+    classify_regime,
+    index_close_series_from_wide,
     regime_compute_weights,
+    vix_series_from_long_df,
 )
 
 __all__ = [
-    # Symbol universe
     "TRADEABLE",
-    # Regime logic
-    "vix_series_from_long_df",
-    "index_close_series_from_wide",
-    "classify_regime",
     "apply_regime_tilt",
-    "regime_compute_weights",
-    # Earnings / insider tilting
-    "score_symbols_earnings_insider",
-    "tilt_weights_by_scores",
-    "earnings_insider_compute_weights",
-    # Sharpe / optimisation helpers
-    "sharpe_compute_weights",
-    # Portfolio worth + analytics
-    "calculate_portfolio_worth",
-    "get_portfolio_worth_history",
     "calculate_performance_metrics",
-    # Sentiment adapter
+    "calculate_portfolio_worth",
+    "classify_regime",
+    "earnings_insider_compute_weights",
     "get_fear_greed_index",
+    "get_portfolio_worth_history",
+    "index_close_series_from_wide",
+    "regime_compute_weights",
+    "score_symbols_earnings_insider",
+    "sharpe_compute_weights",
+    "tilt_weights_by_scores",
+    "vix_series_from_long_df",
 ]
-

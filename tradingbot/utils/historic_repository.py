@@ -7,9 +7,9 @@ data fetching, merging, and cleaning logic.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Optional
 
 import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
@@ -27,15 +27,23 @@ class HistoricDataRepository:
     - Perform bulk inserts with proper duplicate handling.
     """
 
-    def get_latest_timestamp(self, symbol: str) -> Optional[datetime]:
-        """Return the latest timestamp stored for a symbol, or None if none exists."""
+    def get_latest_timestamp(self, symbol: str, interval: str) -> datetime | None:
+        """
+        Return the latest timestamp stored for a (symbol, interval), or None.
+
+        `interval` is required: scoped to the symbol alone this returns the newest
+        bar of ANY size, so for a symbol cached at 1m the answer is always minutes
+        old and a daily writer concludes it has nothing new to insert.
+        """
         if not symbol:
             raise ValueError("symbol must be a non-empty string")
+        if not interval:
+            raise ValueError("interval must be a non-empty string")
 
         with get_db_session() as session:
             latest = (
                 session.query(HistoricData.timestamp)
-                .filter_by(symbol=symbol)
+                .filter_by(symbol=symbol, interval=interval)
                 .order_by(HistoricData.timestamp.desc())
                 .first()
             )
@@ -44,15 +52,23 @@ class HistoricDataRepository:
     def get_range(
         self,
         symbol: str,
-        start_date: Optional[pd.Timestamp] = None,
-        end_date: Optional[pd.Timestamp] = None,
+        interval: str,
+        start_date: pd.Timestamp | None = None,
+        end_date: pd.Timestamp | None = None,
     ) -> pd.DataFrame:
-        """Load historic data for a symbol in an optional [start_date, end_date] range."""
+        """
+        Load historic data for a (symbol, interval) in an optional date range.
+
+        `interval` is required — see HistoricData's docstring for what happens
+        when bar sizes are allowed to mix.
+        """
         if not symbol:
             raise ValueError("symbol must be a non-empty string")
+        if not interval:
+            raise ValueError("interval must be a non-empty string")
 
         with get_db_session() as session:
-            query = session.query(HistoricData).filter_by(symbol=symbol)
+            query = session.query(HistoricData).filter_by(symbol=symbol, interval=interval)
 
             if start_date is not None:
                 query = query.filter(HistoricData.timestamp >= start_date)
@@ -66,6 +82,10 @@ class HistoricDataRepository:
                 return pd.DataFrame()
 
             # Build row dicts while session is open to avoid DetachedInstanceError
+            # `interval` is deliberately NOT projected: the caller already chose it,
+            # and an extra object-dtype column here would flow through
+            # _merge_db_and_yf (where yfinance rows have no such value) into
+            # add_all_ta_features.
             rows = [
                 {
                     "symbol": r.symbol,
@@ -86,6 +106,7 @@ class HistoricDataRepository:
 
         Each row must contain keys:
         - symbol
+        - interval
         - timestamp
         - open, high, low, close, volume
         """
@@ -93,11 +114,12 @@ class HistoricDataRepository:
         if not rows:
             return
 
+        missing = [k for k in ("symbol", "interval", "timestamp") if k not in rows[0]]
+        if missing:
+            raise ValueError(f"OHLCV rows are missing required key(s): {missing}")
+
         stmt = (
-            insert(HistoricData)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=["symbol", "timestamp"])
+            insert(HistoricData).values(rows).on_conflict_do_nothing(index_elements=["symbol", "interval", "timestamp"])
         )
         with get_db_session() as session:
             session.execute(stmt)
-

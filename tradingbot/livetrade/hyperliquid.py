@@ -25,7 +25,7 @@ not the signing wallet -- hence `self.query_address`.
 """
 
 import logging
-from typing import Dict, Literal, Optional
+from typing import Literal
 
 import eth_account
 from hyperliquid.exchange import Exchange
@@ -43,12 +43,11 @@ HL_MIN_ORDER_USD = 10.0
 
 
 class HyperliquidBroker(LiveBroker):
-
     def __init__(
         self,
         private_key: str,
-        account_address: Optional[str] = None,
-        vault_address: Optional[str] = None,
+        account_address: str | None = None,
+        vault_address: str | None = None,
         testnet: bool = True,
         symbol_mapper: SymbolMapper = None,
         data_service: DataService = None,
@@ -56,8 +55,8 @@ class HyperliquidBroker(LiveBroker):
         long_only: bool = True,
         leverage: int = 1,
         slippage: float = 0.02,
-        info: Optional[Info] = None,
-        exchange: Optional[Exchange] = None,
+        info: Info | None = None,
+        exchange: Exchange | None = None,
     ):
         self.name = "hyperliquid"
         self.symbol_mapper = symbol_mapper or SymbolMapper()
@@ -91,7 +90,7 @@ class HyperliquidBroker(LiveBroker):
             account_address=self.account_address,
         )
 
-        self._sz_decimals: Optional[Dict[str, int]] = None
+        self._sz_decimals: dict[str, int] | None = None
         self._leverage_set: set[str] = set()
 
     # ---------------------------------------------------------------- helpers
@@ -99,14 +98,12 @@ class HyperliquidBroker(LiveBroker):
     def _user_state(self) -> dict:
         return self.info.user_state(self.query_address)
 
-    def _universe(self) -> Dict[str, int]:
+    def _universe(self) -> dict[str, int]:
         """coin -> szDecimals, cached for the life of the process."""
         if self._sz_decimals is None:
             meta = self.info.meta() or {}
             self._sz_decimals = {
-                a["name"]: int(a.get("szDecimals", 0))
-                for a in meta.get("universe", [])
-                if a.get("name")
+                a["name"]: int(a.get("szDecimals", 0)) for a in meta.get("universe", []) if a.get("name")
             }
         return self._sz_decimals
 
@@ -171,7 +168,7 @@ class HyperliquidBroker(LiveBroker):
             logger.error(f"Failed to get Hyperliquid cash: {e}")
             return 0.0
 
-    def get_positions(self) -> Dict[str, float]:
+    def get_positions(self) -> dict[str, float]:
         """coin -> SIGNED size. Signed deliberately, Darwinex-style.
 
         With a stray short (szi=-0.01) and a target weight of 0, the copier's
@@ -181,7 +178,7 @@ class HyperliquidBroker(LiveBroker):
         and emit a SELL, doubling the short, every single run.
         """
         try:
-            positions: Dict[str, float] = {}
+            positions: dict[str, float] = {}
             for entry in self._user_state().get("assetPositions", []):
                 position = entry.get("position", {})
                 coin = position.get("coin")
@@ -208,7 +205,7 @@ class HyperliquidBroker(LiveBroker):
         broker_symbol: str,
         quantity: float,
         side: Literal["BUY", "SELL"],
-        symbol_type: Optional[str] = None,
+        symbol_type: str | None = None,
     ) -> None:
         coin = broker_symbol
         universe = self._universe()
@@ -219,9 +216,7 @@ class HyperliquidBroker(LiveBroker):
         sz_decimals = universe[coin]
         size = round(abs(float(quantity)), sz_decimals)
         if size <= 0:
-            logger.warning(
-                f"Quantity {quantity} for {coin} rounded to 0 at {sz_decimals} decimals. Skipping."
-            )
+            logger.warning(f"Quantity {quantity} for {coin} rounded to 0 at {sz_decimals} decimals. Skipping.")
             return
 
         price = self.get_latest_price(coin)
@@ -231,16 +226,12 @@ class HyperliquidBroker(LiveBroker):
             current = self.get_positions().get(coin, 0.0)
             if current <= 0:
                 logger.error(
-                    f"Refusing SELL {size} {coin}: no long position "
-                    f"(current={current}). long_only={self.long_only}."
+                    f"Refusing SELL {size} {coin}: no long position (current={current}). long_only={self.long_only}."
                 )
                 return
             max_close = round(current, sz_decimals)
             if size > max_close:
-                logger.warning(
-                    f"Clamping SELL {size} {coin} to the open long {max_close} -- "
-                    f"never opening a short."
-                )
+                logger.warning(f"Clamping SELL {size} {coin} to the open long {max_close} -- never opening a short.")
                 size = max_close
             if size <= 0:
                 return
@@ -249,8 +240,7 @@ class HyperliquidBroker(LiveBroker):
             is_exact_close = abs(size - max_close) < 10 ** -(sz_decimals + 2)
             if not is_exact_close and notional and notional < HL_MIN_ORDER_USD:
                 logger.warning(
-                    f"Skipping partial SELL {size} {coin} (${notional:.2f} < "
-                    f"${HL_MIN_ORDER_USD} Hyperliquid minimum)."
+                    f"Skipping partial SELL {size} {coin} (${notional:.2f} < ${HL_MIN_ORDER_USD} Hyperliquid minimum)."
                 )
                 return
 
@@ -260,10 +250,7 @@ class HyperliquidBroker(LiveBroker):
             return
 
         if notional and notional < HL_MIN_ORDER_USD:
-            logger.warning(
-                f"Skipping BUY {size} {coin} (${notional:.2f} < ${HL_MIN_ORDER_USD} "
-                f"Hyperliquid minimum)."
-            )
+            logger.warning(f"Skipping BUY {size} {coin} (${notional:.2f} < ${HL_MIN_ORDER_USD} Hyperliquid minimum).")
             return
 
         self._ensure_leverage(coin)
@@ -348,7 +335,7 @@ class HyperliquidBroker(LiveBroker):
         for entry in positions:
             p = entry.get("position", {})
             print(
-                f"  {str(p.get('coin','')):<8} {float(p.get('szi', 0) or 0):>14.6f} "
+                f"  {p.get('coin', '')!s:<8} {float(p.get('szi', 0) or 0):>14.6f} "
                 f"{float(p.get('entryPx', 0) or 0):>12.2f} "
                 f"{float(p.get('positionValue', 0) or 0):>14.2f} "
                 f"{float(p.get('unrealizedPnl', 0) or 0):>12.2f}"
@@ -361,9 +348,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
     if not private_key:

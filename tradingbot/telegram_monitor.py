@@ -40,11 +40,7 @@ def main():
     session_string = os.environ["TELEGRAM_SESSION_STRING"]
     channels_raw = os.environ.get("TELEGRAM_CHANNELS", "")
     # Strip inline comments (e.g. "-100123,chanB # some note" → ["-100123", "chanB"])
-    channels = [
-        c.split("#")[0].strip()
-        for c in channels_raw.split(",")
-        if c.split("#")[0].strip()
-    ]
+    channels = [c.split("#")[0].strip() for c in channels_raw.split(",") if c.split("#")[0].strip()]
     fetch_limit = int(os.environ.get("TELEGRAM_FETCH_LIMIT", "50"))
 
     monitor_channels(

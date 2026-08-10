@@ -8,12 +8,12 @@ Loads Kronos-mini at startup and exposes two endpoints:
 Intended to be called by kronosbot.py running in K8s.
 The Space is paused between runs to save HF quota.
 """
+
 import logging
 import os
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -21,12 +21,12 @@ from pydantic import BaseModel
 
 # Kronos has no PyPI package — source is cloned into /app/Kronos by the Dockerfile
 sys.path.insert(0, "/app/Kronos")
-from model import Kronos, KronosTokenizer, KronosPredictor  # noqa: E402
+from model import Kronos, KronosPredictor, KronosTokenizer  # type: ignore[import-not-found]
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-_MODEL_CONFIGS = {
+_MODEL_CONFIGS: dict[str, dict[str, str | int]] = {
     "kronos-mini": {
         "model_id": "NeoQuasar/Kronos-mini",
         "tokenizer_id": "NeoQuasar/Kronos-Tokenizer-2k",
@@ -42,7 +42,7 @@ _MODEL_CONFIGS = {
 MODEL_KEY = os.environ.get("KRONOS_MODEL", "kronos-mini")
 
 # Loaded once at startup via lifespan
-_predictor: Optional[KronosPredictor] = None
+_predictor: KronosPredictor | None = None
 _model_id: str = ""
 
 
@@ -50,7 +50,7 @@ _model_id: str = ""
 async def lifespan(app: FastAPI):
     global _predictor, _model_id
     cfg = _MODEL_CONFIGS[MODEL_KEY]
-    _model_id = cfg["model_id"]
+    _model_id = str(cfg["model_id"])
     logger.info(f"Loading {_model_id} + tokenizer {cfg['tokenizer_id']}...")
     t0 = time.time()
     tokenizer = KronosTokenizer.from_pretrained(cfg["tokenizer_id"])
@@ -66,6 +66,7 @@ app = FastAPI(title="Kronos Trading API", lifespan=lifespan)
 
 # --- Pydantic schemas ---
 
+
 class OHLCVRow(BaseModel):
     timestamp: str
     open: float
@@ -79,7 +80,7 @@ class PredictRequest(BaseModel):
     symbol: str
     horizon: int = 5
     interval: str = "1d"
-    ohlcv: List[OHLCVRow]
+    ohlcv: list[OHLCVRow]
 
 
 class PredictionRow(BaseModel):
@@ -94,10 +95,11 @@ class PredictionRow(BaseModel):
 class PredictResponse(BaseModel):
     symbol: str
     model: str
-    predictions: List[PredictionRow]
+    predictions: list[PredictionRow]
 
 
 # --- Endpoints ---
+
 
 @app.get("/health")
 def health():
@@ -141,17 +143,19 @@ def predict(req: PredictRequest):
         )
     except Exception as exc:
         logger.error(f"Prediction error for {req.symbol}: {exc}")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
 
     predictions = []
-    for ts, (_, row) in zip(future_ts, pred_df.iterrows()):
-        predictions.append(PredictionRow(
-            target_date=ts.isoformat(),
-            open=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=float(row["volume"]) if "volume" in row else 0.0,
-        ))
+    for ts, (_, row) in zip(future_ts, pred_df.iterrows(), strict=False):
+        predictions.append(
+            PredictionRow(
+                target_date=ts.isoformat(),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]) if "volume" in row else 0.0,
+            )
+        )
 
     return PredictResponse(symbol=req.symbol, model=_model_id, predictions=predictions)

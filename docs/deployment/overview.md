@@ -200,10 +200,8 @@ Check database for run logs:
 from tradingbot.utils.db import get_db_session, RunLog
 
 with get_db_session() as session:
-    logs = session.query(RunLog).filter(
-        RunLog.bot_name == "MyBot"
-    ).order_by(RunLog.timestamp.desc()).limit(10).all()
-    
+    logs = session.query(RunLog).filter(RunLog.bot_name == "MyBot").order_by(RunLog.timestamp.desc()).limit(10).all()
+
     for log in logs:
         print(f"{log.timestamp}: {log.success} - {log.result}")
 ```

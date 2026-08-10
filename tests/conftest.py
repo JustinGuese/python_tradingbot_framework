@@ -7,12 +7,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tradingbot"))
 
 import pytest
-import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from tradingbot.utils.db import Base
+
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.data_service import DataService
+from tradingbot.utils.db import Base
 
 
 @pytest.fixture(scope="session")

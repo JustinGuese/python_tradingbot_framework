@@ -13,19 +13,18 @@ module layout to avoid a disruptive move:
 
 from ..data_service import DataService
 from ..stock_fundamentals_loader import (
-    NEWS_COUNT,
     EARNINGS_LIMIT,
+    NEWS_COUNT,
     SYMBOL_DELAY_SECONDS,
     get_portfolio_symbols,
     load_stock_news_earnings_insider,
 )
 
 __all__ = [
-    "DataService",
-    "NEWS_COUNT",
     "EARNINGS_LIMIT",
+    "NEWS_COUNT",
     "SYMBOL_DELAY_SECONDS",
+    "DataService",
     "get_portfolio_symbols",
     "load_stock_news_earnings_insider",
 ]
-

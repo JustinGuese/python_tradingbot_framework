@@ -6,7 +6,7 @@ StockInsiderTrade (symbol, transaction_date, transaction_type, shares, value).
 No Bot dependency.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import desc
 
@@ -37,8 +37,8 @@ def score_symbols_earnings_insider(
     if not symbols:
         return {}
 
-    result: dict[str, float] = {s: 0.0 for s in symbols}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=insider_days)
+    result: dict[str, float] = dict.fromkeys(symbols, 0.0)
+    cutoff = datetime.now(UTC) - timedelta(days=insider_days)
 
     with get_db_session() as session:
         # Earnings: latest per symbol, surprise_pct > 0 → +1, < 0 → -1, else 0
@@ -61,7 +61,7 @@ def score_symbols_earnings_insider(
 
         # Insider: net value (Purchase - Sale) over last insider_days → +1 / -1 / 0
         for sym in symbols:
-            rows = (
+            insider_rows = (
                 session.query(StockInsiderTrade)
                 .filter(
                     StockInsiderTrade.symbol == sym,
@@ -70,11 +70,11 @@ def score_symbols_earnings_insider(
                 .all()
             )
             net = 0.0
-            for row in rows:
-                val = row.value if row.value is not None else (row.shares or 0.0)
-                if row.transaction_type and "urchase" in row.transaction_type.casefold():
+            for insider_row in insider_rows:
+                val = float(insider_row.value if insider_row.value is not None else (insider_row.shares or 0.0))
+                if insider_row.transaction_type and "urchase" in insider_row.transaction_type.casefold():
                     net += val
-                elif row.transaction_type and "ale" in row.transaction_type.casefold():
+                elif insider_row.transaction_type and "ale" in insider_row.transaction_type.casefold():
                     net -= val
             if net > 0:
                 result[sym] += 1.0

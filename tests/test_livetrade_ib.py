@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
 
@@ -11,14 +13,10 @@ def _resp(data):
 @pytest.fixture
 def mock_client():
     """Patch the IbkrClient class so connect() yields a mock Web API client."""
-    with patch('tradingbot.livetrade.interactive_brokers.IbkrClient') as cls:
+    with patch("tradingbot.livetrade.interactive_brokers.IbkrClient") as cls:
         instance = cls.return_value
-        instance.get_ledger.return_value = _resp({
-            "USD": {"cashbalance": 100000.0, "netliquidationvalue": 150000.0}
-        })
-        instance.positions.return_value = _resp([
-            {"ticker": "AAPL", "position": 10.0, "mktValue": 2000.0}
-        ])
+        instance.get_ledger.return_value = _resp({"USD": {"cashbalance": 100000.0, "netliquidationvalue": 150000.0}})
+        instance.positions.return_value = _resp([{"ticker": "AAPL", "position": 10.0, "mktValue": 2000.0}])
         instance.stock_conid_by_symbol.return_value = _resp({"AAPL": 265598})
         instance.place_order.return_value = _resp([{"order_id": "1"}])
         instance.live_orders.return_value = _resp({"orders": []})
@@ -68,11 +66,20 @@ def test_ib_get_positions_skips_zero_and_pages(mock_client):
 
 def test_ib_place_order(mock_client):
     broker = InteractiveBrokersBroker(account_id="DU123")
-    with patch.object(broker.symbol_mapper, 'unmap_symbol', return_value="AAPL"), \
-         patch.object(broker, 'map_symbol', return_value={
-             "symbol": "AAPL", "type": "stock", "sec_type": "STK",
-             "exchange": "SMART", "currency": "USD",
-         }):
+    with (
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="AAPL"),
+        patch.object(
+            broker,
+            "map_symbol",
+            return_value={
+                "symbol": "AAPL",
+                "type": "stock",
+                "sec_type": "STK",
+                "exchange": "SMART",
+                "currency": "USD",
+            },
+        ),
+    ):
         broker.place_order("AAPL", 10.5, "BUY")
 
     mock_client.place_order.assert_called_once()
@@ -86,11 +93,20 @@ def test_ib_place_order(mock_client):
 
 def test_ib_place_order_skips_sub_one_quantity(mock_client):
     broker = InteractiveBrokersBroker(account_id="DU123")
-    with patch.object(broker.symbol_mapper, 'unmap_symbol', return_value="VSNT"), \
-         patch.object(broker, 'map_symbol', return_value={
-             "symbol": "VSNT", "type": "stock", "sec_type": "STK",
-             "exchange": "SMART", "currency": "USD",
-         }):
+    with (
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="VSNT"),
+        patch.object(
+            broker,
+            "map_symbol",
+            return_value={
+                "symbol": "VSNT",
+                "type": "stock",
+                "sec_type": "STK",
+                "exchange": "SMART",
+                "currency": "USD",
+            },
+        ),
+    ):
         mock_client.stock_conid_by_symbol.return_value = _resp({"VSNT": 111})
 
         broker.place_order("VSNT", 2.16, "SELL")
@@ -104,11 +120,20 @@ def test_ib_place_order_skips_sub_one_quantity(mock_client):
 def test_ib_place_order_skips_unresolvable_conid(mock_client):
     mock_client.stock_conid_by_symbol.return_value = _resp({})
     broker = InteractiveBrokersBroker(account_id="DU123")
-    with patch.object(broker.symbol_mapper, 'unmap_symbol', return_value="NOPE"), \
-         patch.object(broker, 'map_symbol', return_value={
-             "symbol": "NOPE", "type": "stock", "sec_type": "STK",
-             "exchange": "SMART", "currency": "USD",
-         }):
+    with (
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="NOPE"),
+        patch.object(
+            broker,
+            "map_symbol",
+            return_value={
+                "symbol": "NOPE",
+                "type": "stock",
+                "sec_type": "STK",
+                "exchange": "SMART",
+                "currency": "USD",
+            },
+        ),
+    ):
         broker.place_order("NOPE", 5.0, "BUY")
 
     mock_client.place_order.assert_not_called()
@@ -118,24 +143,37 @@ def test_ib_place_order_rejects_non_equity(mock_client):
     """Forex/crypto/futures routing is not implemented over the Web API and must
     raise rather than silently mis-route."""
     broker = InteractiveBrokersBroker(account_id="DU123")
-    with patch.object(broker.symbol_mapper, 'unmap_symbol', return_value="EURUSD=X"), \
-         patch.object(broker, 'map_symbol', return_value={
-             "symbol": "EURUSD", "type": "forex", "sec_type": "CASH",
-             "exchange": "IDEALPRO", "currency": "USD",
-         }):
-        with pytest.raises(NotImplementedError):
-            broker.place_order("EURUSD", 1000.0, "BUY")
+    with (
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="EURUSD=X"),
+        patch.object(
+            broker,
+            "map_symbol",
+            return_value={
+                "symbol": "EURUSD",
+                "type": "forex",
+                "sec_type": "CASH",
+                "exchange": "IDEALPRO",
+                "currency": "USD",
+            },
+        ),
+        pytest.raises(NotImplementedError),
+    ):
+        broker.place_order("EURUSD", 1000.0, "BUY")
 
     mock_client.place_order.assert_not_called()
 
 
 def test_ib_cancel_open_orders(mock_client):
-    mock_client.live_orders.return_value = _resp({"orders": [
-        {"orderId": 1, "status": "Submitted"},
-        {"orderId": 2, "status": "PreSubmitted"},
-        {"orderId": 3, "status": "Filled"},     # terminal, must be skipped
-        {"orderId": 4, "status": "Cancelled"},  # terminal, must be skipped
-    ]})
+    mock_client.live_orders.return_value = _resp(
+        {
+            "orders": [
+                {"orderId": 1, "status": "Submitted"},
+                {"orderId": 2, "status": "PreSubmitted"},
+                {"orderId": 3, "status": "Filled"},  # terminal, must be skipped
+                {"orderId": 4, "status": "Cancelled"},  # terminal, must be skipped
+            ]
+        }
+    )
     broker = InteractiveBrokersBroker(account_id="DU123")
 
     assert broker.cancel_open_orders() == 2
@@ -146,11 +184,15 @@ def test_ib_cancel_open_orders(mock_client):
 
 def test_ib_map_symbol():
     broker = InteractiveBrokersBroker()
-    with patch.object(broker.symbol_mapper, 'map_symbol', return_value={
-        "symbol": "EURUSD",
-        "type": "forex",
-        "source": "default-rule",
-    }):
+    with patch.object(
+        broker.symbol_mapper,
+        "map_symbol",
+        return_value={
+            "symbol": "EURUSD",
+            "type": "forex",
+            "source": "default-rule",
+        },
+    ):
         meta = broker.map_symbol("EURUSD=X")
         assert meta is not None
         assert meta["symbol"] == "EURUSD"
@@ -160,11 +202,15 @@ def test_ib_map_symbol():
 
 def test_ib_map_symbol_defaults_to_us_equity():
     broker = InteractiveBrokersBroker()
-    with patch.object(broker.symbol_mapper, 'map_symbol', return_value={
-        "symbol": "QQQ",
-        "type": "stock",
-        "source": "default-rule",
-    }):
+    with patch.object(
+        broker.symbol_mapper,
+        "map_symbol",
+        return_value={
+            "symbol": "QQQ",
+            "type": "stock",
+            "source": "default-rule",
+        },
+    ):
         meta = broker.map_symbol("QQQ")
         assert meta is not None
         assert meta["sec_type"] == "STK"

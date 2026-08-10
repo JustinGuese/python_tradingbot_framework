@@ -11,15 +11,14 @@ equity snapshot failing must not fail a trading run.
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from utils.db import LiveEquity, get_db_session, init_db
 
 logger = logging.getLogger(__name__)
 
 
-def record_live_equity(broker, bot_weights: Optional[dict] = None) -> None:
+def record_live_equity(broker, bot_weights: dict | None = None) -> None:
     """Upsert today's equity snapshot for `broker`. Idempotent per UTC day.
 
     Re-running on the same day overwrites the row (last write wins), matching
@@ -47,7 +46,7 @@ def record_live_equity(broker, bot_weights: Optional[dict] = None) -> None:
         except Exception:
             positions = {}
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         account_id = str(
             getattr(broker, "query_address", None)
@@ -68,9 +67,7 @@ def record_live_equity(broker, bot_weights: Optional[dict] = None) -> None:
                 .one_or_none()
             )
             if row is None:
-                row = LiveEquity(
-                    broker=broker.name, account_id=account_id, date=today
-                )
+                row = LiveEquity(broker=broker.name, account_id=account_id, date=today)
                 session.add(row)
 
             row.timestamp = now.replace(tzinfo=None)
@@ -81,8 +78,7 @@ def record_live_equity(broker, bot_weights: Optional[dict] = None) -> None:
             row.is_testnet = is_testnet
 
         logger.info(
-            f"Recorded {broker.name} equity ${equity:,.2f} "
-            f"(cash ${cash:,.2f}) for {today.date()}"
+            f"Recorded {broker.name} equity ${equity:,.2f} (cash ${cash:,.2f}) for {today.date()}"
             if cash is not None
             else f"Recorded {broker.name} equity ${equity:,.2f} for {today.date()}"
         )

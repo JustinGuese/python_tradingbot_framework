@@ -14,11 +14,7 @@ logger = logging.getLogger(__name__)
 
 def get_existing_message_ids(session, channel: str) -> set:
     """Get the set of already-stored message IDs for a channel."""
-    rows = (
-        session.query(TelegramMessage.message_id)
-        .filter(TelegramMessage.channel == channel)
-        .all()
-    )
+    rows = session.query(TelegramMessage.message_id).filter(TelegramMessage.channel == channel).all()
     return {r[0] for r in rows}
 
 
@@ -74,7 +70,6 @@ def process_channel(client: TelegramClient, channel: str, fetch_limit: int) -> i
     logger.info(f"  >> Fetching messages (limit={fetch_limit})...")
     messages = client.get_messages(entity, limit=fetch_limit)
     logger.info(f"  >> Got {len(messages)} messages.")
-
 
     with get_db_session() as session:
         existing_ids = get_existing_message_ids(session, channel)

@@ -1,21 +1,24 @@
 import logging
 import os
 import time
-from typing import Dict, List, Literal
-from .broker import LiveBroker
+from typing import Literal
+
 from utils.bot_repository import BotRepository
 from utils.data_service import DataService
 
+from .broker import LiveBroker
+
 logger = logging.getLogger(__name__)
+
 
 class LiveTradeCopier:
     def __init__(
         self,
         broker: LiveBroker,
-        bot_weights: Dict[str, float],
+        bot_weights: dict[str, float],
         min_order_usd: float = 50.0,
         dry_run: bool = False,
-        portfolio_fraction: float = 1.0
+        portfolio_fraction: float = 1.0,
     ):
         self.broker = broker
         self.bot_weights = dict(bot_weights)
@@ -30,7 +33,7 @@ class LiveTradeCopier:
         self.settle_delay_seconds = float(os.getenv("LIVETRADE_SETTLE_DELAY_SECONDS", "10"))
 
         # Inject our data service into the broker if it supports it
-        if hasattr(self.broker, 'data_service'):
+        if hasattr(self.broker, "data_service"):
             self.broker.data_service = self.data_service
 
     def sync(self) -> None:
@@ -44,7 +47,7 @@ class LiveTradeCopier:
             return
 
         # 2. Map target weights to broker symbols
-        broker_target_weights = {} # broker_symbol -> {"weight": float, "type": str}
+        broker_target_weights = {}  # broker_symbol -> {"weight": float, "type": str}
         unmapped_tickers = []
 
         for yf_symbol, weight in target_weights.items():
@@ -56,10 +59,7 @@ class LiveTradeCopier:
             # order the broker silently rejects. Translated indices (^GSPC -> SPX)
             # have already lost the caret and are unaffected.
             if meta and mapped and not mapped.startswith("^"):
-                broker_target_weights[mapped] = {
-                    "weight": weight,
-                    "type": meta.get("type", "stock")
-                }
+                broker_target_weights[mapped] = {"weight": weight, "type": meta.get("type", "stock")}
             else:
                 logger.warning(f"Ticker {yf_symbol} is unmapped")
                 unmapped_tickers.append(yf_symbol)
@@ -78,7 +78,9 @@ class LiveTradeCopier:
 
         if self.portfolio_fraction != 1.0:
             scaled = total_equity * self.portfolio_fraction
-            logger.info(f"Applying portfolio_fraction={self.portfolio_fraction:.2f}: ${total_equity:.2f} -> ${scaled:.2f}")
+            logger.info(
+                f"Applying portfolio_fraction={self.portfolio_fraction:.2f}: ${total_equity:.2f} -> ${scaled:.2f}"
+            )
             total_equity = scaled
 
         # 4. Get current positions from broker
@@ -86,7 +88,7 @@ class LiveTradeCopier:
         if cancelled:
             logger.info(f"Cancelled {cancelled} stale open orders before sync")
 
-        current_positions = self.broker.get_positions() # broker_symbol -> quantity
+        current_positions = self.broker.get_positions()  # broker_symbol -> quantity
 
         # 5. Calculate orders (full target-state sync: liquidates anything not in target)
         orders = self._calculate_orders(broker_target_weights, current_positions, total_equity)
@@ -95,9 +97,9 @@ class LiveTradeCopier:
         self._execute_orders(orders)
         logger.info("Sync complete")
 
-    def _calculate_target_weights(self) -> Dict[str, float]:
+    def _calculate_target_weights(self) -> dict[str, float]:
         """Aggregate weighted portfolios from all source bots into yf_symbol -> weight."""
-        aggregated_weights = {}
+        aggregated_weights: dict[str, float] = {}
         total_user_weight = sum(self.bot_weights.values())
         if total_user_weight == 0:
             return {}
@@ -105,16 +107,16 @@ class LiveTradeCopier:
         for bot_name, user_weight in self.bot_weights.items():
             if user_weight <= 0:
                 continue
-            
+
             bot = self.bot_repo.create_or_get_bot(bot_name)
             portfolio = bot.portfolio or {}
-            
-            symbols = [s for s in portfolio.keys() if s != "USD"]
+
+            symbols = [s for s in portfolio if s != "USD"]
             if not symbols:
                 continue
-                
+
             prices = self.data_service.get_latest_prices_batch(symbols)
-            
+
             bot_total_value = float(portfolio.get("USD", 0.0))
             symbol_values = {}
             for s in symbols:
@@ -125,7 +127,7 @@ class LiveTradeCopier:
                 val = float(portfolio[s]) * price
                 symbol_values[s] = val
                 bot_total_value += val
-            
+
             if bot_total_value <= 0:
                 continue
 
@@ -133,19 +135,16 @@ class LiveTradeCopier:
             for s, val in symbol_values.items():
                 weight_in_live = (val / bot_total_value) * normalized_user_weight
                 aggregated_weights[s] = aggregated_weights.get(s, 0.0) + weight_in_live
-                
+
         return aggregated_weights
 
     def _calculate_orders(
-        self, 
-        target_weights: Dict[str, Dict], 
-        current_positions: Dict[str, float],
-        total_equity: float
-    ) -> List[Dict]:
+        self, target_weights: dict[str, dict], current_positions: dict[str, float], total_equity: float
+    ) -> list[dict]:
         """Diff target vs current to produce order list."""
         orders = []
         all_symbols = set(target_weights.keys()) | set(current_positions.keys())
-        
+
         for symbol in all_symbols:
             target_meta = target_weights.get(symbol, {"weight": 0.0, "type": "stock"})
             target_weight = target_meta["weight"]
@@ -154,13 +153,15 @@ class LiveTradeCopier:
             # Full liquidation: not in target, just sell the whole position.
             # No price lookup needed — broker knows the quantity.
             if target_weight == 0.0 and current_qty > 0:
-                orders.append({
-                    "symbol": symbol,
-                    "quantity": current_qty,
-                    "side": "SELL",
-                    "value": 0.0,  # unknown without a price; not used for execution
-                    "type": target_meta["type"]
-                })
+                orders.append(
+                    {
+                        "symbol": symbol,
+                        "quantity": current_qty,
+                        "side": "SELL",
+                        "value": 0.0,  # unknown without a price; not used for execution
+                        "type": target_meta["type"],
+                    }
+                )
                 continue
 
             target_value = total_equity * target_weight
@@ -178,24 +179,28 @@ class LiveTradeCopier:
             qty_to_trade = diff_value / current_price
             side: Literal["BUY", "SELL"] = "BUY" if qty_to_trade > 0 else "SELL"
 
-            orders.append({
-                "symbol": symbol,
-                "quantity": abs(qty_to_trade),
-                "side": side,
-                "value": abs(diff_value),
-                "type": target_meta["type"]
-            })
-            
+            orders.append(
+                {
+                    "symbol": symbol,
+                    "quantity": abs(qty_to_trade),
+                    "side": side,
+                    "value": abs(diff_value),
+                    "type": target_meta["type"],
+                }
+            )
+
         return orders
 
-    def _execute_orders(self, orders: List[Dict]) -> None:
+    def _execute_orders(self, orders: list[dict]) -> None:
         sells = [o for o in orders if o["side"] == "SELL"]
         buys = [o for o in orders if o["side"] == "BUY"]
 
-        def _submit(o: Dict) -> None:
+        def _submit(o: dict) -> None:
             if self.dry_run:
-                logger.info(f"[DRY RUN] Would {o['side']} {o['quantity']:.4f} {o['symbol']} "
-                            f"(type={o['type']}, ~${o['value']:.2f})")
+                logger.info(
+                    f"[DRY RUN] Would {o['side']} {o['quantity']:.4f} {o['symbol']} "
+                    f"(type={o['type']}, ~${o['value']:.2f})"
+                )
                 return
             try:
                 self.broker.place_order(o["symbol"], o["quantity"], o["side"], symbol_type=o["type"])

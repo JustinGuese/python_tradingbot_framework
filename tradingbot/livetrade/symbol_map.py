@@ -3,24 +3,24 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class SymbolMapper:
     def __init__(self, map_file: str | None = None):
         if map_file is None:
             map_file = str(Path(__file__).parent / "symbol_map.json")
-        
+
         self.overrides = {}
         if os.path.exists(map_file):
             try:
-                with open(map_file, "r") as f:
+                with open(map_file) as f:
                     self.overrides = json.load(f)
             except Exception as e:
                 logger.error(f"Failed to load symbol map from {map_file}: {e}")
 
-    def map_symbol(self, yf_symbol: str, broker_name: Optional[str] = None) -> Optional[Dict]:
+    def map_symbol(self, yf_symbol: str, broker_name: str | None = None) -> dict | None:
         """
         Translate yfinance symbol to broker symbol metadata.
         Override JSON is broker-keyed: {"QQQ": {"collective2": {...}, "interactive_brokers": {...}}}.
@@ -34,17 +34,17 @@ class SymbolMapper:
         broker_symbol = yf_symbol
         symbol_type = "stock"
         source = "default-rule"
-        
+
         # FX: EURUSD=X -> EURUSD
         if broker_symbol.endswith("=X"):
             broker_symbol = broker_symbol[:-2]
             symbol_type = "forex"
-        
+
         # Crypto: BTC-USD -> BTCUSD
         elif "-USD" in broker_symbol:
             broker_symbol = broker_symbol.replace("-USD", "USD")
             symbol_type = "crypto"
-        
+
         # Indices
         elif broker_symbol == "^GSPC":
             broker_symbol = "SPX"
@@ -60,10 +60,10 @@ class SymbolMapper:
             "symbol": broker_symbol,
             "type": symbol_type,
             "verified": datetime.now().strftime("%Y-%m-%d"),
-            "source": source
+            "source": source,
         }
 
-    def unmap_symbol(self, broker_symbol: str, broker_name: Optional[str] = None) -> str:
+    def unmap_symbol(self, broker_symbol: str, broker_name: str | None = None) -> str:
         """
         Heuristic to translate broker symbol back to yfinance for price lookups.
         """
@@ -86,10 +86,13 @@ class SymbolMapper:
             major_currencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
             if broker_symbol[:3] in major_currencies and broker_symbol[3:] in major_currencies:
                 return f"{broker_symbol}=X"
-            
+
         # 4. Indices
-        if broker_symbol == "SPX": return "^GSPC"
-        if broker_symbol == "NDX": return "^NDX"
-        if broker_symbol == "COMP": return "^IXIC"
-        
+        if broker_symbol == "SPX":
+            return "^GSPC"
+        if broker_symbol == "NDX":
+            return "^NDX"
+        if broker_symbol == "COMP":
+            return "^IXIC"
+
         return broker_symbol

@@ -41,21 +41,22 @@ if pred_df is not None:
 ```python
 from tradingbot.utils.core import Bot
 
+
 class MyBot(Bot):
     def decisionFunction(self, row):
         # Get Kronos forecast for this bot's symbol
         from tradingbot.utils.core import KronosClient
-        
+
         client = KronosClient()
         forecast = client.predict(self.symbol, horizon=5)
-        
+
         if forecast is not None:
             next_close = forecast.iloc[0]["close"]
             current_close = row["close"]
-            
+
             if next_close > current_close * 1.02:
                 return 1  # Buy signal
-        
+
         return 0
 ```
 
@@ -66,6 +67,7 @@ Use the `kronos_forecast` LangChain tool in complex AI flows:
 ```python
 from tradingbot.utils.core import Bot, kronos_forecast
 
+
 class AIBot(Bot):
     def decisionFunction(self, row):
         decision = self.run_ai_with_tools(
@@ -73,7 +75,7 @@ class AIBot(Bot):
             user_message=f"Should we buy {self.symbol}? Current close: {row['close']}",
             extra_tools=[kronos_forecast],  # Add Kronos as a tool
         )
-        
+
         if "buy" in decision.lower():
             return 1
         return 0

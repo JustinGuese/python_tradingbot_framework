@@ -1,9 +1,11 @@
+from typing import ClassVar
+
 from utils.core import Bot
 
 
 class XAUSyntheticMetalTreeBot(Bot):
     # Define the hyperparameter search space for this bot
-    param_grid = {
+    param_grid: ClassVar[dict] = {
         "dch_threshold": [315, 330, 350],
         "dcl_threshold": [310, 325, 345],
         "atr_threshold": [0.12, 0.14, 0.16],
@@ -18,11 +20,11 @@ class XAUSyntheticMetalTreeBot(Bot):
         atr_threshold: float = 0.12,
         ichimoku_base_threshold: float = 310,
         kch_threshold: float = 315,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize the XAU Synthetic Metal Tree Bot with configurable thresholds.
-        
+
         Args:
             dch_threshold: Threshold for volatility_dch indicator (default: 207.61)
             dcl_threshold: Threshold for volatility_dcl indicator (default: 204.44)
@@ -39,7 +41,7 @@ class XAUSyntheticMetalTreeBot(Bot):
             atr_threshold=atr_threshold,
             ichimoku_base_threshold=ichimoku_base_threshold,
             kch_threshold=kch_threshold,
-            **kwargs
+            **kwargs,
         )
         # Store parameters as instance variables for easy access
         self.dch_threshold = dch_threshold
@@ -85,7 +87,7 @@ bot.run()
 # 2026-03-26 12:26:36 - utils.data_service - INFO - Rows to insert: 0
 # 2026-03-26 12:26:50 - utils.backtest - INFO - QuantStats report → gs://tradingbotrunresults/XAUSyntheticMetalTreeBot/sharpewinner/report.html
 # 2026-03-26 12:26:58 - utils.backtest - INFO - QuantStats report → gs://tradingbotrunresults/XAUSyntheticMetalTreeBot/yearlyreturnwinner/report.html
-# 2026-03-26 12:26:58 - utils.botclass - INFO - 
+# 2026-03-26 12:26:58 - utils.botclass - INFO -
 # --- Backtest Results: XAUSyntheticMetalTreeBot ---
 # 2026-03-26 12:26:58 - utils.botclass - INFO - Yearly Return: 7.21%
 # 2026-03-26 12:26:58 - utils.botclass - INFO - Buy & Hold Return: -9.73%

@@ -5,7 +5,6 @@ All regime and tilt logic lives in `utils.portfolio`; this bot only fetches data
 """
 
 from dataclasses import dataclass
-from typing import List
 
 from utils.core import Bot
 from utils.portfolio import (
@@ -21,7 +20,7 @@ from utils.portfolio import (
 class RegimeConfig:
     """Configuration for the regime-adaptive strategy."""
 
-    universe: List[str]
+    universe: list[str]
     index_symbol: str = "QQQ"
     interval: str = "1d"
     lookback_period: str = "60d"
@@ -67,17 +66,13 @@ class RegimeAdaptiveBot(Bot):
 
         # 2. Index (e.g. QQQ) + universe; wide close df (helper extracts index series)
         data_long = self.getYFDataMultiple(
-            [cfg.index_symbol] + list(syms),
+            [cfg.index_symbol, *list(syms)],
             interval=cfg.interval,
             period=cfg.lookback_period,
             saveToDB=True,
         )
-        wide_close_df = self.convertToWideFormat(
-            data_long, value_column="close", fill_method="both"
-        )
-        qqq_close_series = index_close_series_from_wide(
-            wide_close_df, index_symbol=cfg.index_symbol
-        )
+        wide_close_df = self.convertToWideFormat(data_long, value_column="close", fill_method="both")
+        qqq_close_series = index_close_series_from_wide(wide_close_df, index_symbol=cfg.index_symbol)
 
         # 3. Fear & Greed
         fg_value = get_fear_greed_index()
@@ -92,6 +87,7 @@ class RegimeAdaptiveBot(Bot):
         )
         self.rebalancePortfolio(weights, onlyOver50USD=True)
         return 0
+
 
 if __name__ == "__main__":
     bot = RegimeAdaptiveBot()

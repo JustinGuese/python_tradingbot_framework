@@ -21,6 +21,8 @@ Environment variables:
   KRONOS_HORIZON        Days ahead to forecast (default 5)
   KRONOS_EXTRA_SYMBOLS  Comma-separated extra tickers to always forecast
 """
+
+import contextlib
 import logging
 import os
 import time
@@ -37,9 +39,7 @@ SPACE_URL = os.environ.get("KRONOS_SPACE_URL", "https://guestros-kronos-trading-
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_SPACE_REPO = os.environ.get("HF_SPACE_REPO", "guestros/kronos-trading-api")
 HORIZON = int(os.environ.get("KRONOS_HORIZON", "5"))
-EXTRA_SYMBOLS = [
-    s.strip() for s in os.environ.get("KRONOS_EXTRA_SYMBOLS", "SPY,QQQ,GLD").split(",") if s.strip()
-]
+EXTRA_SYMBOLS = [s.strip() for s in os.environ.get("KRONOS_EXTRA_SYMBOLS", "SPY,QQQ,GLD").split(",") if s.strip()]
 
 HEALTH_RETRIES = 6
 HEALTH_RETRY_DELAY = 30  # seconds between health checks (total wait ≤ 3 min)
@@ -105,6 +105,7 @@ def main() -> None:
     if HF_TOKEN:
         try:
             from huggingface_hub import HfApi
+
             api = HfApi(token=HF_TOKEN)
         except ImportError:
             logger.warning("huggingface_hub not installed — Space lifecycle management disabled")
@@ -121,10 +122,8 @@ def main() -> None:
     if not _wait_for_space(client):
         logger.error("Space did not become healthy within the retry window — aborting")
         if api:
-            try:
+            with contextlib.suppress(Exception):
                 api.pause_space(HF_SPACE_REPO)
-            except Exception:
-                pass
         return
 
     # 3. Run predictions
@@ -133,6 +132,7 @@ def main() -> None:
 
     all_predictions = []
     import pandas as pd
+
     made_at = pd.Timestamp.utcnow().to_pydatetime()
 
     for symbol in symbols:
@@ -143,19 +143,21 @@ def main() -> None:
             continue
 
         for _, row in pred_df.iterrows():
-            all_predictions.append(KronosPrediction(
-                symbol=symbol,
-                model_name="NeoQuasar/Kronos-mini",
-                interval="1d",
-                prediction_made_at=made_at,
-                target_date=row["target_date"].to_pydatetime(),
-                predicted_open=float(row["open"]),
-                predicted_high=float(row["high"]),
-                predicted_low=float(row["low"]),
-                predicted_close=float(row["close"]),
-                predicted_volume=float(row.get("volume", 0) or 0),
-                horizon_days=HORIZON,
-            ))
+            all_predictions.append(
+                KronosPrediction(
+                    symbol=symbol,
+                    model_name="NeoQuasar/Kronos-mini",
+                    interval="1d",
+                    prediction_made_at=made_at,
+                    target_date=row["target_date"].to_pydatetime(),
+                    predicted_open=float(row["open"]),
+                    predicted_high=float(row["high"]),
+                    predicted_low=float(row["low"]),
+                    predicted_close=float(row["close"]),
+                    predicted_volume=float(row.get("volume", 0) or 0),
+                    horizon_days=HORIZON,
+                )
+            )
 
     if all_predictions:
         _upsert_predictions(all_predictions)

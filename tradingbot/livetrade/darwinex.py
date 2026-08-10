@@ -1,28 +1,37 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Literal, Optional, List
+from typing import Literal
+
 import httpx
+
 from livetrade.broker import LiveBroker
 from livetrade.symbol_map import SymbolMapper
 from utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
+
 class DarwinexBroker(LiveBroker):
     """
     Darwinex DXtrade LiveBroker implementation using the /dxsca-web REST API.
     Docs: https://dxtrade.darwinex.com/dxsca-web/specs (if available)
     """
-    
+
     # Darwinex serves both demo and live accounts off the same DXtrade host;
     # the account_id distinguishes them. Override LIVE_URL here if Darwinex
     # ever splits them onto separate subdomains.
     DEMO_URL = "https://dxtrade.darwinex.com/dxsca-web"
     LIVE_URL = "https://dxtrade.darwinex.com/dxsca-web"
 
-    def __init__(self, username: str, password: str, account_id: Optional[str] = None, 
-                 demo: bool = True, symbol_mapper: SymbolMapper = None, 
-                 data_service: DataService = None):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        account_id: str | None = None,
+        demo: bool = True,
+        symbol_mapper: SymbolMapper = None,
+        data_service: DataService = None,
+    ):
         self.name = "darwinex"
         self.username = username
         self.password = password
@@ -30,31 +39,27 @@ class DarwinexBroker(LiveBroker):
         self.demo = demo
         self.symbol_mapper = symbol_mapper or SymbolMapper()
         self.data_service = data_service or DataService()
-        
+
         self.base_url = self.DEMO_URL if demo else self.LIVE_URL
         self.client = httpx.Client(base_url=self.base_url, timeout=30.0)
-        
-        self._session_token: Optional[str] = None
-        self._token_expires_at: Optional[datetime] = None
-        self._instrument_cache: Dict[str, dict] = {}
+
+        self._session_token: str | None = None
+        self._token_expires_at: datetime | None = None
+        self._instrument_cache: dict[str, dict] = {}
 
     def _login(self):
         """Authenticate and get a session token."""
         logger.info(f"Logging in to Darwinex DXtrade as {self.username}")
-        payload = {
-            "username": self.username,
-            "password": self.password,
-            "domain": "default"
-        }
+        payload = {"username": self.username, "password": self.password, "domain": "default"}
         response = self.client.post("/login", json=payload)
         response.raise_for_status()
-        
+
         data = response.json()
         self._session_token = data.get("sessionToken")
         # DXtrade tokens usually last 24h, but let's be conservative or check if provided
         # If expiry isn't in JSON, default to 2 hours for safety.
         self._token_expires_at = datetime.now() + timedelta(hours=2)
-        
+
         if not self.account_id:
             self._resolve_account_id()
 
@@ -65,29 +70,26 @@ class DarwinexBroker(LiveBroker):
 
     def _get_headers(self) -> dict:
         self._ensure_session()
-        return {
-            "Authorization": f"DXAPI {self._session_token}",
-            "Content-Type": "application/json"
-        }
+        return {"Authorization": f"DXAPI {self._session_token}", "Content-Type": "application/json"}
 
-    def _get(self, path: str, params: dict = None) -> dict:
+    def _get(self, path: str, params: dict | None = None) -> dict:
         response = self.client.get(path, params=params, headers=self._get_headers())
         if response.status_code == 401:
             # Force re-login once
             self._login()
             response = self.client.get(path, params=params, headers=self._get_headers())
-        
+
         if response.status_code >= 400:
             logger.error(f"Darwinex GET {path} -> {response.status_code}: {response.text}")
         response.raise_for_status()
         return response.json()
 
-    def _post(self, path: str, json_data: dict = None) -> dict:
+    def _post(self, path: str, json_data: dict | None = None) -> dict:
         response = self.client.post(path, json=json_data, headers=self._get_headers())
         if response.status_code == 401:
             self._login()
             response = self.client.post(path, json=json_data, headers=self._get_headers())
-            
+
         if response.status_code >= 400:
             logger.error(f"Darwinex POST {path} -> {response.status_code}: {response.text}")
         response.raise_for_status()
@@ -98,7 +100,7 @@ class DarwinexBroker(LiveBroker):
         if response.status_code == 401:
             self._login()
             response = self.client.delete(path, headers=self._get_headers())
-        
+
         if response.status_code >= 400:
             logger.error(f"Darwinex DELETE {path} -> {response.status_code}: {response.text}")
         response.raise_for_status()
@@ -113,7 +115,7 @@ class DarwinexBroker(LiveBroker):
             if not accounts:
                 logger.error(f"No accounts found for Darwinex user {self.username}")
                 return
-            
+
             self.account_id = accounts[0].get("id")
             logger.info(f"Automatically selected Darwinex account: {self.account_id}")
         except Exception as e:
@@ -135,14 +137,14 @@ class DarwinexBroker(LiveBroker):
             logger.error(f"Failed to get Darwinex equity: {e}")
             return 0.0
 
-    def get_positions(self) -> Dict[str, float]:
+    def get_positions(self) -> dict[str, float]:
         """
         Return current open positions as a dict: instrumentCode -> signed quantity.
         DXtrade nets automatically, so we just aggregate positions by instrument.
         """
         try:
             data = self._get(f"/accounts/{self.account_id}/portfolio")
-            positions = {}
+            positions: dict[str, float] = {}
             for pos in data.get("positions", []):
                 symbol = pos.get("instrumentCode")
                 qty = float(pos.get("quantity", 0.0))
@@ -157,21 +159,17 @@ class DarwinexBroker(LiveBroker):
 
     def _get_native_price(self, broker_symbol: str) -> float:
         """
-        DXtrade native quotes are WebSocket-only. 
+        DXtrade native quotes are WebSocket-only.
         For v1, return 0.0 to trigger yfinance fallback.
         """
         # TODO: WebSocket md subscription for live quotes
         return 0.0
 
-    def place_order(self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], 
-                    symbol_type: Optional[str] = None) -> None:
+    def place_order(
+        self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
+    ) -> None:
         """Place a MARKET order on Darwinex."""
-        payload = {
-            "instrument": broker_symbol,
-            "quantity": abs(quantity),
-            "side": side,
-            "type": "MARKET"
-        }
+        payload = {"instrument": broker_symbol, "quantity": abs(quantity), "side": side, "type": "MARKET"}
         logger.info(f"Submitting Darwinex order: {payload}")
         try:
             self._post(f"/accounts/{self.account_id}/orders", payload)
@@ -207,11 +205,11 @@ class DarwinexBroker(LiveBroker):
                         "symbol": res["symbol"],
                         "type": res.get("type", "stock"),
                         "verified": datetime.now().strftime("%Y-%m-%d"),
-                        "source": "darwinex_search"
+                        "source": "darwinex_search",
                     }
                     self._instrument_cache[yf_symbol] = meta
                     return meta
-        
+
         logger.warning(f"Could not resolve Darwinex symbol for {yf_symbol}")
         return None
 
@@ -223,13 +221,15 @@ class DarwinexBroker(LiveBroker):
             instruments = data if isinstance(data, list) else data.get("instruments", [])
             candidates = []
             for inst in instruments:
-                candidates.append({
-                    "symbol": inst.get("symbol"),
-                    "description": inst.get("description"),
-                    "type": inst.get("type", "stock"),
-                    "currency": inst.get("currency"),
-                    "score": 100 # Default score
-                })
+                candidates.append(
+                    {
+                        "symbol": inst.get("symbol"),
+                        "description": inst.get("description"),
+                        "type": inst.get("type", "stock"),
+                        "currency": inst.get("currency"),
+                        "score": 100,  # Default score
+                    }
+                )
             return candidates
         except Exception as e:
             logger.error(f"Darwinex symbol search failed for {query}: {e}")
@@ -256,11 +256,11 @@ class DarwinexBroker(LiveBroker):
         try:
             metrics = self._get(f"/accounts/{self.account_id}/metrics")
             portfolio = self._get(f"/accounts/{self.account_id}/portfolio")
-            
+
             cash = float(metrics.get("balance", 0.0))
             equity = float(metrics.get("equity", 0.0))
             positions = portfolio.get("positions", [])
-            
+
             env_label = "DEMO" if self.demo else "LIVE"
             print(f"\nDarwinex Account ({env_label}) - {self.account_id}")
             print(f"  Cash:             {cash:>15,.2f}")
@@ -269,19 +269,22 @@ class DarwinexBroker(LiveBroker):
             if not positions:
                 print("  (none)")
                 return
-            
+
             print(f"  {'Symbol':<14} {'Qty':>12} {'Side':<6} {'OpenPrice':>12}")
             for p in positions:
-                print(f"  {p.get('instrumentCode', ''):<14} "
-                      f"{float(p.get('quantity', 0)):>12.4f} "
-                      f"{p.get('side', ''):<6} "
-                      f"{float(p.get('openPrice', 0)):>12.4f}")
+                print(
+                    f"  {p.get('instrumentCode', ''):<14} "
+                    f"{float(p.get('quantity', 0)):>12.4f} "
+                    f"{p.get('side', ''):<6} "
+                    f"{float(p.get('openPrice', 0)):>12.4f}"
+                )
         except Exception as e:
             logger.error(f"Failed to print Darwinex summary: {e}")
 
 
 if __name__ == "__main__":
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()
