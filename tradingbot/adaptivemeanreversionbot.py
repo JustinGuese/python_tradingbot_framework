@@ -76,6 +76,9 @@ class AdaptiveMeanReversionBot(Bot):
         self,
         atr_multiplier: float = 1.5,
         sell_buffer: float = 0.03,
+        name: str = "AdaptiveMeanReversionBot",
+        symbol: str = "QQQ",
+        period: str = "1y",
         **kwargs,
     ):
         """
@@ -85,10 +88,16 @@ class AdaptiveMeanReversionBot(Bot):
             sell_buffer:    Exit only when close < SMA-200 × (1 - sell_buffer) (default: 0.08).
                             0.08 = must be 8% below SMA-200. Weathers corrections up to ~8%.
                             Use 0.12-0.20 for near-maximum time-in-market (bear-market-only exits).
+            name/symbol/period:
+                            Exist so the signal can be retargeted at another asset
+                            (see AdaptiveMeanReversionBTCBot). The defaults are the
+                            live QQQ bot's DB identity — do NOT change them: this
+                            bot's portfolio_worth history is the NilssonHedge
+                            submission and must stay continuous.
         """
         super().__init__(
-            "AdaptiveMeanReversionBot",
-            "QQQ",
+            name,
+            symbol,
             atr_multiplier=atr_multiplier,
             sell_buffer=sell_buffer,
             **kwargs,
@@ -96,7 +105,7 @@ class AdaptiveMeanReversionBot(Bot):
         self.atr_multiplier = atr_multiplier
         self.sell_buffer = sell_buffer
         self.interval = "1d"
-        self.period = "1y"
+        self.period = period
 
     # ------------------------------------------------------------------
     # Data preparation
@@ -168,9 +177,14 @@ class AdaptiveMeanReversionBot(Bot):
         return 0
 
 
-bot = AdaptiveMeanReversionBot()
-# bot.local_development()
-bot.run()
+# Guarded so AdaptiveMeanReversionBTCBot can subclass this without the QQQ bot
+# running as an import side effect. The Helm CronJob invokes `python
+# adaptivemeanreversionbot.py`, so __name__ == "__main__" and behaviour is
+# unchanged.
+if __name__ == "__main__":
+    bot = AdaptiveMeanReversionBot()
+    # bot.local_development()
+    bot.run()
 # ============================================================
 # 2026-03-22 11:51:07 - utils.botclass - INFO - Backtesting with best parameters...
 # 2026-03-22 11:51:07 - utils.botclass - INFO - ============================================================

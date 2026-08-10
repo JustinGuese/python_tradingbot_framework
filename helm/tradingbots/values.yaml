@@ -175,7 +175,9 @@ bots:
   schedule: "0 17 * * 2" # Weekly on Tuesday at 5:00 PM
 
 - name: gptbasedstrategytabased
-  schedule: "30 17 * * 1-5" # Daily at 5:30 PM, Mon-Fri
+  # 7-day: this bot trades BTC-USD, which does not stop on weekends. The old
+  # "1-5" cron silently discarded every Saturday and Sunday signal.
+  schedule: "30 17 * * *" # Daily at 5:30 PM UTC, all week
 
 - name: aihedgefundbot
   # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
@@ -201,6 +203,12 @@ bots:
 
 - name: adaptivemeanreversionbot
   schedule: "0 21 * * 1-5" # Daily 9 PM UTC (4 PM ET), near NYSE close for fresh daily OHLCV
+
+- name: adaptivemeanreversionbtcbot
+  # BTC variant of the above — the Hyperliquid vault strategy. 7-day, and timed
+  # at the end of the UTC daily bar (yfinance BTC-USD bars roll at 00:00 UTC).
+  # livetrade-hyperliquid runs at 00:05 UTC, 15 minutes later.
+  schedule: "50 23 * * *" # Daily 11:50 PM UTC, all week
 
 - name: goldenbutterflymombot
   schedule: "0 14 * * 1" # Weekly Monday 2 PM UTC, before US market open
@@ -272,7 +280,7 @@ liveTrade:
   # keys with IBKR and waiting for approval. Flip to true only once both secrets exist,
   # and do one run with liveTrade.dryRun="true" first.
   interactiveBrokers:
-    enabled: false
+    enabled: true
     schedule: "20 21 * * 1-5" # 9:20 PM UTC
     oauthKeysSecret: "ib-oauth-keys" # secret with private_encryption.pem & private_signature.pem
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
@@ -291,6 +299,35 @@ liveTrade:
     demo: true
     # accountId: "12345" # optional: defaults to first found account
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
+
+  # Hyperliquid perps — the DataFortress Omni user vault.
+  # Requires HYPERLIQUID_PRIVATE_KEY (an API/agent wallet key, NOT the leader's
+  # master key) and HYPERLIQUID_ACCOUNT_ADDRESS in tradingbot-secrets.
+  #
+  # Unlike every other broker here this is PERPS, not spot, so three settings are
+  # load-bearing and must not be "tidied up":
+  #   - portfolioFraction 0.95, not 1.0. The copier clamps buys to
+  #     get_cash() * 0.98; at 1.0 the target notional exceeds that budget every
+  #     run, so it scales every order down and sits on the margin boundary.
+  #   - minOrderUsd 25, above Hyperliquid's exchange-enforced $10 floor with
+  #     headroom for that same 0.98 scale-down. Raise it toward 1-2% of vault
+  #     equity once TVL passes ~$50k or the vault churns taker fees every run.
+  #   - The broker forces 1x cross leverage before the first opening order, so
+  #     the exchange rejects anything above account value rather than levering.
+  #
+  # DISABLED until rollout stage 3. See docs/guides/live-trading.md for the
+  # staged testnet -> mainnet -> vault sequence; do not skip stages.
+  hyperliquid:
+    enabled: false
+    schedule: "5 0 * * *" # 00:05 UTC daily, 7 days — BTC trades all week
+    equitySchedule: "5 23 * * *" # standalone live_equity snapshot, keeps the curve gapless
+    testnet: "true" # string, not bool — read as an env var
+    vaultAddress: "" # empty = the leader's own account (mainnet smoke stage only)
+    # allowMainnetWithoutVault: "true"  # required to render mainnet with no vault
+    botWeights: '{"AdaptiveMeanReversionBTCBot": 1.0}' # one strategy, not the book
+    minOrderUsd: "25"
+    portfolioFraction: "0.95"
+    dryRun: "true" # ALWAYS start with true
 
 # telegram monitor
 telegramMonitor:

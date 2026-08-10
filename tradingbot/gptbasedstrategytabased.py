@@ -112,11 +112,12 @@ class gptbasedstrategytabased(Bot):
         return 0
 
 
-bot = gptbasedstrategytabased()
-bot.run()
-# Start with a backtest of the new logic
-# bot.local_backtest()
-# bot.local_development()
+if __name__ == "__main__":
+    bot = gptbasedstrategytabased()
+    bot.run()
+    # Start with a backtest of the new logic
+    # bot.local_backtest()
+    # bot.local_development()
 #  GptBasedStrategyBTCTabased ---
 # 2026-03-23 16:08:44 - utils.botclass - INFO - Yearly Return: 24.20%
 # 2026-03-23 16:08:44 - utils.botclass - INFO - Buy & Hold Return: -16.84%

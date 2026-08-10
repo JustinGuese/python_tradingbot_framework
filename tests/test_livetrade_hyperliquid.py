@@ -256,3 +256,64 @@ def test_copier_flattens_a_stray_short():
     assert len(orders) == 1
     assert orders[0]["side"] == "BUY"
     assert orders[0]["quantity"] == pytest.approx(0.01)
+
+
+# -------------------------------------------------------------- equity recorder
+
+
+@pytest.fixture
+def equity_db():
+    """In-memory live_equity, patched into equity_recorder's session factory."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    @contextmanager
+    def _session():
+        yield session
+        session.commit()
+
+    with patch("tradingbot.livetrade.equity_recorder.get_db_session", _session), \
+         patch("tradingbot.livetrade.equity_recorder.init_db"):
+        yield session
+    session.close()
+
+
+def test_records_equity_snapshot(equity_db, hl):
+    from tradingbot.livetrade.equity_recorder import record_live_equity
+
+    _with_position(hl, "BTC", 0.01)
+    record_live_equity(hl, {"AdaptiveMeanReversionBTCBot": 1.0})
+
+    row = equity_db.query(LiveEquity).one()
+    assert row.broker == "hyperliquid"
+    assert row.account_id == VAULT  # the vault, not the signing wallet
+    assert row.equity == 1000.0
+    assert row.positions == {"BTC": 0.01}
+    assert row.is_testnet is True
+
+
+def test_equity_snapshot_is_idempotent_per_day(equity_db, hl):
+    from tradingbot.livetrade.equity_recorder import record_live_equity
+
+    record_live_equity(hl)
+    hl.info.user_state.return_value = {
+        **FLAT_STATE,
+        "marginSummary": {**FLAT_STATE["marginSummary"], "accountValue": "1100.0"},
+    }
+    record_live_equity(hl)
+
+    row = equity_db.query(LiveEquity).one()  # one row, not two
+    assert row.equity == 1100.0  # last write wins
+
+
+def test_zero_equity_is_not_recorded(equity_db, hl):
+    """Every adapter returns 0.0 when its API is down. Writing that would punch
+    a fake 100% drawdown into the published curve."""
+    from tradingbot.livetrade.equity_recorder import record_live_equity
+
+    hl.info.user_state.side_effect = RuntimeError("api down")
+    record_live_equity(hl)
+
+    assert equity_db.query(LiveEquity).count() == 0

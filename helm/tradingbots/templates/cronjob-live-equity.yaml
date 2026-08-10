@@ -1,0 +1,89 @@
+{{- if .Values.liveTrade.hyperliquid.enabled }}
+# Standalone daily snapshot of real vault equity into live_equity.
+#
+# livetrade_hyperliquid.py already records equity in its finally block. This job
+# exists so the published track record has no holes: it keeps writing on days the
+# copier errors, days dryRun is on, and after the copier is disabled entirely.
+# Idempotent per UTC day — running alongside the copier is safe (last write wins).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: live-equity-recorder
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  schedule: {{ $.Values.liveTrade.hyperliquid.equitySchedule | default "5 23 * * *" | quote }}
+  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
+      template:
+        spec:
+          imagePullSecrets:
+          {{- range $.Values.imagePullSecrets }}
+          - name: {{ .name }}
+          {{- end }}
+          containers:
+          - name: live-equity-recorder
+            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+            command:
+            - "python"
+            args:
+            - "-m"
+            - "record_live_equity"
+            imagePullPolicy: {{ $.Values.image.pullPolicy }}
+            resources:
+              {{- toYaml $.Values.resources | nindent 14 }}
+            env:
+            {{- if $.Values.postgresql.clusterConnection }}
+            - name: POSTGRES_HOST
+              value: {{ $.Values.postgresql.clusterConnection.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ $.Values.postgresql.clusterConnection.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ $.Values.postgresql.clusterConnection.user | quote }}
+            - name: POSTGRES_DATABASE
+              value: {{ $.Values.postgresql.clusterConnection.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: POSTGRES_PASSWORD
+            {{- end }}
+            {{- range $.Values.env }}
+            {{- if and $.Values.postgresql.clusterConnection (or (eq .name "POSTGRES_URI") (eq .name "POSTGRES_PASSWORD")) }}
+            {{- else }}
+            - name: {{ .name }}
+            {{- if .value }}
+              value: {{ .value | quote }}
+            {{- else if .valueFrom }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ .valueFrom.secretKeyRef.key }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            - name: HYPERLIQUID_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: HYPERLIQUID_PRIVATE_KEY
+            - name: HYPERLIQUID_ACCOUNT_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: HYPERLIQUID_ACCOUNT_ADDRESS
+            - name: HYPERLIQUID_VAULT_ADDRESS
+              value: {{ $.Values.liveTrade.hyperliquid.vaultAddress | default "" | quote }}
+            - name: HYPERLIQUID_TESTNET
+              value: {{ $.Values.liveTrade.hyperliquid.testnet | quote }}
+          restartPolicy: OnFailure
+{{- end }}
