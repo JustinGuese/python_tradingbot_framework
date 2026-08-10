@@ -168,11 +168,9 @@ def main():
     args = parser.parse_args()
     
     if args.broker == "ib":
-        host = os.getenv("IB_GATEWAY_HOST", "127.0.0.1")
-        port = int(os.getenv("IB_GATEWAY_PORT", "4004"))
         account_id = os.getenv("IB_ACCOUNT_ID", "")
-        broker = InteractiveBrokersBroker(host=host, port=port, account_id=account_id)
-        logger.info(f"Using Interactive Brokers at {host}:{port}")
+        broker = InteractiveBrokersBroker(account_id=account_id)
+        logger.info("Using Interactive Brokers (Web API / OAuth 1.0a)")
     elif args.broker == "etoro":
         api_key = os.getenv("ETORO_API_KEY", "")
         user_key = os.getenv("ETORO_USER_KEY", "")

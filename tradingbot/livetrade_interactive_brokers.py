@@ -16,19 +16,6 @@ logging.basicConfig(
 logger = logging.getLogger("livetrade_ib")
 
 def main():
-    host = os.getenv("IB_GATEWAY_HOST", "127.0.0.1")
-    try:
-        port = int(os.getenv("IB_GATEWAY_PORT", "4004"))
-    except ValueError:
-        logger.error("IB_GATEWAY_PORT must be an integer")
-        return
-        
-    try:
-        client_id = int(os.getenv("IB_CLIENT_ID", "17"))
-    except ValueError:
-        logger.error("IB_CLIENT_ID must be an integer")
-        return
-        
     account_id = os.getenv("IB_ACCOUNT_ID")
     if not account_id:
         logger.error("IB_ACCOUNT_ID must be set in .env (e.g., DU1234567 for paper)")
@@ -65,15 +52,10 @@ def main():
         logger.error(f"LIVETRADE_PORTFOLIO_FRACTION must be in (0, 1], got {portfolio_fraction}")
         return
 
-    logger.info(f"Initializing Interactive Brokers copier for Account {account_id} at {host}:{port}")
+    logger.info(f"Initializing Interactive Brokers (Web API) copier for Account {account_id}")
     logger.info(f"Bot weights: {bot_weights} | Dry Run: {dry_run}")
-    
-    broker = InteractiveBrokersBroker(
-        host=host, 
-        port=port, 
-        client_id=client_id, 
-        account_id=account_id
-    )
+
+    broker = InteractiveBrokersBroker(account_id=account_id)
     
     copier = LiveTradeCopier(
         broker=broker,

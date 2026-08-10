@@ -382,7 +382,7 @@ See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup ins
 > [!WARNING]
 > **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (via IB Gateway / `ib_async`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (IBKR Web API via headless OAuth 1.0a / `ibind`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
 
 ### 1. Configure Environment
 
@@ -393,11 +393,15 @@ Add these to your `.env` or Kubernetes secrets:
 COLLECTIVE2_API_KEY=your_api_key
 COLLECTIVE2_SYSTEM_ID=12345678
 
-# Interactive Brokers (IB Gateway must be running)
-IB_GATEWAY_HOST=127.0.0.1
-IB_GATEWAY_PORT=4004
-IB_CLIENT_ID=17
+# Interactive Brokers (IBKR Web API — headless OAuth 1.0a, no gateway)
 IB_ACCOUNT_ID=DU1234567   # paper accounts start with DU; live with U
+IBIND_USE_OAUTH=True
+IBIND_OAUTH1A_CONSUMER_KEY=YOURKEY
+IBIND_OAUTH1A_ACCESS_TOKEN=your_access_token
+IBIND_OAUTH1A_ACCESS_TOKEN_SECRET=your_access_token_secret
+IBIND_OAUTH1A_DH_PRIME=hex_dh_prime_from_dhparam_pem
+IBIND_OAUTH1A_ENCRYPTION_KEY_FP=/etc/ibkr/private_encryption.pem
+IBIND_OAUTH1A_SIGNATURE_KEY_FP=/etc/ibkr/private_signature.pem
 
 # eToro (Public REST API)
 ETORO_API_KEY=your_public_key
@@ -425,9 +429,8 @@ before running the copier:
 # Collective2
 uv run python tradingbot/livetrade/collective2.py
 
-# Interactive Brokers (read-only connection; uses IB_CLIENT_ID=19 by default
-# so it won't collide with the cron client id 17 or vscode debug 18)
-uv run python tradingbot/livetrade/interactive_brokers.py
+# Interactive Brokers (IBKR Web API; reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* from .env)
+uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro (reads ETORO_API_KEY, ETORO_USER_KEY, ETORO_DEMO from .env)
 uv run python tradingbot/livetrade/etoro.py

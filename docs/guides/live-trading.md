@@ -39,10 +39,9 @@ credentials and account IDs before running the copier:
 # Collective2 — reads COLLECTIVE2_API_KEY + COLLECTIVE2_SYSTEM_ID
 uv run python tradingbot/livetrade/collective2.py
 
-# Interactive Brokers — reads IB_GATEWAY_HOST/PORT + IB_ACCOUNT_ID
-# Connects read-only with IB_CLIENT_ID=19 by default so it won't collide
-# with the cron client (17) or the vscode debug config (18).
-uv run python tradingbot/livetrade/interactive_brokers.py
+# Interactive Brokers — IBKR Web API via headless OAuth 1.0a.
+# Reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* credentials; prints an account summary.
+uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
 uv run python tradingbot/livetrade/etoro.py
@@ -90,10 +89,14 @@ If you have $100,000 in your live account and configure:
 | --- | --- |
 | `COLLECTIVE2_API_KEY` | Your C2 API v4 key. Get it from the [C2 API Dashboard](https://collective2.com/account-management/apiv4/dashboard/0). |
 | `COLLECTIVE2_SYSTEM_ID` | The ID of your C2 strategy. |
-| `IB_GATEWAY_HOST` | Hostname or IP of IB Gateway (default: `127.0.0.1`). |
-| `IB_GATEWAY_PORT` | API port for IB Gateway (default: `4004`). |
-| `IB_CLIENT_ID` | Unique client ID for the copier (default: `17`). **Do not use Master Client ID (0).** |
 | `IB_ACCOUNT_ID` | Your Interactive Brokers account ID (e.g., `DU1234567` for paper, `U1234567` for live). |
+| `IBIND_USE_OAUTH` | Enable headless OAuth 1.0a for the IBKR Web API. Set to `True`. |
+| `IBIND_OAUTH1A_CONSUMER_KEY` | 9-char consumer key registered in the IBKR self-service OAuth portal. |
+| `IBIND_OAUTH1A_ACCESS_TOKEN` | OAuth access token generated in the IBKR portal. |
+| `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET` | OAuth access token secret generated in the IBKR portal. |
+| `IBIND_OAUTH1A_DH_PRIME` | Diffie-Hellman prime (hex string from `dhparam.pem`). |
+| `IBIND_OAUTH1A_ENCRYPTION_KEY_FP` | Path to the private encryption key file (`private_encryption.pem`). |
+| `IBIND_OAUTH1A_SIGNATURE_KEY_FP` | Path to the private signature key file (`private_signature.pem`). |
 | `ETORO_API_KEY` | Your eToro Public API Key from the [eToro API Portal](https://api-portal.etoro.com/). |
 | `ETORO_USER_KEY` | Your eToro User Key (generated in API Portal settings). |
 | `ETORO_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
@@ -109,51 +112,110 @@ If you have $100,000 in your live account and configure:
 
 ### Enabling the Copiers in Helm
 
-Each broker is its own CronJob, gated by a separate flag in [helm/tradingbots/values.yaml](../../helm/tradingbots/values.yaml). All default to `false` — opt in independently:
+Each broker is its own CronJob, gated by a per-broker `enabled` flag nested under
+`liveTrade` in [helm/tradingbots/values.yaml](../../helm/tradingbots/values.yaml).
+Settings directly under `liveTrade` are shared by every broker; each broker block
+carries only its own connection details and schedule:
 
 ```yaml
 liveTrade:
-  enabled: true     # Collective2 copier
-  # ...
-liveTradeIB:
-  enabled: true     # Interactive Brokers copier
-  # ...
-liveTradeEToro:
-  enabled: true     # eToro copier
-  # ...
-liveTradeDarwinex:
-  enabled: true     # Darwinex copier
-  # ...
+  # shared across all brokers
+  botWeights: '{"SomeBot": 0.5, "OtherBot": 0.5}'
+  dryRun: "false"
+  strictMapping: "true"
+  portfolioFraction: "1.0"
+
+  collective2:
+    enabled: true
+    schedule: "10 21 * * 1-5"
+    systemId: "155809898"
+  interactiveBrokers:
+    enabled: true
+    # ...
+  etoro:
+    enabled: false
+  darwinex:
+    enabled: false
 ```
 
 You can run any combination of brokers (Collective2, IBKR, eToro, Darwinex), or none.
+
+### Running Multiple Collective2 Strategies
+
+A C2 API key is **account-scoped** and every request addresses a strategy by its
+numeric `StrategyId`, so one `COLLECTIVE2_API_KEY` can drive several strategies.
+To publish a different set of bots as a separate, independently-tracked C2
+strategy, add another CronJob rather than another credential.
+
+The `XAUZerifine` strategy is the worked example — see
+[cronjob-livetrade-collective2-xauzerifine.yaml](../../helm/tradingbots/templates/cronjob-livetrade-collective2-xauzerifine.yaml).
+It is a copy of the base Collective2 template that overrides only the strategy id
+and the per-instance settings:
+
+```yaml
+liveTrade:
+  collective2XauZerifine:
+    enabled: false                            # flip on once systemId is filled in
+    schedule: "50 21 * * 1-5"
+    systemId: ""                              # the XAUZerifine StrategyId
+    botWeights: '{"XAUZenbotTreeBot": 1.0}'   # overrides the shared botWeights
+    dryRun: "true"                            # overrides the shared dryRun
+    # apiKeySecretKey: "COLLECTIVE2_API_KEY_XAUZERIFINE"  # only for a different C2 account
+```
+
+`botWeights`, `dryRun` and `portfolioFraction` fall back to the shared
+`liveTrade.*` values when omitted. The template refuses to render if `systemId`
+is empty, or if it duplicates `liveTrade.collective2.systemId` **while both
+instances are enabled** — two copiers pointed at one strategy would each
+liquidate the other's positions, since `sync()` is a full target-state
+reconciliation.
+
+Sharing a `systemId` is legitimate when you are **handing a strategy over**:
+disable the old instance in the same commit that enables the new one, so only one
+copier ever runs against it. Be aware that the C2 strategy keeps its existing
+track record and equity curve — the first run of the new instance liquidates
+whatever the old bots held and rebuilds the portfolio from the new ones. If you
+want a clean track record, create a fresh C2 strategy instead.
+
+Each strategy needs its bots' tickers to be tradeable on C2. `XAUZenbotTreeBot`
+trades `^XAU` (the PHLX Gold/Silver **index**), which is mapped to the `GDX`
+miners ETF in [symbol_map.json](../../tradingbot/livetrade/symbol_map.json) —
+without that override it could not trade at all. See the warning about index
+tickers under [Ticker Mapping (Discovery)](#-ticker-mapping-discovery).
 
 ---
 
 ## 🏦 Interactive Brokers (IBKR)
 
-The framework supports Interactive Brokers via **IB Gateway** (or TWS).
+The framework connects to Interactive Brokers through the **IBKR Web API** (Client Portal REST) using the [`ibind`](https://github.com/Voyz/ibind) library with **fully headless OAuth 1.0a** authentication. There is **no IB Gateway / TWS container** and no daily browser login — the live-session token is obtained programmatically and self-renews on a 24h cycle.
 
-### 1. Requirements
-- **IB Gateway** running and configured for API access.
-- **Paper Account** strongly recommended for initial testing.
-- **Paper Port**: Usually `4002` (standard) or `4004` (often used in local setups).
+### 1. One-time OAuth setup (in the IBKR self-service portal)
+1. Generate keys locally with OpenSSL: a private encryption key (`private_encryption.pem`), a private signature key (`private_signature.pem`), and DH params (`dhparam.pem`).
+2. In the IBKR **self-service OAuth portal**: register a 9-char consumer key, upload the public encryption + signature keys and the DH params, then generate an **access token** and **access token secret**.
+3. Extract the DH prime as a hex string from `dhparam.pem`.
+
+> IBKR approval/activation of OAuth access can take from a day up to a couple of weeks. A **Paper Account** is strongly recommended for initial testing.
 
 ### 2. Configuration
-Set these environment variables:
+Set these environment variables (see the reference table above for full descriptions):
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `IB_GATEWAY_HOST` | Hostname of IB Gateway. | `127.0.0.1` |
-| `IB_GATEWAY_PORT` | API Port. | `4004` |
-| `IB_CLIENT_ID` | Unique ID for this connection. | `17` |
 | `IB_ACCOUNT_ID` | Your IB account ID (e.g., `DU1234567`). | **Required** |
+| `IBIND_USE_OAUTH` | Enable headless OAuth 1.0a. | `True` |
+| `IBIND_OAUTH1A_CONSUMER_KEY` | Consumer key from the portal. | **Required** |
+| `IBIND_OAUTH1A_ACCESS_TOKEN` | Access token from the portal. | **Required** |
+| `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET` | Access token secret from the portal. | **Required** |
+| `IBIND_OAUTH1A_DH_PRIME` | DH prime (hex). | **Required** |
+| `IBIND_OAUTH1A_ENCRYPTION_KEY_FP` | Path to `private_encryption.pem`. | **Required** |
+| `IBIND_OAUTH1A_SIGNATURE_KEY_FP` | Path to `private_signature.pem`. | **Required** |
 | `LIVETRADE_DRY_RUN` | Paper-safety: defaults to `true`. | `true` |
 
 > [!IMPORTANT]
-> **clientId and Order Isolation**: The copier is designed to be idempotent. Before each sync, it calls `cancel_open_orders()` to clear any stale orders submitted by previous runs that haven't filled yet. To ensure this **does not cancel your manual orders**, the copier only targets orders with a matching `IB_CLIENT_ID`. 
-> - **Always use a unique `IB_CLIENT_ID` (default: 17)** for the copier.
-> - **Avoid using "Master Client ID" (0)** for the copier, as it can see and cancel orders from all other clients.
+> **Order Isolation**: The copier is idempotent. Before each sync it calls `cancel_open_orders()` to clear stale working orders from previous runs. Over the Web API this cancels the **account's** live orders — run the copier against a dedicated account (or accept that it manages that account's open orders) so it does not clear unrelated manual orders.
+
+> [!NOTE]
+> **Scope**: order routing currently supports **US equities/ETFs** (conid resolved via `stock_conid_by_symbol`, which the live bots use). Forex/crypto/futures over the Web API is not yet implemented and raises `NotImplementedError`.
 
 ### 3. Usage
 ```bash
@@ -234,6 +296,15 @@ uv run python tradingbot/livetrade_darwinex.py
 ## 🔍 Ticker Mapping (Discovery)
 
 Broker symbols (e.g., `EURUSD`) rarely match yfinance tickers (`EURUSD=X`) exactly.
+
+> ⚠️ **Index tickers need an explicit override.** A bot whose ticker is an index
+> (`^XAU`, `^VIX`, …) has nothing tradeable to buy. `SymbolMapper` only translates
+> `^GSPC`/`^NDX`/`^IXIC` by default; any other `^` ticker is returned **unchanged**,
+> so it is not `None` and does not look "unmapped". The copier therefore rejects any
+> mapped symbol that still starts with `^`, and `LIVETRADE_STRICT_MAPPING=true` will
+> abort the sync — which is what you want, since the alternative is silently
+> submitting orders the broker rejects on every run. Fix it by mapping the index to a
+> tradeable proxy ETF in `symbol_map.json`, as `^XAU` → `GDX` does for Collective2.
 
 ### 1. Run Discovery
 Find unmapped tickers in your bot portfolios:
