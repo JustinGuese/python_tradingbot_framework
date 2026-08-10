@@ -262,9 +262,11 @@ liveTrade:
     schedule: "50 21 * * 1-5" # 9:50 PM UTC (C2 :10, IB :20, eToro :30, Darwinex :40)
     systemId: "155809898"
     botWeights: '{"XAUZenbotTreeBot": 1.0}'
-    # LIVE. The first run LIQUIDATES the inherited SynthesizedHyperConvexity/
-    # AdaptiveMeanReversion positions, since sync() is a full target-state
-    # reconciliation, and rebuilds from XAUZenbotTreeBot (GDX, or all-cash when flat).
+    # LIVE. sync() is a full target-state reconciliation, so it WOULD liquidate the
+    # inherited QQQ/TQQQ positions — but only once XAUZenbotTreeBot is actually
+    # holding something. While the bot is flat (~94% of days) target_weights is
+    # empty, sync() early-returns at copier.py:42, and the stale positions survive
+    # untouched. Flatten strategy 155809898 by hand if you want a clean handover.
     dryRun: "false"
     # apiKeySecretKey: "COLLECTIVE2_API_KEY_XAUZERIFINE" # optional: only if a different C2 account
     # portfolioFraction: "0.5" # optional: override the shared liveTrade.portfolioFraction
@@ -293,6 +295,20 @@ liveTrade:
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
   # Darwinex — requires DARWINEX_USERNAME and DARWINEX_PASSWORD in tradingbot-secrets.
+  #
+  # BLOCKED, and not by credentials. DarwinexBroker speaks the DXtrade REST API
+  # (/dxsca-web), and DXtrade carries ONLY forex, indices and commodities. Darwinex's
+  # ~800 US stocks and ~100 US ETFs are MetaTrader 5 only, so no equity/ETF ticker in
+  # this fleet is reachable from here — including the ^XAU -> GDX mapping that makes
+  # XAUZenbotTreeBot tradeable on Collective2. Reaching MT5 needs an EA bridge
+  # (DWX Connect), not a config change.
+  #
+  # Login also returns 403 "RBAC: access denied", consistent with the account being
+  # Darwinex Zero, which is MT4/MT5 only and has no DXtrade entitlement at all.
+  #
+  # Do NOT "fix" this by mapping ^XAU -> XAUUSD. XAUZenbotTreeBot's signal is computed
+  # on the PHLX gold/silver MINERS index; its measured beta to bullion was 0.14, so
+  # spot gold is a different strategy, not a proxy.
   darwinex:
     enabled: false
     schedule: "40 21 * * 1-5" # 9:40 PM UTC

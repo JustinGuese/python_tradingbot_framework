@@ -50,6 +50,10 @@ uv run python tradingbot/livetrade/etoro.py
 
 # Darwinex — reads DARWINEX_USERNAME + DARWINEX_PASSWORD + DARWINEX_DEMO
 uv run python tradingbot/livetrade/darwinex.py
+
+# Hyperliquid — reads HYPERLIQUID_PRIVATE_KEY + _ACCOUNT_ADDRESS + _VAULT_ADDRESS
+# + _TESTNET. Also prints effective leverage, which must stay <= 1.0x.
+PYTHONPATH=tradingbot uv run python tradingbot/livetrade/hyperliquid.py
 ```
 
 All brokers expose `print_account_summary()` on the broker class, so you can
@@ -373,6 +377,114 @@ DXtrade REST API does not provide a simple "last price" endpoint (it is WebSocke
 ### 5. Usage
 ```bash
 uv run python tradingbot/livetrade_darwinex.py
+```
+
+---
+
+## ⚡ Hyperliquid (Perpetuals / On-Chain Vault)
+
+Runs one strategy on Hyperliquid perpetuals, optionally inside a **user vault** so
+outside depositors can follow it. This is the only **perps** broker here; every
+other one is spot. Three things behave differently and none of them are cosmetic.
+
+### 1. Requirements
+- An **API (agent) wallet** — generate at <https://app.hyperliquid.xyz/API>.
+  Never use your master wallet key. Use **separate agent wallets for testnet and
+  mainnet**: nonces are tracked per signer.
+- For a vault: 100 USDC minimum seed, a **one-time 10,000 USDC creation fee**,
+  and the leader must hold **≥5% of vault equity** at all times. Depositors are
+  subject to a lock-up. Read Hyperliquid's docs — these are protocol rules.
+
+### 2. Configuration
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `HYPERLIQUID_PRIVATE_KEY` | API/agent wallet private key (the signer). | **Required** |
+| `HYPERLIQUID_ACCOUNT_ADDRESS` | Master account the agent signs for. | wallet address |
+| `HYPERLIQUID_VAULT_ADDRESS` | Routes all trades into the vault. Empty = your own account. | `""` |
+| `HYPERLIQUID_TESTNET` | `true` for testnet, `false` for mainnet. | `true` |
+
+Helm: `liveTrade.hyperliquid` in `helm/tradingbots/values.yaml`. The template
+**hard-fails at render time** if `testnet: "false"` and `vaultAddress` is empty,
+unless you also set `allowMainnetWithoutVault: "true"` — that combination trades
+real personal funds, so it has to be deliberate.
+
+### 3. Why the settings are what they are
+
+- **`portfolioFraction: "0.95"`, not `1.0`.** The copier clamps buys to
+  `get_cash() * 0.98`. At 1.0 the target notional exceeds that budget on every
+  run, so it scales every order down and sits on the margin boundary. At 0.95 the
+  scaling branch never fires.
+- **`minOrderUsd: "25"`.** Hyperliquid rejects orders below **$10** notional
+  (exact reduce-only closes are exempt); 25 leaves headroom for that 0.98
+  scale-down. **Raise it as the vault grows** — target roughly 1–2% of equity.
+  Past ~$50k TVL a fixed $25 floor churns taker fees on noise every single run.
+- **1x cross leverage**, set by the broker before the first opening order on each
+  coin. This is what makes "notional ≤ equity" true even if the copier's weight
+  maths is wrong: at 1x the exchange itself rejects an oversized order instead of
+  silently levering up. It also makes liquidation of a single cross position
+  effectively impossible.
+- **`get_cash()` returns `withdrawable`, not `accountValue`.** Perps have no
+  settled cash; free collateral is the real constraint on new notional.
+  `accountValue` would let the copier submit orders the exchange rejects, and
+  `place_order` can only log that — a silent no-op is harder to debug than a clamp.
+- **`get_positions()` returns SIGNED sizes** (like Darwinex, unlike C2/IB). With
+  `abs()`, a stray short would take the copier's full-liquidation branch and emit
+  a SELL, doubling the short — every run. Signed falls through to the general diff
+  and buys it back. `test_copier_flattens_a_stray_short` locks this in.
+
+### 4. Staged rollout — do not skip stages
+
+| Stage | Where | Config | Advance when |
+| --- | --- | --- | --- |
+| 0 | laptop | `TESTNET=true`, no vault, `DRY_RUN=true` | Summary prints; sync logs `[DRY RUN] Would BUY`; nothing unmapped; **no websocket hang** |
+| 1 | laptop | `DRY_RUN=false`, ~$1000 faucet USDC | Order fills; effective leverage ≈0.95x; immediate re-run emits no orders; flipping the paper bot to cash closes to exactly 0 |
+| 2 | laptop | testnet vault created, `VAULT_ADDRESS` set | **Vault page shows the position and your personal account shows nothing.** Confirms an agent wallet can sign for a vault |
+| 3 | cluster | `enabled: true`, `dryRun: true` → then `false` | 7 full days including a weekend; `live_equity` has 7 rows |
+| 4 | cluster | mainnet key, `testnet: false`, no vault, `portfolioFraction: "0.20"`, ~$200 real | Loud no-vault warning fires; one clean fill; leverage ≈0.2x; 3–5 days clean |
+| 5 | cluster | vault created, `vaultAddress` set, `portfolioFraction: "0.95"` | First run liquidates nothing and opens the target long |
+
+Trigger a run manually:
+```bash
+kubectl create job --from=cronjob/livetrade-hyperliquid hl-manual-1 -n tradingbots-2025
+```
+
+**Open question, answered at stage 2:** Hyperliquid's "Nonces and API wallets"
+docs only describe master → sub-account delegation, not agent → vault. `vaultAddress`
+is part of the signed preimage so it is not a security hole, and third-party docs
+say it works — but verify with a $10 testnet order. If it is rejected, fall back
+to the leader's master key and note that in the runbook.
+
+### 5. ⚠️ Rollback leaves the position open
+
+Setting `enabled: false` and running `helm upgrade` stops **new** orders. It does
+**not** flatten what is already open — there is no job left to close it. To go flat:
+
+- point `LIVETRADE_BOT_WEIGHTS` at a bot that is currently in cash and run once
+  with `dryRun: "false"`, or
+- close the position manually in the Hyperliquid UI.
+
+Disabling the copier and walking away leaves a live, unmanaged, funding-accruing
+perp position.
+
+### 6. Vault equity tracking
+
+Real equity is recorded to the **`live_equity`** table — deliberately *not*
+`portfolio_worth`, which is the paper leaderboard ($10k starts, no fees, no
+funding); mixing real money into it makes both curves uninterpretable.
+
+Two writers, one row per (broker, account, UTC day), idempotent:
+- `livetrade_hyperliquid.py` records in its `finally` block (free — the sync
+  already made those API calls).
+- `record_live_equity.py` runs as its own CronJob at 23:05 UTC so the curve stays
+  gapless on days the copier errors, days `dryRun` is on, and after it is disabled.
+
+`is_testnet` keeps validation runs out of the published curve. The website
+generator reads this table via `generator/vault.py`.
+
+### 7. Usage
+```bash
+uv run python tradingbot/livetrade_hyperliquid.py
 ```
 
 ---
