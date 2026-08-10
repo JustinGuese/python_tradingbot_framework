@@ -486,8 +486,64 @@ from the `ib-oauth-keys` secret.
 > IBKR's weekend server restarts. Register early; a 401 on day one isn't necessarily a
 > misconfiguration.
 
-Full runbook, including the `kubectl` commands to load the secrets:
-[docs/guides/live-trading.md](docs/guides/live-trading.md).
+### Loading the IBKR Credentials Into Kubernetes
+
+All five string values plus the two private PEMs go into a single `ib-oauth-keys` secret —
+that is what the CronJob reads its env from and mounts at `/etc/ibkr`.
+
+**Do not try to build it with one `kubectl create secret` call.** `--from-env-file` cannot be
+combined with `--from-file`, so a secret mixing string values and file content is impossible
+in a single invocation:
+
+```
+error: from-env-file cannot be combined with from-file or from-literal
+```
+
+Use the helper instead, which assembles the manifest and pipes it to `apply`:
+
+```bash
+./scripts/create_ib_oauth_secret.sh [key-dir]     # default: ~/ibkr-oauth-paper
+```
+
+`key-dir` must hold `oauth.env`, `private_encryption.pem`, and `private_signature.pem`.
+Write `oauth.env` with an **editor, not the shell** — `--from-literal` and `export` both leak
+values into shell history and into `ps` output while the command runs:
+
+```
+IBIND_OAUTH1A_CONSUMER_KEY=DFTRADEBO
+IBIND_OAUTH1A_ACCESS_TOKEN=...
+IBIND_OAUTH1A_ACCESS_TOKEN_SECRET=...
+IBIND_OAUTH1A_DH_PRIME=...
+IB_ACCOUNT_ID=DU1234567
+```
+
+The script refuses to apply anything if a value is empty or the consumer key isn't exactly
+9 characters, strips stray whitespace (a trailing newline inside a token fails IBKR auth with
+an unhelpful error), never writes plaintext to disk, and prints only key names and byte
+lengths so no value reaches your terminal or scrollback. Re-running it updates the secret in
+place rather than erroring with "already exists".
+
+Because it exits non-zero on failure, gate the cleanup on success — otherwise a failed apply
+still destroys the tokens you just pasted:
+
+```bash
+./scripts/create_ib_oauth_secret.sh && shred -u ~/ibkr-oauth-paper/oauth.env
+```
+
+Override the target with `KUBE_CONTEXT`, `NAMESPACE`, or `SECRET_NAME` env vars. The default
+context is `luxvps` — the cluster's default context is a *different* cluster that will simply
+hang.
+
+Then enable the CronJob:
+
+```yaml
+liveTrade:
+  dryRun: "true"                 # first run only
+  interactiveBrokers:
+    enabled: true
+```
+
+Full runbook: [docs/guides/live-trading.md](docs/guides/live-trading.md).
 
 ### Inspect Account & Portfolio
 
