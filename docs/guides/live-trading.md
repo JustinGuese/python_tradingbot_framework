@@ -41,7 +41,9 @@ uv run python tradingbot/livetrade/collective2.py
 
 # Interactive Brokers — IBKR Web API via headless OAuth 1.0a.
 # Reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* credentials; prints an account summary.
-uv run python -m tradingbot.livetrade.interactive_brokers
+# Needs tradingbot/ on PYTHONPATH: the livetrade modules use the container-style
+# `from livetrade.X import ...` imports, so `-m tradingbot.livetrade...` fails.
+PYTHONPATH=tradingbot uv run python tradingbot/livetrade/interactive_brokers.py
 
 # eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
 uv run python tradingbot/livetrade/etoro.py
