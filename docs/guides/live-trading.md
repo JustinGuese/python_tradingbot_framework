@@ -193,9 +193,23 @@ The framework connects to Interactive Brokers through the **IBKR Web API** (Clie
 
 ### 1. One-time OAuth setup (in the IBKR self-service portal)
 
-This is **first-party self-service** OAuth: you register against your own account and
-issue your own tokens. There is no third-party consumer application to submit and no
-approval queue to wait on.
+This is **first-party self-service** OAuth: you register against your own account and issue
+your own tokens. It replaces the **Client Portal Gateway** — the small Java program IBKR's
+"Getting Started → Retail" section points at. With OAuth 1.0a there is no gateway process
+to run, which is the whole reason for this integration: a CronJob cannot babysit a
+long-lived local Java daemon.
+
+**Eligibility.** The live account must be fully open, **funded**, and of the **IBKR Pro**
+type (not Lite). Note that IBKR's own docs file OAuth 1.0a under "Web API Access for
+Organizations" and steer individuals toward the CP Gateway; in practice individual Pro
+accountholders do use the self-service portal, and IBKR API support has stated there is no
+technical limitation preventing it. If the portal refuses your login, that assumption is
+what broke — fall back to asking API support to enable OAuth on the username.
+
+**Activation lag.** There is no formal approval process here (unlike *third-party* OAuth,
+which carries an 8–14 week compliance review). But consumer keys are not always live
+immediately: reported activation delays run from 24 hours to about two weeks, possibly
+tied to IBKR's weekend server restarts. Register the key before you need it.
 
 **Paper accounts are supported.** Log into the portal with your **paper** credentials and
 follow the identical flow. Generate a *separate* keypair for paper — do not reuse the live
@@ -272,6 +286,20 @@ Set these environment variables (see the reference table above for full descript
 
 > [!NOTE]
 > **Scope**: order routing currently supports **US equities/ETFs** (conid resolved via `stock_conid_by_symbol`, which the live bots use). Forex/crypto/futures over the Web API is not yet implemented and raises `NotImplementedError`.
+
+> [!WARNING]
+> **One brokerage session per username, across all IBKR platforms.** If you are logged into
+> TWS, IBKR Mobile, or Client Portal with the same username when the CronJob fires, the two
+> sessions compete and one gets displaced. Give the copier a **dedicated username** rather
+> than the one you log in with manually, or stay logged out around 21:20 UTC.
+
+> [!NOTE]
+> **No market data subscription is needed.** `_get_native_price()` returns `0.0` on purpose,
+> so the base class falls back to yfinance for pricing. The copier therefore never touches
+> `/iserver/marketdata/*` and consumes none of the account's 100 market data lines.
+> Rate limits worth knowing if this grows: 10 req/s globally, but `/iserver/orders` and
+> `/portfolio/accounts` are 1 req/5s each, and `/tickle` is 1 req/s. Exceeding them returns
+> 429 and can put the source IP in a 10-minute penalty box.
 
 ### 3. Usage
 ```bash
