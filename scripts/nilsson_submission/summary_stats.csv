@@ -1,0 +1,21 @@
+Strategy,AdaptiveMeanReversionBot
+Instrument,QQQ (Nasdaq-100 ETF)
+Type,"Systematic long / cash, daily, trend-following"
+Track record,"Live (paper book, $10,000 notional)"
+Inception,2026-03-22
+As of,2026-07-01
+Months live,5
+Starting notional (USD),10000.0
+Current value / AUM (USD),11916.48
+Total Return %,19.16
+CAGR (annualized) %,88.53
+Ann. Volatility %,20.61
+Sharpe (rf=0),2.16
+Sortino,16.33
+Max Drawdown %,-7.03
+Calmar,12.6
+Best Month %,11.13
+Worst Month %,-1.44
+QQQ B&H over window %,24.58
+Trades to date,1
+Current exposure,100% long QQQ

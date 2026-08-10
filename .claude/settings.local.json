@@ -3,7 +3,9 @@
     "allow": [
       "WebFetch(domain:api-portal.etoro.com)",
       "WebFetch(domain:skills.bullaware.com)",
-      "WebSearch"
+      "WebSearch",
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

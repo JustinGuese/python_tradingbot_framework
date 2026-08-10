@@ -504,6 +504,45 @@ class RunLog(Base):
     result: str (nullable, contains decision/error info)
 ```
 
+#### PortfolioWorth Model
+
+```python
+class PortfolioWorth(Base):
+    bot_name: str (primary key, part of composite)
+    date: datetime (primary key, part of composite)
+    portfolio_worth: float   # total value in USD on that day
+    holdings: dict (JSON)     # snapshot e.g. {"USD": 0, "QQQ": 16.43}
+    created_at: datetime
+```
+
+Written daily by the portfolio-worth-calculator CronJob. This is the **live
+per-bot track record** — one daily valuation row per bot. `Benchmark_QQQ`,
+`Benchmark_SPY`, `Benchmark_FTWD` rows are buy-and-hold reference series in the
+same table. Each real bot has a live equity history here (e.g.
+`AdaptiveMeanReversionBot` since 2026-03-22, starting from a $10,000 notional).
+
+### Accessing production data (trades + portfolio_worth)
+
+The real trade history (`trades`) and live equity curves (`portfolio_worth`) live
+in the **production Postgres in Kubernetes**, not on localhost. `POSTGRES_URI` in
+`.env` points at `localhost:5432`, which is not running locally — you must reach
+the cluster DB.
+
+- Namespace: `tradingbots-2025`
+- Postgres pod: `psql-deployment-*` (service `psql-service:5432`, db `postgres`)
+- **Exec directly** (simplest, no port-forward):
+  ```bash
+  POD=$(kubectl get pods -n tradingbots-2025 -o name | grep psql | head -1)
+  kubectl exec -n tradingbots-2025 ${POD#pod/} -- \
+    psql -U postgres -d postgres -c \
+    "SELECT date::date, portfolio_worth FROM portfolio_worth WHERE bot_name='AdaptiveMeanReversionBot' ORDER BY date;"
+  ```
+- **Or port-forward** and use the framework's `get_db_session()` locally:
+  ```bash
+  kubectl port-forward -n tradingbots-2025 svc/psql-service 5432:5432
+  ```
+- See the `/k8s-psql-investigate` skill for full details.
+
 ### Database Session Management
 
 **Always use the context manager**:
