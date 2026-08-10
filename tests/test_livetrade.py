@@ -71,6 +71,46 @@ class TestLiveTrade(unittest.TestCase):
             self.copier.sync()
             self.assertTrue(any("STRICT MODE: Aborting sync" in line for line in cm.output))
 
+    def test_strict_mapping_rejects_untranslated_index_ticker(self):
+        """map_symbol() never returns None for an unknown ^-ticker — the default
+        rules pass it through unchanged. Strict mode must still abort, or we'd
+        submit an order for a symbol like ^XAU that the broker just rejects."""
+        self.copier.strict_mapping = True
+
+        mock_bot = MagicMock(spec=Bot)
+        mock_bot.portfolio = {"USD": 1000, "^XAU": 10}
+        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.data_service.get_latest_prices_batch.return_value = {"^XAU": 100.0}
+
+        # What SymbolMapper's default rules actually do with an unknown index.
+        self.broker.map_symbol.return_value = {
+            "symbol": "^XAU", "type": "stock", "source": "default-rule"
+        }
+
+        with self.assertLogs("tradingbot.livetrade.copier", level="ERROR") as cm:
+            self.copier.sync()
+        self.assertTrue(any("STRICT MODE: Aborting sync" in line for line in cm.output))
+        self.broker.place_order.assert_not_called()
+
+    def test_translated_index_ticker_still_maps(self):
+        """Regression: ^GSPC -> SPX loses the caret and must keep working."""
+        self.copier.strict_mapping = True
+
+        mock_bot = MagicMock(spec=Bot)
+        mock_bot.portfolio = {"USD": 0, "^GSPC": 10}
+        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.data_service.get_latest_prices_batch.return_value = {"^GSPC": 100.0}
+        self.broker.map_symbol.return_value = {"symbol": "SPX", "type": "index"}
+        self.broker.get_total_equity.return_value = 1000.0
+        self.broker.get_positions.return_value = {}
+
+        self.copier.sync()  # must not abort
+
+        orders = self.copier._calculate_orders(
+            {"SPX": {"weight": 1.0, "type": "index"}}, {}, 1000.0
+        )
+        self.assertEqual(orders[0]["symbol"], "SPX")
+
     def test_calculate_orders_skips_zero_price(self):
         target_weights = {"AAPL": {"weight": 0.5, "type": "stock"}}
         current_positions = {"AAPL": 0}

@@ -944,6 +944,24 @@ POSTGRES_URI="postgresql://x:x@localhost:5432/x" PYTHONPATH=. uv run pytest test
 
 The connection isn't opened until a session is actually used, so a syntactically-valid bogus URI is enough to satisfy import.
 
+### 13. Index Tickers Defeat `LIVETRADE_STRICT_MAPPING`
+
+**Problem**: A bot whose ticker is an index — `XAUZenbotTreeBot` trades `^XAU`, the PHLX Gold/Silver index — has nothing tradeable to buy, but `LIVETRADE_STRICT_MAPPING=true` did **not** catch it. The copier submitted C2 orders for `FullSymbol: "^XAU"` that the broker rejected on every run, silently.
+
+**Cause**: `SymbolMapper.map_symbol()` never returns `None`. Its default rules translate only `^GSPC`/`^NDX`/`^IXIC`; every other ticker falls through the `elif` chain and is returned **unchanged** as `{"symbol": "^XAU", "type": "stock", "source": "default-rule"}`. That is a non-`None` dict with a truthy `symbol`, so the copier counted it as *successfully mapped* and the strict-mode abort never fired. Strict mapping only ever protected against a broker's `map_symbol` returning `None` — which the shared `SymbolMapper` never does.
+
+**Solution**: `copier.sync()` now also rejects any mapped symbol that still starts with `^`, since no broker accepts a caret symbol. Translated indices (`^GSPC` → `SPX`) have already lost the caret and are unaffected. When adding a bot that trades an index, map it to a tradeable proxy ETF in `symbol_map.json` — `^XAU` → `GDX` (VanEck Gold Miners) for `collective2`.
+
+**Generalize**: don't assume a non-`None` return from a mapper means "mapped". Check the mapped *value* is usable for the target system, not just that a lookup succeeded.
+
+### 14. Multiple Collective2 Strategies Share One API Key
+
+C2 API keys are **account-scoped** and every request selects the strategy by numeric `StrategyId`, so a second C2 strategy needs a second CronJob, **not** a second credential. `helm/tradingbots/templates/cronjob-livetrade-collective2-xauzerifine.yaml` is the pattern: same image, same `livetrade_collective2.py`, different `COLLECTIVE2_SYSTEM_ID` + per-instance `LIVETRADE_BOT_WEIGHTS`/`LIVETRADE_DRY_RUN` via the `default <shared> <per-instance>` idiom.
+
+**Never point two *enabled* copiers at one `StrategyId`.** `copier.sync()` is a full target-state reconciliation that liquidates every position not in its target set, so two jobs on one strategy each liquidate the other's positions on every run. The template hard-fails at render time if `systemId` is empty, or if it duplicates `liveTrade.collective2.systemId` while both instances are enabled.
+
+Reusing a `StrategyId` **is** correct when handing a strategy over to a different bot set — disable the old instance in the same change that enables the new one. That keeps the C2 strategy's existing track record and equity curve; the first run liquidates the old bots' positions and rebuilds from the new ones. Create a fresh C2 strategy instead if the new bot needs a clean record.
+
 ## Technical Analysis Indicators
 
 After calling `getYFDataWithTA()`, the DataFrame includes indicators from the `ta` library:

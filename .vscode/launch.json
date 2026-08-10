@@ -30,6 +30,23 @@
       }
     },
     {
+      // Reads COLLECTIVE2_SYSTEM_ID from .env — set that to the XAUZerifine
+      // strategy id before running, or you'll inspect the wrong C2 strategy.
+      "name": "LiveTrade: Collective2 XAUZerifine (DRY RUN)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tradingbot/livetrade_collective2.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/tradingbot/",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LIVETRADE_DRY_RUN": "true",
+        "LIVETRADE_STRICT_MAPPING": "true",
+        "LIVETRADE_BOT_WEIGHTS": "{\"XAUZenbotTreeBot\": 1.0}",
+        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+      }
+    },
+    {
       "name": "LiveTrade: Interactive Brokers (paper)",
       "type": "debugpy",
       "request": "launch",

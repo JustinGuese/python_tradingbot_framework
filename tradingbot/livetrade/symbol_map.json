@@ -19,11 +19,35 @@
       "source": "human"
     }
   },
+  "^XAU": {
+    "collective2": {
+      "symbol": "GDX",
+      "type": "stock",
+      "verified": "2026-08-10",
+      "source": "human"
+    }
+  },
   "SPY": {
     "darwinex": {
       "symbol": "SPY.US",
       "type": "stock",
       "verified": "2026-05-04",
+      "source": "human"
+    }
+  },
+  "BTC-USD": {
+    "hyperliquid": {
+      "symbol": "BTC",
+      "type": "crypto",
+      "verified": "2026-08-10",
+      "source": "human"
+    }
+  },
+  "ETH-USD": {
+    "hyperliquid": {
+      "symbol": "ETH",
+      "type": "crypto",
+      "verified": "2026-08-10",
       "source": "human"
     }
   }

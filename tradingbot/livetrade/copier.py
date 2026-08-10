@@ -49,8 +49,14 @@ class LiveTradeCopier:
 
         for yf_symbol, weight in target_weights.items():
             meta = self.broker.map_symbol(yf_symbol)
-            if meta and meta.get("symbol"):
-                broker_target_weights[meta["symbol"]] = {
+            mapped = meta.get("symbol") if meta else None
+            # A leading "^" means the default rules passed an index ticker through
+            # untranslated (e.g. ^XAU) — no broker accepts that as a symbol. Treat it
+            # as unmapped so strict_mapping actually aborts, instead of submitting an
+            # order the broker silently rejects. Translated indices (^GSPC -> SPX)
+            # have already lost the caret and are unaffected.
+            if meta and mapped and not mapped.startswith("^"):
+                broker_target_weights[mapped] = {
                     "weight": weight,
                     "type": meta.get("type", "stock")
                 }

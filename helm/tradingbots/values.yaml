@@ -234,19 +234,47 @@ liveTrade:
 
   # Collective2 — requires COLLECTIVE2_API_KEY in tradingbot-secrets.
   collective2:
-    enabled: true
+    # DISABLED: strategy 155809898 was handed over to collective2XauZerifine below,
+    # which now publishes XAUZenbotTreeBot to it. Do NOT re-enable this while that
+    # instance points at the same systemId — the two copiers would liquidate each
+    # other's positions on every run (the template hard-fails if you try).
+    enabled: false
     schedule: "10 21 * * 1-5" # 9:10 PM UTC (10 min after AdaptiveMeanReversionBot at 21:00)
     systemId: "155809898" # Collective2 strategy ID
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
-  # Interactive Brokers — requires IB_ACCOUNT_ID in tradingbot-secrets and a
-  # reachable IB Gateway service (NetworkPolicy gate via ib-gateway-client label).
-  interactiveBrokers:
+  # Collective2 "XAUZerifine" — publishes XAUZenbotTreeBot to C2 strategy 155809898,
+  # taken over from liveTrade.collective2 (disabled above). C2 API keys are
+  # account-scoped and address strategies by numeric StrategyId, so this reuses
+  # COLLECTIVE2_API_KEY. The strategy keeps its existing C2 track record.
+  # NOTE: XAUZenbotTreeBot trades ^XAU (an index) — it only reaches a tradeable
+  # instrument via the ^XAU -> GDX override in tradingbot/livetrade/symbol_map.json.
+  collective2XauZerifine:
     enabled: true
+    schedule: "50 21 * * 1-5" # 9:50 PM UTC (C2 :10, IB :20, eToro :30, Darwinex :40)
+    systemId: "155809898"
+    botWeights: '{"XAUZenbotTreeBot": 1.0}'
+    # LIVE. The first run LIQUIDATES the inherited SynthesizedHyperConvexity/
+    # AdaptiveMeanReversion positions, since sync() is a full target-state
+    # reconciliation, and rebuilds from XAUZenbotTreeBot (GDX, or all-cash when flat).
+    dryRun: "false"
+    # apiKeySecretKey: "COLLECTIVE2_API_KEY_XAUZERIFINE" # optional: only if a different C2 account
+    # portfolioFraction: "0.5" # optional: override the shared liveTrade.portfolioFraction
+
+  # Interactive Brokers — IBKR Web API (Client Portal) via headless OAuth 1.0a.
+  # Requires in tradingbot-secrets: IB_ACCOUNT_ID, IBIND_OAUTH1A_CONSUMER_KEY,
+  # IBIND_OAUTH1A_ACCESS_TOKEN, IBIND_OAUTH1A_ACCESS_TOKEN_SECRET, IBIND_OAUTH1A_DH_PRIME.
+  # Requires a separate secret (oauthKeysSecret) holding private_encryption.pem and
+  # private_signature.pem, mounted at /etc/ibkr. No IB Gateway / NetworkPolicy needed.
+  #
+  # DISABLED: none of the IBIND_OAUTH1A_* keys nor the ib-oauth-keys secret exist yet.
+  # IBKR self-service OAuth 1.0a requires registering a consumer key + your RSA public
+  # keys with IBKR and waiting for approval. Flip to true only once both secrets exist,
+  # and do one run with liveTrade.dryRun="true" first.
+  interactiveBrokers:
+    enabled: false
     schedule: "20 21 * * 1-5" # 9:20 PM UTC
-    host: "ib-gateway-service.interactivebrokersgateway.svc.cluster.local"
-    port: "4002"
-    clientId: "17"
+    oauthKeysSecret: "ib-oauth-keys" # secret with private_encryption.pem & private_signature.pem
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
   # eToro — requires ETORO_API_KEY and ETORO_USER_KEY in tradingbot-secrets.

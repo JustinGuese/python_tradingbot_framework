@@ -33,6 +33,9 @@ dependencies = [
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
     "ibind[oauth]>=0.1.23",
+    # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account;
+    # pulls no numpy, so the numpy<2.4 pin above is unaffected.
+    "hyperliquid-python-sdk>=0.24.0",
 ]
 [project.optional-dependencies]
 dev = [

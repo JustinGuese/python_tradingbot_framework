@@ -23,3 +23,15 @@ bmSPY.run()
 
 bmFTWD = BenchmarkBot("Benchmark_FTWD", "FTWD.DE")
 bmFTWD.run()
+
+# Commodity and crypto beta. Without these, a gold or BTC strategy compared only
+# against equity indices shows near-zero correlation by construction, which reads
+# as diversification when it is really just a different asset class.
+# Both series were backfilled from historic_data to the same inception date as the
+# equity benchmarks (2025-12-08, 10,000 USD notional) so they are directly
+# comparable; makeOneIteration is a no-op for them because USD is already 0.
+bmGLD = BenchmarkBot("Benchmark_GLD", "GLD")
+bmGLD.run()
+
+bmBTC = BenchmarkBot("Benchmark_BTC", "BTC-USD")
+bmBTC.run()

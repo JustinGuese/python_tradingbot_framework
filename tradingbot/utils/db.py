@@ -372,10 +372,55 @@ class TelegramMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class LiveEquity(Base):
+    """
+    Real broker/vault equity snapshots — one row per (broker, account, UTC day).
+
+    Deliberately NOT stored in portfolio_worth. That table is the paper-bot
+    leaderboard: it has a foreign key to bots.name, every bot starts at $10k, and
+    no row there pays fees or funding. A real-money curve in the same table would
+    need a fake bots row (which calculate_portfolio_worth would then overwrite
+    daily with a paper valuation) and would make both curves uninterpretable.
+
+    No foreign key here — a vault is not a bot.
+
+    Attributes:
+        broker: Adapter name, e.g. "hyperliquid"
+        account_id: Vault or account address the equity belongs to
+        date: Midnight UTC — the idempotency key, mirroring PortfolioWorth
+        timestamp: Actual snapshot time (UTC)
+        equity: Total account value including unrealized PnL
+        cash: Free collateral / withdrawable, if the broker reports it
+        positions: JSON of broker_symbol -> signed quantity at snapshot time
+        bot_weights: JSON string of the LIVETRADE_BOT_WEIGHTS that were live
+        is_testnet: Keeps testnet validation runs out of the published curve
+    """
+    __tablename__ = "live_equity"
+    __table_args__ = (
+        UniqueConstraint("broker", "account_id", "date", name="uq_live_equity_broker_account_date"),
+        Index("ix_live_equity_broker_date", "broker", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    broker = Column(String, nullable=False, index=True)
+    account_id = Column(String, nullable=False)
+    date = Column(DateTime, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+    equity = Column(Float, nullable=False)
+    cash = Column(Float, nullable=True)
+    positions = Column(MutableDict.as_mutable(JSON), nullable=True)
+    bot_weights = Column(String, nullable=True)
+    is_testnet = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def _migrate_schema() -> None:
     """
     Apply incremental column additions that create_all cannot handle on existing tables.
     Each statement is idempotent (IF NOT EXISTS), safe to run on every startup.
+
+    NOTE: brand-new tables need nothing here — create_all() creates them. Only
+    new *columns* on *existing* tables belong below.
     """
     with engine.connect() as conn:
         conn.execute(text(
