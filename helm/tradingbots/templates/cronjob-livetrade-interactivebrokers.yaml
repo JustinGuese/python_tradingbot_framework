@@ -65,32 +65,36 @@ spec:
             {{- end }}
             {{- end }}
             # IBKR Web API (Client Portal) OAuth 1.0a — fully headless, no gateway.
+            # Every IBKR credential lives in its own secret (oauthKeysSecret), not in the
+            # shared tradingbot-secrets blob: it has a separate rotation cadence, and it
+            # keeps the PEMs and their matching tokens in one object.
+            {{- $ibSecret := $.Values.liveTrade.interactiveBrokers.oauthKeysSecret | default "ib-oauth-keys" }}
             - name: IB_ACCOUNT_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.secretName }}
+                  name: {{ $ibSecret }}
                   key: IB_ACCOUNT_ID
             - name: IBIND_USE_OAUTH
               value: "True"
             - name: IBIND_OAUTH1A_CONSUMER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.secretName }}
+                  name: {{ $ibSecret }}
                   key: IBIND_OAUTH1A_CONSUMER_KEY
             - name: IBIND_OAUTH1A_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.secretName }}
+                  name: {{ $ibSecret }}
                   key: IBIND_OAUTH1A_ACCESS_TOKEN
             - name: IBIND_OAUTH1A_ACCESS_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.secretName }}
+                  name: {{ $ibSecret }}
                   key: IBIND_OAUTH1A_ACCESS_TOKEN_SECRET
             - name: IBIND_OAUTH1A_DH_PRIME
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.secretName }}
+                  name: {{ $ibSecret }}
                   key: IBIND_OAUTH1A_DH_PRIME
             # Private key files mounted from the ib-oauth-keys secret (see volumes below).
             - name: IBIND_OAUTH1A_ENCRYPTION_KEY_FP

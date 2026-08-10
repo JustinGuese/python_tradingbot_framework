@@ -167,3 +167,8 @@ data/state/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# OAuth / signing key material — never commit
+*.pem
+dhparam.pem
+oauth.env
