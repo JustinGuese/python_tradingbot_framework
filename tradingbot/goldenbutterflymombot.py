@@ -112,6 +112,10 @@ class GoldenButterflyMomBot(Bot):
         super().__init__(
             "GoldenButterflyMomBot",
             tickers=[*UNIVERSE, BENCHMARK],
+            # SPY is loaded for the RRG baseline but never held. Without this the
+            # divisor would be 6 for 5 tradeable sleeves, permanently stranding
+            # 1/6 of capital in cash.
+            benchmark_tickers=[BENCHMARK],
             interval="1d",
             period="2y",  # ~504 bars — enough for LOOKBACK_12M=252 + buffer
         )

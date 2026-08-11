@@ -155,7 +155,8 @@ class BotRepository:
             quantity: Number of shares/units
             price: Price per unit
             is_buy: True for buy, False for sell
-            profit: Profit from the trade (for sells)
+            profit: MISNOMER — net cash proceeds credited on a sell, NOT realized
+                P&L (no cost basis is tracked). Leave None on buys.
             session: Optional existing database session
 
         Returns:

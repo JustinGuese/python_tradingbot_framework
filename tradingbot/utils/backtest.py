@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .botclass import Bot
+from .config import EXECUTION_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +383,15 @@ def backtest_bot(
     #  Multi-ticker path (N > 1)                                          #
     # ------------------------------------------------------------------ #
     if N > 1:
+        # Benchmark tickers are loaded and kept aligned like any other ticker
+        # (a strategy may need one as a relative-strength baseline) but are
+        # excluded from the divisor and never traded — matching
+        # Bot._multi_ticker_target_weights. getattr, not the property, because
+        # backtest_bot accepts instances built with a stubbed __init__.
+        benchmarks = set(getattr(bot, "benchmark_tickers", ()) or ())
+        tradeable = [t for t in tickers if t not in benchmarks] or tickers
+        n_trade = len(tradeable)
+
         backtest_period = None
         data_dict: dict[str, pd.DataFrame] = {}
 
@@ -462,52 +472,78 @@ def backtest_bot(
             if has_ta_columns and any(rows[t]["trend_adx"] == 0.0 for t in tickers):
                 continue
 
-            total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tickers)
-            target = total_value / N
+            total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
+            target = total_value / n_trade
+            band = EXECUTION_CONFIG.no_trade_threshold(target)
 
-            for ticker in tickers:
+            # Decide for every tradeable ticker before trading any of them, so
+            # exits can fund entries — mirroring the live path, where
+            # rebalance_portfolio executes all sells before any buy.
+            decisions: dict[str, int] = {}
+            for ticker in tradeable:
                 try:
                     bot._current_ticker = ticker
-                    decision = bot.decisionFunction(rows[ticker])
+                    decisions[ticker] = bot.decisionFunction(rows[ticker])
                 except Exception as e:
                     logger.warning(f"Error in decisionFunction for {ticker} at {ts}: {e}")
-                    decision = 0
+                    decisions[ticker] = 0
 
+            # Phase 1: exits and trims. decision 0 caps at one sleeve but is
+            # never funded; decision -1 exits fully and ignores the band.
+            for ticker, decision in decisions.items():
                 price = prices[ticker]
                 holding = portfolio.get(ticker, 0.0)
+                if holding <= 0:
+                    continue
                 holding_value = holding * price
+                if decision == -1:
+                    wanted = 0.0
+                elif decision == 1:
+                    wanted = target
+                else:
+                    wanted = min(holding_value, target)
+                excess = holding_value - wanted
+                if excess <= (0.0 if decision == -1 else band):
+                    continue
+                qty = min(holding, excess / price)
+                execution_price = price * (1 - slippage_pct)
+                cash_proceeds = qty * execution_price
+                net_proceeds = cash_proceeds - cash_proceeds * commission_pct
+                portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
+                portfolio[ticker] = holding - qty
+                nrtrades += 1
 
-                if decision == 1:
-                    shortfall = target - holding_value
-                    if shortfall > 0:
-                        cash = portfolio.get("USD", 0.0)
-                        buy_amount = min(shortfall, cash)
-                        if buy_amount > 0:
-                            commission_cost = buy_amount * commission_pct
-                            available = buy_amount - commission_cost
-                            execution_price = price * (1 + slippage_pct)
-                            qty = available / execution_price
-                            portfolio["USD"] = cash - buy_amount
-                            portfolio[ticker] = holding + qty
-                            nrtrades += 1
-                elif decision == -1 and holding > 0:
-                    execution_price = price * (1 - slippage_pct)
-                    cash_proceeds = holding * execution_price
-                    commission_cost = cash_proceeds * commission_pct
-                    net_proceeds = cash_proceeds - commission_cost
-                    portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
-                    portfolio[ticker] = 0.0
-                    nrtrades += 1
+            # Phase 2: entries and top-ups, funded by the proceeds above.
+            for ticker, decision in decisions.items():
+                if decision != 1:
+                    continue
+                price = prices[ticker]
+                holding = portfolio.get(ticker, 0.0)
+                shortfall = target - holding * price
+                if shortfall <= band:
+                    continue
+                cash = portfolio.get("USD", 0.0)
+                buy_amount = min(shortfall, cash)
+                if buy_amount <= 0:
+                    continue
+                commission_cost = buy_amount * commission_pct
+                available = buy_amount - commission_cost
+                execution_price = price * (1 + slippage_pct)
+                portfolio["USD"] = cash - buy_amount
+                portfolio[ticker] = holding + available / execution_price
+                nrtrades += 1
 
-            current_total = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tickers)
+            current_total = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
             portfolio_values.append(current_total)
             portfolio_timestamps.append(ts)
 
         metrics = _compute_backtest_metrics(portfolio_values, bot.interval, risk_free_rate)
 
-        # Buy-and-hold: equal-weight mean of individual B&H returns across tickers
+        # Buy-and-hold: equal-weight mean of individual B&H returns across the
+        # TRADEABLE tickers. Including a benchmark here would average SPY into
+        # the very number SPY is the benchmark for.
         bh_returns = []
-        for _ticker, df in data_dict.items():
+        for _ticker, df in ((t, data_dict[t]) for t in tradeable if t in data_dict):
             close = df["close"].dropna()
             if len(close) >= 2:
                 first = float(close.iloc[0])

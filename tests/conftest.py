@@ -1,38 +1,90 @@
-import sys
-from pathlib import Path
+"""
+Shared pytest fixtures.
 
-# Put tradingbot/ on sys.path so modules using `from utils.X` (the in-container
-# import style used by bots and livetrade) also resolve when pytest runs from
-# the repo root.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tradingbot"))
+Import roots are configured in pyproject.toml ([tool.pytest.ini_options]
+pythonpath), which puts both the repo root and tradingbot/ on sys.path — the
+latter because bots and livetrade modules use the in-container `from utils.X`
+style. Prefer the `tradingbot.` root in tests; mixing the two in one module
+gives you two distinct copies of the same class.
+"""
+
+from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.data_service import DataService
 from tradingbot.utils.db import Base
 
+# Modules that call get_db_session() directly rather than accepting a session
+# argument. Each did `from .db import get_db_session`, so the name lives in the
+# importing module's namespace and has to be patched there, not on db.
+_SESSION_CONSUMERS = (
+    "tradingbot.utils.portfolio_manager",
+    "tradingbot.utils.bot_repository",
+)
 
-@pytest.fixture(scope="session")
+
+@pytest.fixture
 def test_engine():
-    """Create an in-memory SQLite database for testing."""
-    engine = create_engine("sqlite:///:memory:")
+    """
+    A throwaway in-memory SQLite engine, one per test.
+
+    StaticPool + check_same_thread=False keeps every connection pointed at the
+    same in-memory database; the default pool would hand out a fresh (empty)
+    database to each connection, so a session opened inside the code under test
+    would not see rows the fixture just wrote.
+    """
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     return engine
 
 
 @pytest.fixture
 def db_session(test_engine):
-    """Provide a clean session for each test."""
+    """A session on the throwaway database. The engine dies with the test, so
+    there is nothing to tear down between tests."""
+    session = sessionmaker(bind=test_engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
+def sqlite_db(test_engine, monkeypatch):
+    """
+    Point the code under test at the throwaway database.
+
+    PortfolioManager.rebalance_portfolio and several BotRepository helpers open
+    their own transaction instead of accepting one, so redirecting the session
+    factory is the only way to keep them off a real Postgres. Without this a
+    test silently connects to whatever POSTGRES_URI points at.
+
+    Note SQLite ignores SELECT ... FOR UPDATE, so get_bot_locked runs here but
+    its locking is NOT covered by these tests.
+    """
     Session = sessionmaker(bind=test_engine)
-    session = Session()
-    yield session
-    session.close()
-    # Clean up tables between tests if needed, or just rely on separate sessions
-    for table in reversed(Base.metadata.sorted_tables):
-        test_engine.execute(table.delete())
+
+    @contextmanager
+    def _session():
+        session = Session()
+        try:
+            yield session
+            session.commit()
+        finally:
+            session.close()
+
+    for module in _SESSION_CONSUMERS:
+        monkeypatch.setattr(f"{module}.get_db_session", _session)
+    return _session
 
 
 @pytest.fixture
@@ -49,4 +101,5 @@ def test_bot(db_session):
     """Create a test bot in the database."""
     bot_name = "TestBot"
     bot = BotRepository.create_or_get_bot(bot_name, session=db_session)
+    db_session.commit()
     return bot

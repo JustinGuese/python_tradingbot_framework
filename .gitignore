@@ -175,3 +175,6 @@ data/state/
 *.pem
 dhparam.pem
 oauth.env
+
+# Claude Code scratch worktrees
+.claude/worktrees/

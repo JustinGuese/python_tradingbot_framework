@@ -145,6 +145,29 @@ Backtest realism (recently fixed):
 - Slippage: 0.05% per side (configurable via slippage_pct)
 - Commission: 0% default (configurable via commission_pct)
 - Risk-free rate: 0% default for Sharpe (configurable via risk_free_rate)
+
+**Live execution uses the same cost model** (`utils/config.py ExecutionConfig`,
+env vars `EXECUTION_SLIPPAGE_PCT` / `EXECUTION_COMMISSION_PCT`). Until Aug 2026
+`PortfolioManager` filled every paper trade at the raw mid price, so paper
+trading was *more optimistic than the backtest* of the same strategy — which
+flattered exactly the high-churn bots. Any `portfolio_worth` row before that
+changeover is cost-free and not comparable to later ones.
+
+Convention, identical on both sides: on a BUY, `quantity_usd` is the gross cash
+budget and commission comes out of it (never on top), so "spend all cash" cannot
+overdraw; on a SELL, `quantity_usd` is position notional at the *reference*
+price, so the share count is invariant to slippage and a rebalance converges in
+one step. `Trade.price` records the **execution** price and `Trade.profit` the
+**net proceeds** — that field is a misnomer and has never been realized P&L.
+
+**The no-trade band is relative** (`EXECUTION_MIN_TRADE_USD`,
+`EXECUTION_REBALANCE_BAND_PCT`): trade only if the adjustment exceeds
+`max(min_trade_usd, band_pct * max(target, current))`. Full exits always bypass
+it — otherwise a sub-band position could never be liquidated, and the
+`only_over_50_usd` filter (which closes positions *by* dropping them from the
+target) would become a no-op. New entries do not bypass. The old flat `$1`
+threshold is why RegimeAdaptiveBot and EarningsInsiderTiltBot were putting 93% /
+92% of their trades through at under $25 notional (smallest: $0.011).
 - No look-ahead bias — bfill() removed from TA computation
 - QuantStats reports: Automatically generated and uploaded to GCS (if credentials configured) showing Sharpe/return optimization views, drawdown analysis, and performance vs. buy-and-hold benchmark. Local backtest() and local_optimize() both produce reports. [Example report](docs/examplequantstatsreport.html)
 
@@ -306,20 +329,42 @@ Anything that reasons about what a bot *holds* — a meta-bot, a live-trade copi
 a backtest, an analysis script — has to reproduce these three rules exactly.
 They are not conventions; they are what the live code does.
 
-**1. `decisionFunction` returning `0` means "hold", not "go to target".**
-`_run_multi_ticker_iteration` only acts on `1` (buy up to target) and `-1` (sell
-everything). A `0` leg is skipped entirely, so its position carries over from
-whatever the previous bar left there. Multi-asset portfolios are therefore
-**path-dependent**: you cannot recompute a bot's holdings for a given date from
-that date's signals alone, you have to simulate forward from the start.
+**1. `decisionFunction` returning `0` means "hold, but stay capped".** A `0` leg
+is never *funded* — the signal is a statement about initiating exposure — but it
+IS trimmed back if it has drifted above one equal-weight sleeve, because that cap
+is a risk limit independent of the signal. `1` targets a full sleeve (buying up
+or trimming down to it); `-1` exits fully and bypasses the no-trade band, so a
+sell signal can always close a position no matter how small.
 
-**2. Multi-ticker equal-weighting divides by `len(self.tickers)`, including
-tickers the bot never trades.** Several bots put a benchmark in `tickers` purely
-so its history lands in `self.datas` (GoldenButterflyMomBot carries SPY for its
-RRG computation and returns `0` for it forever). `target_per_ticker =
-total_value / N` still uses `N = 6`, so that bot tops out at 5/6 invested and
-permanently holds >=17% cash. Dividing by the count of *tradeable* tickers would
-silently lever every such bot up.
+Do not read `0` as "go to target": `KronosTraderBot.decisionFunction` returns `0`
+for *"no prediction available"*, so funding those legs would make it buy every
+symbol it has no opinion about.
+
+Multi-asset portfolios remain **path-dependent** — you cannot recompute holdings
+for a given date from that date's signals alone, you have to simulate forward.
+
+**2. Multi-ticker equal-weighting divides by `len(self.tradeable_tickers)`.**
+Pass `benchmark_tickers=` to `Bot.__init__` for tickers that are loaded into
+`self.datas` for their data but never traded — GoldenButterflyMomBot carries SPY
+as its RRG baseline and declares `benchmark_tickers=["SPY"]`. Benchmarks are
+excluded from the divisor, are never asked for a decision, and any position held
+in one is liquidated. A bot that declares no benchmarks is unaffected.
+
+(Before Aug 2026 the divisor was `len(self.tickers)`, so GoldenButterflyMomBot
+topped out at 5/6 invested and permanently held >=17% cash.)
+
+**2b. The multi-ticker path reconciles the whole book in ONE transaction.**
+`_run_multi_ticker_iteration` computes target weights via the pure
+`_multi_ticker_target_weights()` and makes a single `rebalancePortfolio` call.
+It previously issued one buy/sell transaction per leg in ticker order, and since
+`PortfolioManager.buy` silently clamps to available cash and never retries, a
+sell that sorted *after* a buy never funded it — silent under-investment that
+persisted until a later run happened to order things favourably.
+`rebalance_portfolio` executes all sells before any buy, which fixes this
+structurally. Holdings in symbols outside `self.tickers` are left untouched by
+default (set `LIQUIDATE_UNTRACKED = True` to sell them); KronosTraderBot rebuilds
+its universe from the predictions table each run, so a one-day gap must not
+liquidate the book.
 
 **3. Single-asset bots are all-in / all-out.** The default `makeOneIteration`
 calls `buy(symbol)` with no amount (spends all cash) or `sell(symbol)` with no

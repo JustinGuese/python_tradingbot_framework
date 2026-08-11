@@ -99,7 +99,9 @@ class Trade(Base):
         quantity: Number of shares/units traded
         price: Price per unit at time of trade
         timestamp: Timestamp when trade was executed
-        profit: Profit from the trade (for sells, nullable)
+        profit: MISNOMER — this is the net cash proceeds credited on a sell,
+            NOT realized P&L. No cost basis is tracked anywhere, so summing this
+            column does not give profit. NULL on buys.
     """
 
     __tablename__ = "trades"

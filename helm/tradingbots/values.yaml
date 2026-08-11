@@ -81,6 +81,27 @@ env:
     secretKeyRef:
       key: OPENROUTER_API_KEY
 
+# Execution cost model + no-trade band (utils/config.py ExecutionConfig).
+# Set explicitly rather than relying on code defaults so rollback is a
+# `helm upgrade --set`, not a rebuild. All four at 0/0/1/0 reproduces the
+# pre-cost-model behaviour exactly.
+#
+# STAGE 1 (current): costs ON, band effectively OFF — MIN_TRADE_USD=1 and
+# BAND_PCT=0 reproduce the old flat $1 threshold, so any change in behaviour is
+# attributable to the cost model alone.
+# STAGE 2 (after one clean cycle): set MIN_TRADE_USD=25 and BAND_PCT=0.05 to
+# switch on the band. Expect ~50 fewer trades per run on RegimeAdaptiveBot and
+# EarningsInsiderTiltBot, which currently put 93% / 92% of their trades through
+# at under $25 notional.
+- name: EXECUTION_SLIPPAGE_PCT
+  value: "0.0005" # 5 bps one-way, mirrors backtest.py
+- name: EXECUTION_COMMISSION_PCT
+  value: "0.0"
+- name: EXECUTION_MIN_TRADE_USD
+  value: "1.0" # stage 2 -> "25.0"
+- name: EXECUTION_REBALANCE_BAND_PCT
+  value: "0.0" # stage 2 -> "0.05"
+
 # Kronos forecasting service — HF Space URL (public, no secret needed)
 - name: KRONOS_SPACE_URL
   value: "https://guestros-kronos-trading-api.hf.space"

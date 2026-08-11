@@ -68,6 +68,14 @@ dev = [
     "ruff>=0.16.2",
 ]
 
+[tool.pytest.ini_options]
+# Both roots, because tests import via `tradingbot.utils.X` while the modules
+# under test import each other as `utils.X` (the layout the container gets from
+# `COPY tradingbot/ /app/`). Keep a single test module on ONE of these roots:
+# importing the same class under both names yields two distinct classes.
+pythonpath = [".", "tradingbot"]
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"

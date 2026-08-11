@@ -110,11 +110,15 @@ class EURUSDTreeBot(Bot):
                 return 0
 
 
-bot = EURUSDTreeBot()
+# Guarded: without this, importing this module executes bot.run() and trades a
+# live paper portfolio as a side effect of the import. The Helm CronJob invokes
+# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
+if __name__ == "__main__":
+    bot = EURUSDTreeBot()
 
-bot.run()
-# For local development, run optimization + backtest
-# bot.local_development()
+    bot.run()
+    # For local development, run optimization + backtest
+    # bot.local_development()
 
-# Live execution:
-# bot.local_backtest()
+    # Live execution:
+    # bot.local_backtest()

@@ -61,11 +61,15 @@ class FearGreedBotQQQ(Bot):
         return 0
 
 
-indexvalue = get_fear_greed_index()
+# Guarded: without this, importing this module executes bot.run() and trades a
+# live paper portfolio as a side effect of the import. The Helm CronJob invokes
+# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
+if __name__ == "__main__":
+    indexvalue = get_fear_greed_index()
 
-fgb = FearGreedBotQQQ(indexvalue or 50)
-# fgb.local_development()
-fgb.run()
-fgbi = FearGreedBotQQQ(indexvalue or 50, name="FearGreedBotQQQInverse")
-# fgbi.local_development()
-fgbi.run()
+    fgb = FearGreedBotQQQ(indexvalue or 50)
+    # fgb.local_development()
+    fgb.run()
+    fgbi = FearGreedBotQQQ(indexvalue or 50, name="FearGreedBotQQQInverse")
+    # fgbi.local_development()
+    fgbi.run()

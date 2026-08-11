@@ -40,6 +40,10 @@ from .portfolio_manager import PortfolioManager
 
 logger = logging.getLogger(__name__)
 
+# Below this many units a holding is float residue, not a position. Matches the
+# zero-holding cutoff in PortfolioManager.sell.
+DUST_QTY = 1e-6
+
 
 class Bot:
     """
@@ -64,6 +68,12 @@ class Bot:
     # Optional class attribute: subclasses can define their hyperparameter search space
     param_grid: dict[str, list[Any]] | None = None
 
+    # If True, symbols held but absent from self.tickers are sold to cash on the
+    # multi-ticker path. Default False because KronosTraderBot rebuilds its
+    # universe from the predictions table on every run, so a single day's gap
+    # would otherwise liquidate and re-enter the whole book.
+    LIQUIDATE_UNTRACKED: bool = False
+
     def __init__(
         self,
         name: str,
@@ -71,6 +81,7 @@ class Bot:
         tickers: list[str] | None = None,
         interval: str = "1m",
         period: str = "1d",
+        benchmark_tickers: list[str] | None = None,
         **kwargs,
     ):
         """
@@ -85,18 +96,28 @@ class Bot:
                      e.g. tickers=["SPY", "QQQ", "GLD"]
             interval: Data interval (e.g., "1m", "5m", "1h", "1d") - default: "1m"
             period: Data period (e.g., "1d", "5d", "1mo", "1y") - default: "1d"
+            benchmark_tickers: Subset of `tickers` that is loaded for data but
+                     NEVER traded, and excluded from the equal-weight divisor.
+                     For strategies that need a relative-strength baseline (e.g.
+                     GoldenButterflyMomBot carries SPY for its RRG computation).
+                     Without this, such a bot's capital is divided by a count
+                     that includes an asset it can never hold, permanently
+                     stranding that share in cash.
             **kwargs: Arbitrary hyperparameters that will be stored in self.params
                      and can be accessed by subclasses for flexible parameterization
         """
         setup_logging()
         self.bot_name = name  # Store name separately to avoid DetachedInstanceError
-        init_db()  # Ensure database is initialized before first access
-        self.dbBot = BotRepository.create_or_get_bot(name)
+
+        # Resolve the universe BEFORE touching the database: a misconfigured bot
+        # must fail without first materialising a $10k row in `bots`.
         if tickers is not None:
             # Guard: accept a bare string as a single-element list
             if isinstance(tickers, str):
                 tickers = [tickers]
-            self.tickers: list[str] = list(tickers)
+            # Dedupe: a repeated ticker would both inflate the divisor and get
+            # traded twice.
+            self.tickers: list[str] = list(dict.fromkeys(tickers))
             self.symbol: str | None = None
         elif symbol is not None:
             self.tickers = [symbol]
@@ -104,6 +125,22 @@ class Bot:
         else:
             self.tickers = []
             self.symbol = None
+
+        if isinstance(benchmark_tickers, str):
+            benchmark_tickers = [benchmark_tickers]
+        self.benchmark_tickers: list[str] = list(dict.fromkeys(benchmark_tickers or []))
+
+        unknown = [t for t in self.benchmark_tickers if t not in self.tickers]
+        if unknown:
+            raise ValueError(
+                f"{name}: benchmark_tickers {unknown} are not in tickers {self.tickers}. "
+                "A benchmark must also be listed in tickers, or its data is never fetched."
+            )
+        if self.tickers and not self.tradeable_tickers:
+            raise ValueError(f"{name}: every ticker is a benchmark — nothing left to trade.")
+
+        init_db()  # Ensure database is initialized before first access
+        self.dbBot = BotRepository.create_or_get_bot(name)
         self.interval = interval
         self.period = period
 
@@ -126,9 +163,31 @@ class Bot:
         self.datasettings: tuple[str | None, str | None] = (None, None)
 
     @property
+    def tradeable_tickers(self) -> list[str]:
+        """
+        Tickers this bot may actually hold: self.tickers minus benchmark_tickers.
+
+        Benchmarks are fetched into self.datas (a strategy may need one as a
+        relative-strength baseline) but are excluded from the equal-weight
+        divisor and are never bought or sold. Defaults to self.tickers, so bots
+        that declare no benchmarks are unaffected.
+
+        Written defensively because tests stub out Bot.__init__ entirely and
+        backtest_bot() accepts arbitrary instances. It is also called from
+        __init__ during validation, before the attributes are guaranteed set.
+        """
+        benchmarks = set(getattr(self, "benchmark_tickers", ()) or ())
+        return [t for t in getattr(self, "tickers", ()) if t not in benchmarks]
+
+    @property
     def backtest_type(self) -> str:
         """
         Classify the bot's backtesting mode.
+
+        Note this counts self.tickers, NOT tradeable_tickers: a bot with one
+        tradeable ticker plus a benchmark must still take the multi-ticker path,
+        because the single-asset path fetches only self.symbol (None for a
+        tickers= bot) and would never load the benchmark's data.
 
         Returns:
             "single_asset"  — decisionFunction overridden + single ticker  → backtestable
@@ -692,54 +751,198 @@ class Bot:
             logger.info("No trade action taken (hold).")
         return 0
 
+    def _multi_ticker_target_weights(
+        self,
+        decisions: dict[str, int],
+        prices: dict[str, float],
+        portfolio: dict[str, float],
+    ) -> dict[str, float]:
+        """
+        Turn per-ticker signals into target portfolio weights.
+
+        Pure: no I/O, no DB, no mutation of self. All of the allocation policy
+        lives here so it can be unit-tested exhaustively — which matters because
+        the caller reconciles the WHOLE BOOK in one transaction, so a mistake
+        here liquidates a position rather than merely mis-sizing it.
+
+        Rules, each a deliberate choice:
+          * The divisor is len(tradeable_tickers) — benchmarks are excluded.
+          * signal ==  1  -> one full equal-weight sleeve (buy up OR trim down).
+          * signal == -1  -> zero. A full exit, so the no-trade band cannot
+                             strand a small position that was told to leave.
+          * signal ==  0  -> HOLD: never funded, but capped at one sleeve.
+                             "Don't add" is a statement about initiating
+                             exposure; the cap is a risk limit that applies
+                             whatever the signal. Funding a 0 leg would be a
+                             semantic inversion for KronosTraderBot, which
+                             returns 0 for "no prediction available" and would
+                             then buy every symbol it has no opinion about.
+          * A held benchmark is sold — declaring it non-tradeable declares it is
+            not part of the book, and nothing else could ever exit it.
+          * A held symbol outside self.tickers keeps its exact current weight and
+            is excluded from the sizing base, unless LIQUIDATE_UNTRACKED. Default
+            off because KronosTraderBot rebuilds its universe from the
+            predictions table every run: a one-day gap would otherwise liquidate
+            and re-enter the entire book.
+          * An unpriceable ticker leaves the divisor rather than being sized
+            against an assumed value of zero (which would buy a full sleeve on
+            top of a position already held).
+
+        Returns weights summing to 1.0 (USD absorbs the residual), or {} if the
+        portfolio cannot be sized this run.
+        """
+        benchmarks = set(self.benchmark_tickers)
+        held = {s: q for s, q in portfolio.items() if s != "USD" and q > DUST_QTY}
+        cash = float(portfolio.get("USD", 0.0))
+
+        def _px(sym: str) -> float:
+            p = prices.get(sym) or 0.0
+            return float(p) if p > 0 else 0.0
+
+        # Unpriceable holdings contribute 0 — which is exactly how
+        # rebalance_portfolio values them, so our weights and its valuation agree
+        # and it computes diff == 0 and leaves them alone.
+        unpriceable = [s for s in held if _px(s) <= 0]
+        if unpriceable:
+            logger.error(
+                "%s: no price for held symbols %s — valuing them at 0 and not trading them",
+                self.bot_name,
+                sorted(unpriceable),
+            )
+
+        values = {s: q * _px(s) for s, q in held.items()}
+        total_value = cash + sum(values.values())
+        if total_value <= 0:
+            logger.warning("%s: portfolio values at $0 — nothing to rebalance", self.bot_name)
+            return {}
+
+        tradeable = [t for t in self.tradeable_tickers if _px(t) > 0]
+        dropped = [t for t in self.tradeable_tickers if _px(t) <= 0]
+        if dropped:
+            logger.error("%s: dropping unpriceable tickers from this run: %s", self.bot_name, dropped)
+        if not tradeable:
+            logger.error("%s: no priceable tradeable tickers — skipping rebalance", self.bot_name)
+            return {}
+
+        tradeable_set = set(tradeable)
+        keep: dict[str, float] = {}
+        if not self.LIQUIDATE_UNTRACKED:
+            keep = {s: v for s, v in values.items() if s not in tradeable_set and s not in benchmarks and v > 0}
+        if keep:
+            logger.warning(
+                "%s: holding $%.2f in symbols outside its universe (%s); excluded from the "
+                "sizing base and left untouched. Set LIQUIDATE_UNTRACKED to sell them.",
+                self.bot_name,
+                sum(keep.values()),
+                sorted(keep),
+            )
+        stranded = {s: v for s, v in values.items() if s in benchmarks and v > 0}
+        if stranded:
+            logger.warning(
+                "%s: liquidating benchmark holdings %s ($%.2f) — benchmarks are not tradeable",
+                self.bot_name,
+                sorted(stranded),
+                sum(stranded.values()),
+            )
+
+        investable = total_value - sum(keep.values())
+        if investable <= 0:
+            logger.warning("%s: nothing investable after untracked holdings", self.bot_name)
+            return {}
+
+        target_per_leg = investable / len(tradeable)
+
+        target_values: dict[str, float] = dict(keep)
+        for ticker in tradeable:
+            signal = decisions.get(ticker, 0)
+            current = values.get(ticker, 0.0)
+            if signal == -1:
+                continue  # target zero: omit entirely, rebalance sells it out
+            wanted = target_per_leg if signal == 1 else min(current, target_per_leg)
+            if wanted > 0:
+                target_values[ticker] = wanted
+
+        weights = {s: v / total_value for s, v in target_values.items() if v > 0}
+        non_usd = sum(weights.values())
+        if non_usd > 1.0:  # float defence only; the arithmetic above cannot exceed 1
+            logger.error("%s: target weights summed to %.6f — scaling down", self.bot_name, non_usd)
+            weights = {s: w / non_usd for s, w in weights.items()}
+            non_usd = 1.0
+        weights["USD"] = max(0.0, 1.0 - non_usd)
+        return weights
+
     def _run_multi_ticker_iteration(self) -> int:
         """
         Execute one live-trading iteration for a multi-ticker bot.
 
-        For each ticker, fetches the latest data, calls decisionFunction on the
-        most recent row, and rebalances toward equal-weight using buy/sell.
+        Loads data for every ticker (benchmarks included, so cross-ticker
+        strategies see them in self.datas), asks for a decision on the tradeable
+        ones only, converts those decisions into target weights, and reconciles
+        the whole book in ONE locked transaction via rebalancePortfolio().
+
+        The previous implementation issued N separate buy/sell transactions in
+        ticker order. Because PortfolioManager.buy silently clamps to available
+        cash and never retries, sale proceeds arrived AFTER every buy had already
+        been sized against pre-sale cash — permanent, silent under-investment
+        whenever a sell sorted after a buy. rebalance_portfolio executes all
+        sells before any buy inside one transaction, which fixes that
+        structurally, and gives correct partial trimming for free.
 
         Returns:
-            Number of trades executed (buys + sells)
+            Number of legs whose target differs materially from their current value
         """
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-        N = len(self.tickers)
-        decisions: dict[str, int] = {}
+        tradeable = self.tradeable_tickers
 
-        # Phase 1: load all data so self.datas is fully populated before
-        # any decisionFunction call (needed for cross-ticker strategies like
-        # GoldenButterflyMomBot that read self.datas inside decisionFunction)
+        # Phase 1: load ALL tickers so self.datas is complete before any
+        # decisionFunction call (GoldenButterflyMomBot reads self.datas[SPY]).
         for ticker in self.tickers:
-            data = self.getYFDataWithTA(
+            self.datas[ticker] = self.getYFDataWithTA(
                 symbol=ticker,
                 saveToDB=True,
                 interval=self.interval,
                 period=self.period,
             )
-            self.datas[ticker] = data
 
-        # Phase 2: compute decisions (self.datas is now complete)
-        for ticker in self.tickers:
+        # Phase 2: decide. A benchmark is never asked for a decision at all.
+        decisions: dict[str, int] = {}
+        for ticker in tradeable:
             self._current_ticker = ticker
             decisions[ticker] = self.getLatestDecision(self.datas[ticker])
+        logger.info("%s decisions: %s", self.bot_name, decisions)
 
-        prices = self.getLatestPricesBatch(self.tickers)
-        portfolio = self.dbBot.portfolio
-        total_value = portfolio.get("USD", 0) + sum(portfolio.get(t, 0) * prices.get(t, 0) for t in self.tickers)
-        target_per_ticker = total_value / N
+        # Phase 3: one batch price read — the same call rebalance_portfolio uses
+        # to value the book, so our weights and its valuation cannot disagree.
+        portfolio = dict(self.dbBot.portfolio or {})
+        symbols = sorted({*self.tickers, *(s for s in portfolio if s != "USD")})
+        prices = self.getLatestPricesBatch(symbols)
 
-        actions = 0
-        for ticker, signal in decisions.items():
-            holding_value = portfolio.get(ticker, 0) * prices.get(ticker, 0)
-            if signal == 1:
-                shortfall = target_per_ticker - holding_value
-                if shortfall > 1:
-                    self.buy(ticker, quantity_usd=shortfall)
-                    actions += 1
-            elif signal == -1 and portfolio.get(ticker, 0) > 0:
-                self.sell(ticker)
-                actions += 1
-        return actions
+        weights = self._multi_ticker_target_weights(decisions, prices, portfolio)
+        if not weights:
+            return 0
+
+        # Warm the module-level TTL price cache from data we already hold, so the
+        # per-leg get_latest_price calls inside the rebalance are cache hits
+        # rather than yfinance I/O executed while holding the bots row lock.
+        for ticker in tradeable:
+            try:
+                self.getLatestPrice(ticker)
+            except Exception as exc:
+                logger.warning("Price prewarm failed for %s: %s", ticker, exc)
+
+        total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(s, 0.0) * (prices.get(s) or 0.0) for s in symbols)
+        moves = sum(
+            1
+            for sym, w in weights.items()
+            if sym != "USD" and abs(w * total_value - portfolio.get(sym, 0.0) * (prices.get(sym) or 0.0)) > 1.0
+        )
+        logger.info(
+            "%s target weights: %s",
+            self.bot_name,
+            {s: round(w, 4) for s, w in sorted(weights.items())},
+        )
+        self.rebalancePortfolio(weights)
+        return moves
 
     def local_optimize(
         self,

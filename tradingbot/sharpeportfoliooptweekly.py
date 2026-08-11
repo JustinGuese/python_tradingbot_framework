@@ -66,7 +66,11 @@ class SharpePortfolioOptWeeklyBot(Bot):
             raise
 
 
-bot = SharpePortfolioOptWeeklyBot()
+# Guarded: without this, importing this module executes bot.run() and trades a
+# live paper portfolio as a side effect of the import. The Helm CronJob invokes
+# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
+if __name__ == "__main__":
+    bot = SharpePortfolioOptWeeklyBot()
 
-# bot.local_development() # not possible, event driven
-bot.run()
+    # bot.local_development() # not possible, event driven
+    bot.run()
