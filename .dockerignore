@@ -1,0 +1,37 @@
+# Keep the build context small and, more importantly, keep host state OUT of the
+# image. The Dockerfile builds its own venv with `uv sync`; copying the host's
+# .venv over it would replace working entrypoints with scripts whose shebangs
+# point at /home/<user>/..., breaking `python` inside the container.
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets. .env holds real broker and database credentials; an image is pushed to
+# a registry and is not a private place.
+.env
+.env.*
+!.env.example
+
+# Version control, agent state, and IDE config. .claude/worktrees/ in particular
+# can hold a second full copy of the source tree.
+.git/
+.gitignore
+.claude/
+.vscode/
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Not needed at runtime
+tests/
+docs/
+site/
+exploration/
+data/
+helm/
+scripts/
+*.md
+mkdocs.yml

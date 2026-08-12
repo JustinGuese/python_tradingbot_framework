@@ -1,5 +1,11 @@
 variables:
+  # Branch tag is mutable and kept for convenience/manual pulls. The SHA tag is
+  # what actually gets deployed: a CronJob's image and its args then change in
+  # the SAME Helm revision, so a job can never start with new code and old args.
+  # It also makes `helm rollback` a real rollback — rolling back a mutable :main
+  # restores the old args while still pointing at the new image.
   IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_BRANCH
+  IMAGE_SHA: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_SHA
   DOCKER_TLS_CERTDIR: "/certs"
 
 default:
@@ -7,21 +13,47 @@ default:
   - docker:25.0.5-dind
 
 stages:
+- test
 - build
 - deploy
+
+pytest:
+  stage: test
+  image: python:3.12-slim
+  variables:
+    # db.py resolves DATABASE_URL and calls create_engine() at import time, so
+    # importing anything in the package needs this set. create_engine does not
+    # connect, so a syntactically valid bogus URI is enough — and it must stay
+    # bogus, so a test that escapes its mocks fails instead of touching a real DB.
+    POSTGRES_URI: "postgresql://ci:ci@localhost:5432/ci"
+  before_script:
+  - pip install uv
+  - uv sync --frozen --extra dev
+  script:
+  - uv run ruff check .
+  - uv run ruff format --check .
+  - uv run pytest tests/ -q
 
 build-docker:
   stage: build
   image: docker:25.0.5-git
+  needs:
+  - pytest
   # tags:
   #   - dfserver
   script:
   - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
-  - docker build --pull -t $IMAGE .
+  - docker build --pull -t $IMAGE -t $IMAGE_SHA .
   - docker push $IMAGE
+  - docker push $IMAGE_SHA
 
 helm-kubectl-deploy:
   stage: deploy
+  # Only main deploys. Without this a refactor branch would deploy itself, which
+  # makes it impossible to land a multi-commit change (e.g. an import rewrite and
+  # its matching CronJob invocation) as one atomic production cutover.
+  rules:
+  - if: $CI_COMMIT_BRANCH == "main"
   tags:
   - dfserver
   image:
@@ -30,11 +62,12 @@ helm-kubectl-deploy:
   dependencies:
   - build-docker
   script:
-  # Deploy trading bots and PostgreSQL using Helm
+  # Deploy trading bots and PostgreSQL using Helm, pinned to this commit's image.
   - |
     helm upgrade --install tradingbots \
       ./helm/tradingbots \
       --create-namespace \
-      --namespace tradingbots-2025
+      --namespace tradingbots-2025 \
+      --set image.tag=$CI_COMMIT_SHA
 
   environment: production
