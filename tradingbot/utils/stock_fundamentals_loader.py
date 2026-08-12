@@ -46,13 +46,30 @@ def get_portfolio_symbols(session) -> set[str]:
     return symbols
 
 
+def _naive_utc(value) -> datetime:
+    """Convert any timestamp to UTC and drop the tzinfo.
+
+    Every datetime column in `db.py` is a bare `DateTime` (no `timezone=True`), so
+    Postgres stores `TIMESTAMP WITHOUT TIME ZONE` and reads rows back *naive*. An
+    aware datetime therefore never compares equal to the value it was written as,
+    which is what silently broke the dedup sets below: keys built from freshly
+    fetched (aware) timestamps never matched keys built from stored (naive) ones,
+    so every row looked new on every run and the insert died on the unique
+    constraint — rolling back news and earnings along with it.
+
+    Convert first, then strip, so a non-UTC input is shifted rather than truncated.
+    Mirrors `db._utcnow_naive`.
+    """
+    return ensure_utc_timestamp(pd.Timestamp(value)).to_pydatetime().replace(tzinfo=None)
+
+
 def _published_at_from_unix(ts) -> datetime:
-    """Convert yfinance Unix timestamp to UTC datetime."""
+    """Convert yfinance Unix timestamp to a naive-UTC datetime."""
     if ts is None:
-        return datetime.now(UTC)
+        return datetime.now(UTC).replace(tzinfo=None)
     if isinstance(ts, (int, float)):
-        return datetime.fromtimestamp(int(ts), tz=UTC)
-    return ensure_utc_timestamp(pd.Timestamp(ts)).to_pydatetime()
+        return datetime.fromtimestamp(int(ts), tz=UTC).replace(tzinfo=None)
+    return _naive_utc(ts)
 
 
 def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
@@ -114,7 +131,7 @@ def _load_earnings_for_symbol(symbol: str, existing_dates: set[tuple]) -> list:
     for report_date, row in df.iterrows():
         if pd.isna(report_date):
             continue
-        report_dt = ensure_utc_timestamp(pd.Timestamp(report_date)).to_pydatetime()
+        report_dt = _naive_utc(report_date)
         key = (symbol, report_dt)
         if key in existing_dates:
             continue
@@ -195,7 +212,7 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> 
             raw_date = row.get(date_col) if hasattr(row, "get") else row[date_col]
             if pd.isna(raw_date):
                 continue
-            transaction_date = ensure_utc_timestamp(pd.Timestamp(raw_date)).to_pydatetime()
+            transaction_date = _naive_utc(raw_date)
         except (TypeError, KeyError, ValueError):
             continue
 
@@ -289,20 +306,28 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
 
         for i, symbol in enumerate(sorted(symbols)):
             try:
-                new_news = _load_news_for_symbol(symbol, existing_news)
-                if new_news:
-                    session.add_all(new_news)
-                    news_added += len(new_news)
+                # One SAVEPOINT per symbol. Without it there is a single commit at
+                # the very end, so one unexpected duplicate discards the whole run —
+                # every table, every symbol. That is exactly how this loader stayed
+                # frozen at its first successful batch while reporting thousands of
+                # rows "added" each night. Now a bad symbol loses only itself.
+                with session.begin_nested():
+                    new_news = _load_news_for_symbol(symbol, existing_news)
+                    if new_news:
+                        session.add_all(new_news)
 
-                new_earnings = _load_earnings_for_symbol(symbol, existing_earnings)
-                if new_earnings:
-                    session.add_all(new_earnings)
-                    earnings_added += len(new_earnings)
+                    new_earnings = _load_earnings_for_symbol(symbol, existing_earnings)
+                    if new_earnings:
+                        session.add_all(new_earnings)
 
-                new_insider = _load_insider_for_symbol(symbol, existing_insider)
-                if new_insider:
-                    session.add_all(new_insider)
-                    insider_added += len(new_insider)
+                    new_insider = _load_insider_for_symbol(symbol, existing_insider)
+                    if new_insider:
+                        session.add_all(new_insider)
+                # Counted only after the savepoint released cleanly, so the summary
+                # reports what was actually persisted rather than what was attempted.
+                news_added += len(new_news)
+                earnings_added += len(new_earnings)
+                insider_added += len(new_insider)
             except Exception as e:
                 logger.warning("Error loading fundamentals for %s: %s", symbol, e, exc_info=True)
 

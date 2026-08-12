@@ -100,7 +100,13 @@ class Bot(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     portfolio: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), nullable=True, default=lambda: {"USD": 10000})
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+    # onupdate, not just default: without it the column is stamped once at INSERT
+    # and never moves, so it recorded creation time under an "updated" name. That
+    # made it useless for the one question it gets asked — "is this bot still
+    # trading?" — e.g. SynthesizedHyperConvexityBot traded 2026-08-11 while its
+    # updated_at still read 2026-03-22. Rows written before this stay stale; only
+    # the next portfolio write corrects each one.
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive, onupdate=_utcnow_naive)
 
 
 class Trade(Base):
