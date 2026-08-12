@@ -1,44 +1,15 @@
 """
 Utility modules for trading bots.
 
-This package now exposes a **layered structure**:
+Import the concrete module you need — `utils.botclass`, `utils.db`,
+`utils.data_service`, `utils.portfolio_manager`, `utils.config`, and so on.
 
-- `utils.core`: core infrastructure (bot base class, DB models, portfolio manager,
-  backtesting, hyperparameter tuning, shared helpers).
-- `utils.data`: data access (Yahoo Finance + DB, stock fundamentals loaders).
-- `utils.portfolio`: portfolio and strategy logic (regime classification and tilts,
-  earnings/insider tilting, Sharpe optimisation, portfolio worth analytics, sentiment
-  adapters, and the canonical `TRADEABLE` universe).
-- `utils.ai`: AI helpers for OpenRouter/LangChain integrations.
-
-For backwards compatibility, the most common core symbols are still re-exported from
-the `utils` package root, but new code should prefer the subpackages above.
+This package deliberately re-exports nothing. It previously advertised a layered
+structure (`utils.core`, `utils.data`, `utils.portfolio`, `utils.ai`) implemented
+as four re-export-only subpackages, which gave every symbol two importable names
+without moving any code; those have been removed. It also re-exported Bot,
+DataService and the ORM models from this file, which had no consumers and meant
+that importing a pure-function module like `utils.helpers` eagerly pulled in
+yfinance, pandas, sqlalchemy and a database engine — about a second of startup
+for a timezone helper.
 """
-
-from .bot_repository import BotRepository
-from .botclass import Bot
-from .data_service import DataService
-from .db import (
-    Bot as BotModel,
-)
-from .db import (
-    HistoricData,
-    RunLog,
-    SessionLocal,
-    Trade,
-    get_db_session,
-)
-from .portfolio_manager import PortfolioManager
-
-__all__ = [
-    "Bot",
-    "BotModel",
-    "BotRepository",
-    "DataService",
-    "HistoricData",
-    "PortfolioManager",
-    "RunLog",
-    "SessionLocal",
-    "Trade",
-    "get_db_session",
-]

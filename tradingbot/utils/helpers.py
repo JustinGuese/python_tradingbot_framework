@@ -25,16 +25,22 @@ def ensure_utc_series(series: pd.Series) -> pd.Series:
     """
     Ensure a pandas Series of timestamps is timezone-aware in UTC.
 
+    Naive values are interpreted as UTC; aware values are converted to UTC.
+
     Args:
         series: Series of timestamps to convert
 
     Returns:
         Series with timezone-aware timestamps in UTC
+
+    Note:
+        Uses pd.to_datetime rather than the .dt accessor. A series that mixes
+        naive and aware datetimes has dtype=object, and .dt raises
+        "Can only use .dt accessor with datetimelike values" on it — so the
+        previous accessor-based form could not normalise the one input shape
+        this function exists to normalise.
     """
-    if series.dt.tz is None:
-        return series.dt.tz_localize("UTC")
-    else:
-        return series.dt.tz_convert("UTC")
+    return pd.to_datetime(series, utc=True)
 
 
 def validate_dataframe_columns(df: pd.DataFrame, required_columns: list[str] | None = None) -> None:
@@ -46,15 +52,18 @@ def validate_dataframe_columns(df: pd.DataFrame, required_columns: list[str] | N
         required_columns: List of required column names (defaults to REQUIRED_DATA_COLUMNS)
 
     Raises:
-        AssertionError: If DataFrame doesn't have the required columns
+        TypeError: If df is not a pandas DataFrame
+        ValueError: If DataFrame doesn't have the required columns
     """
     if required_columns is None:
         required_columns = REQUIRED_DATA_COLUMNS
 
-    assert isinstance(df, pd.DataFrame), "Input must be a pandas DataFrame"
-    assert df.columns.tolist() == required_columns, (
-        f"DataFrame must have specific columns: {required_columns}, got: {df.columns.tolist()}"
-    )
+    # Plain if/raise (not assert): asserts are stripped under `python -O`, which
+    # would silently disable this validation in optimised interpreters.
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input must be a pandas DataFrame")
+    if df.columns.tolist() != required_columns:
+        raise ValueError(f"DataFrame must have specific columns: {required_columns}, got: {df.columns.tolist()}")
 
 
 def parse_period_to_date_range(period: str) -> tuple[pd.Timestamp, pd.Timestamp]:

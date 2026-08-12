@@ -57,17 +57,17 @@ This document summarizes the Kronos financial forecasting integration added to t
 8. **`pyproject.toml` — Updated**
    - Added `huggingface_hub>=0.20.0` (API client for Space control)
 
-### Utilities Export
+### Utilities
 
-9. **`tradingbot/utils/core/__init__.py` — Updated**
-   - Exported `KronosClient` and `kronos_forecast` for easier imports
+9. **`tradingbot/utils/kronos_client.py` — Added**
+   - Provides `KronosClient` and `kronos_forecast` for direct imports
 
 ## Files Modified
 
 - `tradingbot/utils/db.py` — added `KronosPrediction` class
 - `helm/tradingbots/values.yaml` — added kronosbot + env vars
 - `pyproject.toml` — added huggingface_hub dependency
-- `tradingbot/utils/core/__init__.py` — exported new classes
+- `tradingbot/utils/kronos_client.py` — added `KronosClient` and `kronos_forecast`
 - `mkdocs.yml` — added documentation references
 
 ## Documentation
@@ -129,7 +129,8 @@ This document summarizes the Kronos financial forecasting integration added to t
 ### Direct Usage in a Bot
 
 ```python
-from tradingbot.utils.core import Bot, KronosClient
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.kronos_client import KronosClient
 
 
 class MyBot(Bot):
@@ -147,7 +148,8 @@ class MyBot(Bot):
 ### With AI Tools
 
 ```python
-from tradingbot.utils.core import run_ai_with_tools, kronos_forecast
+from tradingbot.utils.aitools import run_ai_with_tools
+from tradingbot.utils.kronos_client import kronos_forecast
 
 decision = run_ai_with_tools(
     system_prompt="You are a trading analyst. Use Kronos forecasts to inform your decision.",
@@ -159,7 +161,7 @@ decision = run_ai_with_tools(
 ### Database Query
 
 ```python
-from tradingbot.utils.core import get_db_session
+from tradingbot.utils.db import get_db_session
 from tradingbot.utils.db import KronosPrediction
 from datetime import datetime, timedelta
 

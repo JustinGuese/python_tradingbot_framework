@@ -8,6 +8,7 @@ from .config import EXECUTION_CONFIG, PORTFOLIO_CONFIG, ExecutionConfig
 from .data_service import DataService
 from .db import Bot as BotModel
 from .db import get_db_session
+from .weights import require_normalized
 
 logger = logging.getLogger(__name__)
 
@@ -286,16 +287,29 @@ class PortfolioManager:
                            Weights must sum to 1.0 (100%)
             only_over_50_usd: If True, filter out assets with target value <= $50
         """
-        # Step 1: Validate weights sum to 1.0
-        total_weight = sum(target_portfolio.values())
-        if abs(total_weight - 1.0) > 0.01:
-            raise ValueError(f"Target portfolio weights must sum to 1.0, got {total_weight}")
+        # Step 1: Validate weights sum to 1.0. Caller-supplied input, so reject
+        # rather than silently rescale — a target that does not sum to 1 means the
+        # caller's own maths is wrong and rescaling would hide it.
+        require_normalized(target_portfolio)
+
+        # Step 2: Resolve prices BEFORE taking the row lock.
+        #
+        # get_latest_prices_batch opens its own session and, on a cache miss, calls
+        # yfinance over the network. Doing that inside the locked block held
+        # SELECT ... FOR UPDATE on this bot's row across an external HTTP request,
+        # so every other writer for the same bot — the copier, the worth
+        # calculator, a concurrent run — blocked for as long as a third party took
+        # to respond, with the statement timeout as the only ceiling.
+        with get_db_session() as preview_session:
+            snapshot = preview_session.query(BotModel).filter_by(name=self.bot_name).one()
+            preview_symbols = sorted(set(target_portfolio) | set(snapshot.portfolio))
+        prices = self.data_service.get_latest_prices_batch([s for s in preview_symbols if s != "USD"])
 
         with get_db_session() as session:
             # Lock bot row for the entire duration of rebalance
             self.bot = self.bot_repository.get_bot_locked(session, self.bot_name)
 
-            # Step 2: Calculate current portfolio value
+            # Step 3: Calculate current portfolio value
             current_usd = self.bot.portfolio.get("USD", 0)
 
             # Get all symbols involved. Sorted, not set-ordered: buys are sized
@@ -305,8 +319,13 @@ class PortfolioManager:
             all_involved_symbols = sorted(set(list(target_portfolio.keys()) + list(self.bot.portfolio.keys())))
             all_involved_symbols = [s for s in all_involved_symbols if s != "USD"]
 
-            # Batch fetch prices
-            prices = self.data_service.get_latest_prices_batch(all_involved_symbols)
+            # The unlocked snapshot above can be stale: another writer may have
+            # added a holding between the two reads. Fetch only what that missed,
+            # so the common case still costs zero network time under the lock.
+            missing = [s for s in all_involved_symbols if s not in prices]
+            if missing:
+                logger.debug(f"Prices for {missing} appeared after the pre-lock snapshot; fetching under lock")
+                prices.update(self.data_service.get_latest_prices_batch(missing))
 
             # Calculate total portfolio value
             total_portfolio_value = current_usd

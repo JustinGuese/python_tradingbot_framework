@@ -23,9 +23,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tradingbot"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.core import engine
+from tradingbot.utils.db import engine
 
 ALPHA = "XAUZenbotTreeBot"
 CARRY = "GoldenButterflyMomBot"

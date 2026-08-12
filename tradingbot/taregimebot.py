@@ -5,10 +5,11 @@ Regime and signal logic live in utils.ta_regime; this bot only fetches data
 and calls ta_regime_decision.
 """
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from utils.core import Bot
-from utils.ta_regime import ta_regime_decision
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.runner import run_bot
+from tradingbot.utils.ta_regime import ta_regime_decision
 
 
 class TARegimeAdaptiveBot(Bot):
@@ -65,7 +66,11 @@ class TARegimeAdaptiveBot(Bot):
             macd_confirm_trend=macd_confirm_trend,
             **kwargs,
         )
-        self._ta_params = {
+        # Annotated because the literal below mixes int, float and bool, so it
+        # infers as dict[str, float] and the **unpack into ta_regime_decision
+        # then mismatches its int/bool parameters. The values are correct; only
+        # the inferred element type is lossy.
+        self._ta_params: dict[str, Any] = {
             "hurst_window": hurst_window,
             "hurst_trend_threshold": hurst_trend_threshold,
             "adx_threshold": adx_threshold,
@@ -82,29 +87,7 @@ class TARegimeAdaptiveBot(Bot):
         return ta_regime_decision(row, self.data, **self._ta_params)
 
 
+# Backtest transcript (best params, max-sharpe): see docs/backtests/taregimebot.md
 if __name__ == "__main__":
-    bot = TARegimeAdaptiveBot()
-
-    # ============================================================
-    # Backtesting with best parameters (max-sharpe)
-    # ============================================================
-    # hurst_window: 50
-    # hurst_trend_threshold: 0.46
-    # adx_threshold: 16
-    # rsi_oversold: 36
-    # rsi_overbought: 66
-    # bbp_low: 0.0
-    # bbp_high: 0.8
-    # zscore_window: 15
-    # zscore_entry: 1.5
-
-    # --- Backtest Results: TARegimeAdaptiveBot ---
-    # Yearly Return: 12.58%
-    # Buy & Hold Return: 16.32%
-    # Outperformance vs B&H: -3.74%
-    # Sharpe Ratio: 2.65
-    # Number of Trades: 7
-    # Max Drawdown: 2.62%
-    # bot.local_development(objective="yearly_return", param_sample_ratio=.1) #
-    bot.run()
-    # bot.local_development()
+    # bot.local_development(objective="yearly_return", param_sample_ratio=.1)
+    run_bot(TARegimeAdaptiveBot)

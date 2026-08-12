@@ -1,7 +1,9 @@
 import logging
 
-from utils.core import Bot
-from utils.portfolio import TRADEABLE, sharpe_compute_weights
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.config import TRADEABLE
+from tradingbot.utils.portfolio_utils import sharpe_compute_weights
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +68,6 @@ class SharpePortfolioOptWeeklyBot(Bot):
             raise
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = SharpePortfolioOptWeeklyBot()
-
-    # bot.local_development() # not possible, event driven
-    bot.run()
+    # local_development() not possible, event driven
+    run_bot(SharpePortfolioOptWeeklyBot)

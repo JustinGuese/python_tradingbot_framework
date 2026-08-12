@@ -38,7 +38,8 @@ import logging
 import numpy as np
 import pandas as pd
 
-from utils.botclass import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,4 @@ class GoldenButterflyMomBot(Bot):
 # copying it. The Helm CronJob invokes `python goldenbutterflymombot.py`, so
 # __name__ == "__main__" and behaviour is unchanged.
 if __name__ == "__main__":
-    bot = GoldenButterflyMomBot()
-    bot.run()
-    # bot.local_backtest()
+    run_bot(GoldenButterflyMomBot)

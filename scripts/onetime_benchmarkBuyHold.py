@@ -1,9 +1,9 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent / "tradingbot"))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from utils.core import Bot
+from tradingbot.utils.botclass import Bot
 
 
 class BenchmarkBot(Bot):

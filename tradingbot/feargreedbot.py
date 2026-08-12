@@ -1,7 +1,7 @@
 import logging
 
-from utils.core import Bot
-from utils.portfolio import get_fear_greed_index
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.portfolio_utils import get_fear_greed_index
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,11 @@ class FearGreedBotQQQ(Bot):
                     logger.info(f"Current FearGreed: {self.currentFearGreed} is neutral - No action")
                     return 0
         else:
-            raise ValueError(f"Unknown bot name: {self.name}")
-        return 0
+            # self.bot_name, not self.name: the base class stores the bot's
+            # identity as bot_name (botclass.py) and never defines .name, so
+            # this line used to raise AttributeError instead of the intended
+            # ValueError — masking the actual misconfiguration.
+            raise ValueError(f"Unknown bot name: {self.bot_name}")
 
 
 # Guarded: without this, importing this module executes bot.run() and trades a

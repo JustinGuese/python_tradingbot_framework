@@ -3,9 +3,9 @@ from typing import Literal
 
 from ibind import IbkrClient, OrderRequest, QuestionType
 
-from livetrade.broker import LiveBroker
-from livetrade.symbol_map import SymbolMapper
-from utils.data_service import DataService
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.livetrade.symbol_map import SymbolMapper
+from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ class InteractiveBrokersBroker(LiveBroker):
     def __init__(
         self,
         account_id: str = "",
-        symbol_mapper: SymbolMapper = None,
-        data_service: DataService = None,
+        symbol_mapper: SymbolMapper | None = None,
+        data_service: DataService | None = None,
     ):
         self.name = "interactive_brokers"
         self.account_id = account_id
@@ -40,6 +40,17 @@ class InteractiveBrokersBroker(LiveBroker):
         self.data_service = data_service or DataService()
         self.client: IbkrClient | None = None
         self._connected = False
+
+    @property
+    def account_ref(self) -> str:
+        return str(self.account_id or "")
+
+    @property
+    def is_sandbox(self) -> bool:
+        # IBKR paper accounts are the DU-prefixed ones (live accounts are U…),
+        # which is why the entry script's error text says "e.g. DU1234567 for
+        # paper". There is no API flag for this — the account id is the signal.
+        return str(self.account_id or "").upper().startswith("DU")
 
     # ------------------------------------------------------------------ #
     # Connection lifecycle
@@ -331,29 +342,38 @@ class InteractiveBrokersBroker(LiveBroker):
                 )
         return candidates
 
-    def print_account_summary(self) -> None:
+    # print_account_summary() itself lives on LiveBroker. IBKR is the one
+    # adapter that probes extra session state (visible portfolio accounts)
+    # before the header, uses different labels for cash/equity, and shows
+    # market value per position instead of get_positions()'s plain qty.
+    def _pre_summary_lines(self) -> list[str]:
         self.connect(readonly=True)
         if self.client is None:
             raise RuntimeError("IBKR client not connected — call connect() first")
         accounts = self.client.portfolio_accounts().data
-        print(f"Portfolio accounts: {accounts}")
-        print(f"Configured account: {self.account_id or '(none — using default)'}")
+        return [
+            f"Portfolio accounts: {accounts}",
+            f"Configured account: {self.account_id or '(none — using default)'}",
+        ]
 
-        cash = self.get_cash()
-        equity = self.get_total_equity()
-        print(f"\nAccount {self.account_id}")
-        print(f"  Cash (USD):       {cash:>15,.2f}")
-        print(f"  Net Liquidation:  {equity:>15,.2f}")
+    def _summary_header(self) -> str:
+        return f"Account {self.account_id}"
 
+    def _account_lines(self) -> list[str]:
+        return [
+            self._summary_line("Cash (USD):", self.get_cash()),
+            self._summary_line("Net Liquidation:", self.get_total_equity()),
+        ]
+
+    def _position_rows(self) -> tuple[str, list[str]]:
         positions = self._raw_positions()
-        print(f"\nPositions ({len(positions)}):")
-        if not positions:
-            print("  (none)")
-            return
-        print(f"  {'Symbol':<12} {'Qty':>12} {'Mkt Value':>15}")
-        for p in positions:
-            sym = p.get("ticker") or p.get("contractDesc") or "?"
-            print(f"  {sym:<12} {float(p.get('position', 0) or 0):>12.4f} {float(p.get('mktValue', 0) or 0):>15.2f}")
+        header = f"  {'Symbol':<12} {'Qty':>12} {'Mkt Value':>15}"
+        rows = [
+            f"  {(p.get('ticker') or p.get('contractDesc') or '?'):<12} "
+            f"{float(p.get('position', 0) or 0):>12.4f} {float(p.get('mktValue', 0) or 0):>15.2f}"
+            for p in positions
+        ]
+        return header, rows
 
 
 if __name__ == "__main__":

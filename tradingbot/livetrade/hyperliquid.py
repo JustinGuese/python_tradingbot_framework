@@ -32,9 +32,9 @@ from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants as hl_constants
 
-from livetrade.broker import LiveBroker
-from livetrade.symbol_map import SymbolMapper
-from utils.data_service import DataService
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.livetrade.symbol_map import SymbolMapper
+from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,8 @@ class HyperliquidBroker(LiveBroker):
         account_address: str | None = None,
         vault_address: str | None = None,
         testnet: bool = True,
-        symbol_mapper: SymbolMapper = None,
-        data_service: DataService = None,
+        symbol_mapper: SymbolMapper | None = None,
+        data_service: DataService | None = None,
         cash_mode: str = "withdrawable",
         long_only: bool = True,
         leverage: int = 1,
@@ -92,6 +92,16 @@ class HyperliquidBroker(LiveBroker):
 
         self._sz_decimals: dict[str, int] | None = None
         self._leverage_set: set[str] = set()
+
+    @property
+    def account_ref(self) -> str:
+        # The vault when trading one, else the leader's own wallet — i.e. the
+        # address whose equity get_total_equity() actually reports.
+        return str(self.query_address or "")
+
+    @property
+    def is_sandbox(self) -> bool:
+        return self.testnet
 
     # ---------------------------------------------------------------- helpers
 
@@ -311,35 +321,42 @@ class HyperliquidBroker(LiveBroker):
 
     # ------------------------------------------------------------------- pretty
 
-    def print_account_summary(self) -> None:
+    # print_account_summary() itself lives on LiveBroker. Hyperliquid is the
+    # one adapter with no settled cash to show (perps use margin, not a cash
+    # balance) — it shows signer/vault identity plus withdrawable collateral,
+    # total notional and effective leverage instead. Positions carry entry
+    # price and unrealized P&L that get_positions()'s signed qty discards.
+    def _summary_header(self) -> str:
+        target = "vault" if self.vault_address else "account"
+        return f"Hyperliquid {'TESTNET' if self.testnet else 'MAINNET'} ({target})"
+
+    def _account_lines(self) -> list[str]:
         state = self._user_state()
         margin = state.get("marginSummary", {})
         equity = float(margin.get("accountValue", 0) or 0)
         notional = float(margin.get("totalNtlPos", 0) or 0)
-        target = "vault" if self.vault_address else "account"
+        return [
+            self._summary_line("Signer:", self.wallet_address, fmt=""),
+            self._summary_line("Queried address:", self.query_address, fmt=""),
+            self._summary_line("Equity:", equity),
+            self._summary_line("Withdrawable:", float(state.get("withdrawable", 0) or 0)),
+            self._summary_line("Total notional:", notional),
+            self._summary_line("Effective lev:", notional / equity if equity else 0) + "x",
+        ]
 
-        print(f"\nHyperliquid {'TESTNET' if self.testnet else 'MAINNET'} ({target})")
-        print(f"  Signer:           {self.wallet_address}")
-        print(f"  Queried address:  {self.query_address}")
-        print(f"  Equity:           {equity:>15,.2f}")
-        print(f"  Withdrawable:     {float(state.get('withdrawable', 0) or 0):>15,.2f}")
-        print(f"  Total notional:   {notional:>15,.2f}")
-        print(f"  Effective lev:    {(notional / equity if equity else 0):>15,.2f}x")
-
-        positions = state.get("assetPositions", [])
-        print(f"\nPositions ({len(positions)}):")
-        if not positions:
-            print("  (none)")
-            return
-        print(f"  {'Coin':<8} {'Size':>14} {'Entry':>12} {'Notional':>14} {'uPnL':>12}")
+    def _position_rows(self) -> tuple[str, list[str]]:
+        positions = self._user_state().get("assetPositions", [])
+        header = f"  {'Coin':<8} {'Size':>14} {'Entry':>12} {'Notional':>14} {'uPnL':>12}"
+        rows = []
         for entry in positions:
             p = entry.get("position", {})
-            print(
+            rows.append(
                 f"  {p.get('coin', '')!s:<8} {float(p.get('szi', 0) or 0):>14.6f} "
                 f"{float(p.get('entryPx', 0) or 0):>12.2f} "
                 f"{float(p.get('positionValue', 0) or 0):>14.2f} "
                 f"{float(p.get('unrealizedPnl', 0) or 0):>12.2f}"
             )
+        return header, rows
 
 
 if __name__ == "__main__":

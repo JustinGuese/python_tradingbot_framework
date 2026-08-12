@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from tradingbot.utils.indicators import safe_get as _safe_get
+
 
 def hurst_proxy_from_returns(returns: pd.Series, window: int) -> float:
     """
@@ -85,17 +87,6 @@ def rolling_zscore(series: pd.Series, window: int, current_idx: int) -> float | 
     if std == 0 or not np.isfinite(std):
         return None
     return float((current - mean) / std)
-
-
-def _safe_get(row: pd.Series, key: str, default: float = 0.0) -> float:
-    """Get float from row with NaN handling. Internal use only."""
-    value = row.get(key, default)
-    if pd.isna(value):
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
 
 
 def ta_regime_decision(

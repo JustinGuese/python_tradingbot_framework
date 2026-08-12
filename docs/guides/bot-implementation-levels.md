@@ -159,7 +159,7 @@ class GoldenButterflyMomBot(Bot):
 #### A. External APIs (Live-Only)
 
 ```python
-from utils.portfolio import get_fear_greed_index
+from tradingbot.utils.portfolio_utils import get_fear_greed_index
 
 
 class FearGreedBot(Bot):
@@ -197,7 +197,8 @@ class FearGreedBot(Bot):
 #### B. Portfolio-Weight Optimization
 
 ```python
-from utils.portfolio import TRADEABLE, sharpe_compute_weights
+from tradingbot.utils.config import TRADEABLE
+from tradingbot.utils.portfolio_utils import sharpe_compute_weights
 
 
 class SharpePortfolioOptBot(Bot):

@@ -1,19 +1,16 @@
 """
 Regime-adaptive bot: classify regime from VIX, index trend, Fear & Greed; apply regime tilt; rebalance.
 
-All regime and tilt logic lives in `utils.portfolio`; this bot only fetches data and orchestrates.
+All regime and tilt logic lives in `utils.regime`; this bot only fetches data and orchestrates.
 """
 
 from dataclasses import dataclass
 
-from utils.core import Bot
-from utils.portfolio import (
-    TRADEABLE,
-    get_fear_greed_index,
-    index_close_series_from_wide,
-    regime_compute_weights,
-    vix_series_from_long_df,
-)
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.config import TRADEABLE
+from tradingbot.utils.portfolio_utils import get_fear_greed_index
+from tradingbot.utils.regime import index_close_series_from_wide, regime_compute_weights, vix_series_from_long_df
+from tradingbot.utils.runner import run_bot
 
 
 @dataclass(frozen=True)
@@ -90,6 +87,5 @@ class RegimeAdaptiveBot(Bot):
 
 
 if __name__ == "__main__":
-    bot = RegimeAdaptiveBot()
-    # bot.local_backtest() # not possible, event driven
-    bot.run()
+    # local_backtest() not possible, event driven
+    run_bot(RegimeAdaptiveBot)

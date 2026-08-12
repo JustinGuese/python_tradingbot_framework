@@ -3,13 +3,14 @@
 import logging
 from datetime import UTC, datetime
 
-from utils.core import BotModel, PortfolioWorth, get_db_session
-from utils.data import (
-    DataService,
+from tradingbot.utils.data_service import DataService
+from tradingbot.utils.db import Bot as BotModel
+from tradingbot.utils.db import PortfolioWorth, get_db_session
+from tradingbot.utils.portfolio_utils import calculate_portfolio_worth
+from tradingbot.utils.stock_fundamentals_loader import (
     get_portfolio_symbols,
     load_stock_news_earnings_insider,
 )
-from utils.portfolio import calculate_portfolio_worth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -4,71 +4,8 @@
 {{- fail "liveTrade.hyperliquid: MAINNET with no vaultAddress trades the leader's own funds. Set vaultAddress, or set allowMainnetWithoutVault: \"true\" for the deliberate mainnet smoke stage." }}
 {{- end }}
 {{- end }}
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: livetrade-hyperliquid
-  namespace: {{ $.Values.namespace }}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    meta.helm.sh/release-name: {{ $.Release.Name }}
-    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
-spec:
-  schedule: {{ $.Values.liveTrade.hyperliquid.schedule | quote }}
-  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
-  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
-  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
-  jobTemplate:
-    spec:
-      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
-      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
-      template:
-        spec:
-          imagePullSecrets:
-          {{- range $.Values.imagePullSecrets }}
-          - name: {{ .name }}
-          {{- end }}
-          containers:
-          - name: livetrade-hyperliquid
-            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
-            command:
-            - "python"
-            args:
-            - "livetrade_hyperliquid.py"
-            imagePullPolicy: {{ $.Values.image.pullPolicy }}
-            resources:
-              {{- toYaml $.Values.resources | nindent 14 }}
-            env:
-            {{- if $.Values.postgresql.clusterConnection }}
-            - name: POSTGRES_HOST
-              value: {{ $.Values.postgresql.clusterConnection.host | quote }}
-            - name: POSTGRES_PORT
-              value: {{ $.Values.postgresql.clusterConnection.port | quote }}
-            - name: POSTGRES_USER
-              value: {{ $.Values.postgresql.clusterConnection.user | quote }}
-            - name: POSTGRES_DATABASE
-              value: {{ $.Values.postgresql.clusterConnection.database | quote }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Values.secretName }}
-                  key: POSTGRES_PASSWORD
-            {{- end }}
-            {{- range $.Values.env }}
-            {{- if and $.Values.postgresql.clusterConnection (or (eq .name "POSTGRES_URI") (eq .name "POSTGRES_PASSWORD")) }}
-            {{- else }}
-            - name: {{ .name }}
-            {{- if .value }}
-              value: {{ .value | quote }}
-            {{- else if .valueFrom }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Values.secretName }}
-                  key: {{ .valueFrom.secretKeyRef.key }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-hyperliquid" "schedule" .Values.liveTrade.hyperliquid.schedule "module" "tradingbot.livetrade_hyperliquid") }}
+{{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
             # Hyperliquid credentials (from secret). The private key is an API
             # (agent) wallet key, not the leader's master key.
             - name: HYPERLIQUID_PRIVATE_KEY
@@ -86,18 +23,9 @@ spec:
               value: {{ $.Values.liveTrade.hyperliquid.vaultAddress | default "" | quote }}
             - name: HYPERLIQUID_TESTNET
               value: {{ $.Values.liveTrade.hyperliquid.testnet | quote }}
-            # LiveTrade configuration (from values.yaml)
-            - name: LIVETRADE_BOT_WEIGHTS
-              value: {{ default $.Values.liveTrade.botWeights $.Values.liveTrade.hyperliquid.botWeights | quote }}
-            - name: LIVETRADE_MIN_ORDER_USD
-              value: {{ default $.Values.liveTrade.minOrderUsd $.Values.liveTrade.hyperliquid.minOrderUsd | quote }}
-            - name: LIVETRADE_DRY_RUN
-              value: {{ default $.Values.liveTrade.dryRun $.Values.liveTrade.hyperliquid.dryRun | quote }}
-            # 0.95, not 1.0 — at 1.0 the copier's cash clamp scales every order
-            # down and sits on the margin boundary. See livetrade_hyperliquid.py.
-            - name: LIVETRADE_PORTFOLIO_FRACTION
-              value: {{ default $.Values.liveTrade.portfolioFraction $.Values.liveTrade.hyperliquid.portfolioFraction | quote }}
-            - name: LIVETRADE_STRICT_MAPPING
-              value: {{ $.Values.liveTrade.strictMapping | quote }}
+            # portfolioFraction is 0.95, not 1.0 — at 1.0 the copier's cash clamp
+            # scales every order down and sits on the margin boundary. The value
+            # lives in values.yaml; the code-side default is in livetrade/registry.py.
+{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" .Values.liveTrade.hyperliquid) }}
           restartPolicy: OnFailure
 {{- end }}

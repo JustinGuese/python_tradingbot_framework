@@ -1,9 +1,13 @@
 """
 EMA Momentum Zone Bot (Pattern A)
 
-Rides QQQ momentum when three independent signals agree: the medium-term
+Rides GLD momentum when three independent signals agree: the medium-term
 EMA trend is up, RSI is in the "healthy momentum zone" (not extreme), and
 the MACD histogram is positive. Exits when any of these breaks down.
+
+(The symbol is GLD — see the super().__init__ call below. This docstring
+described QQQ, which the bot has never traded; the strategy logic is
+symbol-agnostic, so only the prose was wrong.)
 
 Signal logic:
   BUY  : trend_macd > 0             (EMA-12 > EMA-26 = medium-term uptrend)
@@ -42,12 +46,13 @@ Schedule: 55 21 * * 1-5  (9:55 PM UTC, near NYSE close)
 """
 
 import logging
-import math
 from typing import ClassVar
 
 import pandas as pd
 
-from utils.botclass import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.indicators import safe_get
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +162,10 @@ class SqueezeMomentumBot(Bot):
         """
 
         def _safe(key, default=0.0):
-            v = row.get(key, default)
-            try:
-                f = float(v)
-                return default if (math.isnan(f) or not math.isfinite(f)) else f
-            except (TypeError, ValueError):
-                return default
+            # check_finite=True: preserves this bot's original stricter behaviour
+            # of also rejecting +/-inf values (e.g. from an upstream divide-by-zero),
+            # unlike the plain safe_get() default used elsewhere.
+            return safe_get(row, key, default, check_finite=True)
 
         close = _safe("close")
         sma50 = _safe("sma_50")
@@ -206,26 +209,8 @@ class SqueezeMomentumBot(Bot):
         return 0
 
 
-bot = SqueezeMomentumBot()
-
-# ── Best parameters (from local_development, 2026-04-14) ──────────────────
-# Tight grid: rsi_low [35,38,40,42,45], rsi_high [58,60,62,65],
-#             rsi_exit [75,78,80,83,85], macd_hist [-1.0,-0.5,-0.2,0.0],
-#             sell_buffer [0.02,0.03,0.04,0.05] — 400 combos, full search
-#
-# --- Backtest Results: SqueezeMomentumBot ---
-# Yearly Return:             53.91%
-# Buy & Hold Return (GLD):   48.56%
-# Outperformance vs B&H:     +5.35%
-# Sharpe Ratio:               2.19
-# Number of Trades:          19
-# Max Drawdown:               8.09%
-
+# Backtest transcript: see docs/backtests/squeezemomentumbot.md
 if __name__ == "__main__":
     # ── Tune hyperparameters then backtest best params ─────────────────
     # bot.local_development(objective="sharpe_ratio", param_sample_ratio=0.3)
-
-    # ── Quick backtest with current defaults ───────────────────────────
-    # bot.local_backtest()
-
-    bot.run()
+    run_bot(SqueezeMomentumBot)

@@ -18,8 +18,9 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-from utils.botclass import Bot
-from utils.db import StockNews, get_db_session
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.db import StockNews, get_db_session
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def _classify_sentiment(symbol: str, headlines: list[str]) -> dict | None:
         {"direction": "BUY"|"SELL"|"HOLD", "confidence": "low"|"medium"|"high"}
         or None on any parse failure.
     """
-    from utils.ai import run_ai_simple_with_fallback
+    from tradingbot.utils.aitools import run_ai_simple_with_fallback
 
     bullets = "\n".join(f"- {h}" for h in headlines)
     system = (
@@ -155,9 +156,5 @@ class StockNewsSentimentBot(Bot):
         return 0
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = StockNewsSentimentBot()  # backtest not possible, event driven
-    bot.run()
+    run_bot(StockNewsSentimentBot)  # backtest not possible, event driven

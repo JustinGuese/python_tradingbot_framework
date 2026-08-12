@@ -13,12 +13,13 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from utils.db import LiveEquity, get_db_session, init_db
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.utils.db import LiveEquity, get_db_session, init_db
 
 logger = logging.getLogger(__name__)
 
 
-def record_live_equity(broker, bot_weights: dict | None = None) -> None:
+def record_live_equity(broker: LiveBroker, bot_weights: dict | None = None) -> None:
     """Upsert today's equity snapshot for `broker`. Idempotent per UTC day.
 
     Re-running on the same day overwrites the row (last write wins), matching
@@ -48,13 +49,13 @@ def record_live_equity(broker, bot_weights: dict | None = None) -> None:
 
         now = datetime.now(UTC)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
-        account_id = str(
-            getattr(broker, "query_address", None)
-            or getattr(broker, "account_id", None)
-            or getattr(broker, "system_id", None)
-            or ""
-        )
-        is_testnet = bool(getattr(broker, "testnet", False))
+        # LiveBroker.account_ref / .is_sandbox, not a getattr() chain over
+        # adapter-specific attribute names. The old chain looked broker-agnostic
+        # but only ever matched Hyperliquid: eToro and Darwinex spell their paper
+        # flag `demo`, so a demo account would have been recorded is_testnet=False
+        # — paper money entering the published live track record.
+        account_id = broker.account_ref
+        is_testnet = broker.is_sandbox
 
         with get_db_session() as session:
             row = (

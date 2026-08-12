@@ -286,7 +286,7 @@ if __name__ == "__main__":
 Save this to `tradingbot/mybot.py` and run:
 
 ```bash
-python tradingbot/mybot.py
+python -m tradingbot.mybot
 ```
 
 ## Next Steps

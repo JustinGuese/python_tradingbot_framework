@@ -37,7 +37,8 @@ copier (livetrade_hyperliquid.py) runs at 00:05 UTC, 15 minutes later.
 import logging
 from typing import ClassVar
 
-from adaptivemeanreversionbot import AdaptiveMeanReversionBot
+from tradingbot.adaptivemeanreversionbot import AdaptiveMeanReversionBot
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,5 @@ class AdaptiveMeanReversionBTCBot(AdaptiveMeanReversionBot):
 
 
 if __name__ == "__main__":
-    bot = AdaptiveMeanReversionBTCBot()
     # bot.local_optimize()   # run this first, then paste the footer below
-    bot.run()
+    run_bot(AdaptiveMeanReversionBTCBot)

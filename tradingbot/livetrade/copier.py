@@ -3,8 +3,8 @@ import os
 import time
 from typing import Literal
 
-from utils.bot_repository import BotRepository
-from utils.data_service import DataService
+from tradingbot.utils.bot_repository import BotRepository
+from tradingbot.utils.data_service import DataService
 
 from .broker import LiveBroker
 
@@ -88,7 +88,17 @@ class LiveTradeCopier:
         if cancelled:
             logger.info(f"Cancelled {cancelled} stale open orders before sync")
 
-        current_positions = self.broker.get_positions()  # broker_symbol -> quantity
+        # A positions read that fails must abort the sync, never fall through as
+        # "flat". _calculate_orders does full target-state reconciliation, so an
+        # empty dict here means "buy the entire book" — on top of positions we
+        # actually still hold. Adapters that swallow their transport errors into
+        # {} (several still do) can't be distinguished here, so this guard is the
+        # backstop for the ones that raise.
+        try:
+            current_positions = self.broker.get_positions()  # broker_symbol -> quantity
+        except Exception as e:
+            logger.error(f"Aborting sync: could not read positions from {self.broker.name}: {e}", exc_info=True)
+            return
 
         # 5. Calculate orders (full target-state sync: liquidates anything not in target)
         orders = self._calculate_orders(broker_target_weights, current_positions, total_equity)

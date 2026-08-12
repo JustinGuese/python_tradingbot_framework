@@ -18,8 +18,9 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
-from utils.botclass import Bot
-from utils.db import TelegramMessage, get_db_session
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.db import TelegramMessage, get_db_session
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def _classify_signal(text: str, summary: str) -> dict | None:
         {"is_signal": bool, "direction": "BUY"|"SELL"|null, "yf_ticker": str|null}
         or None on parse failure.
     """
-    from utils.ai import run_ai_simple
+    from tradingbot.utils.aitools import run_ai_simple
 
     system = (
         "You are a trading signal classifier. Given a Telegram message, "
@@ -131,9 +132,5 @@ class TelegramSignalsBankBot(Bot):
         return 0
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = TelegramSignalsBankBot()
-    bot.run()
+    run_bot(TelegramSignalsBankBot)

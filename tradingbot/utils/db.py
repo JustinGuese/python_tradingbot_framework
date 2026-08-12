@@ -8,7 +8,6 @@ from urllib.parse import quote_plus
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -20,9 +19,26 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow_naive() -> datetime:
+    """Current UTC time as a NAIVE datetime — the value `datetime.utcnow()` returned.
+
+    Every timestamp column here is a bare `DateTime` (no `timezone=True`), and the
+    rows already in production are naive UTC, so the default must stay naive or new
+    rows would stop comparing against old ones.
+
+    Two things this replaces. First, `default=datetime.utcnow` as a bare callable:
+    still deprecated in 3.12 and still emitting a DeprecationWarning from inside
+    SQLAlchemy on every insert, because passing the function rather than calling it
+    only moves the call, it does not avoid it. Second, one outlier column that used
+    `lambda: datetime.now(UTC)` — an *aware* datetime into a naive column, which
+    happened to round-trip correctly only because the value was already UTC.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _database_url() -> str:
@@ -80,11 +96,11 @@ class Bot(Base):
 
     __tablename__ = "bots"
 
-    name = Column(String, primary_key=True)
-    description = Column(String, nullable=True)
-    portfolio = Column(MutableDict.as_mutable(JSON), default=lambda: {"USD": 10000})
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    portfolio: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), nullable=True, default=lambda: {"USD": 10000})
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class Trade(Base):
@@ -106,14 +122,14 @@ class Trade(Base):
 
     __tablename__ = "trades"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    bot_name = Column(String, ForeignKey("bots.name"))
-    symbol = Column(String)
-    isBuy = Column(Boolean)
-    quantity = Column(Float)
-    price = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    profit = Column(Float, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_name: Mapped[str | None] = mapped_column(String, ForeignKey("bots.name"))
+    symbol: Mapped[str | None] = mapped_column(String)
+    isBuy: Mapped[bool | None] = mapped_column(Boolean)
+    quantity: Mapped[float | None] = mapped_column(Float)
+    price: Mapped[float | None] = mapped_column(Float)
+    timestamp: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+    profit: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class HistoricData(Base):
@@ -141,14 +157,14 @@ class HistoricData(Base):
 
     __tablename__ = "historic_data"
 
-    symbol = Column(String, primary_key=True)
-    interval = Column(String, primary_key=True)
-    timestamp = Column(DateTime, primary_key=True)
-    open = Column(Float)
-    high = Column(Float)
-    low = Column(Float)
-    close = Column(Float)
-    volume = Column(Float)
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    interval: Mapped[str] = mapped_column(String, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    open: Mapped[float | None] = mapped_column(Float)
+    high: Mapped[float | None] = mapped_column(Float)
+    low: Mapped[float | None] = mapped_column(Float)
+    close: Mapped[float | None] = mapped_column(Float)
+    volume: Mapped[float | None] = mapped_column(Float)
 
 
 class RunLog(Base):
@@ -165,11 +181,11 @@ class RunLog(Base):
 
     __tablename__ = "run_logs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    bot_name = Column(String, ForeignKey("bots.name"))
-    start_time = Column(DateTime, default=datetime.utcnow)
-    success = Column(Boolean, default=False)
-    result = Column(String, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_name: Mapped[str | None] = mapped_column(String, ForeignKey("bots.name"))
+    start_time: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+    success: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    result: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class PortfolioWorth(Base):
@@ -186,11 +202,11 @@ class PortfolioWorth(Base):
 
     __tablename__ = "portfolio_worth"
 
-    bot_name = Column(String, ForeignKey("bots.name"), primary_key=True)
-    date = Column(DateTime, primary_key=True)
-    portfolio_worth = Column(Float, nullable=False)
-    holdings = Column(MutableDict.as_mutable(JSON), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    bot_name: Mapped[str] = mapped_column(String, ForeignKey("bots.name"), primary_key=True)
+    date: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    portfolio_worth: Mapped[float] = mapped_column(Float, nullable=False)
+    holdings: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class StockNews(Base):
@@ -214,16 +230,16 @@ class StockNews(Base):
         Index("ix_stock_news_symbol_published_at", "symbol", "published_at"),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String, nullable=False, index=True)
-    title = Column(String, nullable=False)
-    link = Column(String, nullable=False)
-    publisher = Column(String, nullable=True)
-    publisher_url = Column(String, nullable=True)
-    published_at = Column(DateTime, nullable=False)
-    related_tickers = Column(JSON, nullable=True)
-    acted_on = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    link: Mapped[str] = mapped_column(String, nullable=False)
+    publisher: Mapped[str | None] = mapped_column(String, nullable=True)
+    publisher_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    related_tickers: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    acted_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class StockEarnings(Base):
@@ -243,14 +259,14 @@ class StockEarnings(Base):
     __tablename__ = "stock_earnings"
     __table_args__ = (UniqueConstraint("symbol", "report_date", name="uq_stock_earnings_symbol_report_date"),)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String, nullable=False, index=True)
-    report_date = Column(DateTime, nullable=False)
-    eps_estimate = Column(Float, nullable=True)
-    reported_eps = Column(Float, nullable=True)
-    surprise_pct = Column(Float, nullable=True)
-    fiscal_period = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    report_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    eps_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reported_eps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    surprise_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiscal_period: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class StockInsiderTrade(Base):
@@ -280,37 +296,37 @@ class StockInsiderTrade(Base):
         Index("ix_stock_insider_trades_symbol_transaction_date", "symbol", "transaction_date"),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String, nullable=False, index=True)
-    transaction_date = Column(DateTime, nullable=False)
-    insider_name = Column(String, nullable=True)
-    transaction_type = Column(String, nullable=True)
-    shares = Column(Float, nullable=True)
-    value = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    insider_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    transaction_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    shares: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
     __table_args__ = (UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    bot_name = Column(String, nullable=False, index=True)
-    symbol = Column(String, nullable=True)
-    interval = Column(String, nullable=True)
-    period = Column(String, nullable=True)
-    metric = Column(String, nullable=False)  # "best_sharpe" or "best_yearly_return"
-    params = Column(MutableDict.as_mutable(JSON), default=lambda: {})
-    yearly_return = Column(Float, nullable=True, index=True)
-    sharpe_ratio = Column(Float, nullable=True, index=True)
-    nrtrades = Column(Integer, nullable=True)
-    maxdrawdown = Column(Float, nullable=True)
-    buy_hold_return = Column(Float, nullable=True)
-    sortino_ratio = Column(Float, nullable=True)
-    calmar_ratio = Column(Float, nullable=True)
-    win_rate = Column(Float, nullable=True)  # fraction 0.0–1.0
-    volatility = Column(Float, nullable=True)  # annualized
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    interval: Mapped[str | None] = mapped_column(String, nullable=True)
+    period: Mapped[str | None] = mapped_column(String, nullable=True)
+    metric: Mapped[str] = mapped_column(String, nullable=False)  # "best_sharpe" or "best_yearly_return"
+    params: Mapped[dict | None] = mapped_column(MutableDict.as_mutable(JSON), default=lambda: {})
+    yearly_return: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    sharpe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    nrtrades: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    maxdrawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    buy_hold_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sortino_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calmar_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)  # fraction 0.0–1.0
+    volatility: Mapped[float | None] = mapped_column(Float, nullable=True)  # annualized
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class KronosPrediction(Base):
@@ -341,18 +357,18 @@ class KronosPrediction(Base):
         Index("ix_kronos_predictions_symbol_target_date", "symbol", "target_date"),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String, nullable=False, index=True)
-    model_name = Column(String, nullable=False)
-    interval = Column(String, nullable=False)
-    prediction_made_at = Column(DateTime, nullable=False)
-    target_date = Column(DateTime, nullable=False)
-    predicted_open = Column(Float, nullable=False)
-    predicted_high = Column(Float, nullable=False)
-    predicted_low = Column(Float, nullable=False)
-    predicted_close = Column(Float, nullable=False)
-    predicted_volume = Column(Float, nullable=True)
-    horizon_days = Column(Integer, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    interval: Mapped[str] = mapped_column(String, nullable=False)
+    prediction_made_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    target_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    predicted_open: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_high: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_low: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_close: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class TelegramMessage(Base):
@@ -376,15 +392,15 @@ class TelegramMessage(Base):
         Index("ix_telegram_messages_channel_published_at", "channel", "published_at"),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    channel = Column(String, nullable=False, index=True)
-    message_id = Column(Integer, nullable=False)
-    text = Column(String, nullable=True)
-    summary = Column(String, nullable=True)
-    symbol = Column(String, nullable=True, index=True)
-    acted_on = Column(Boolean, nullable=False, default=False)
-    published_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    message_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str | None] = mapped_column(String, nullable=True)
+    summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    acted_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class LiveEquity(Base):
@@ -417,17 +433,17 @@ class LiveEquity(Base):
         Index("ix_live_equity_broker_date", "broker", "date"),
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    broker = Column(String, nullable=False, index=True)
-    account_id = Column(String, nullable=False)
-    date = Column(DateTime, nullable=False)
-    timestamp = Column(DateTime, nullable=False)
-    equity = Column(Float, nullable=False)
-    cash = Column(Float, nullable=True)
-    positions = Column(MutableDict.as_mutable(JSON), nullable=True)
-    bot_weights = Column(String, nullable=True)
-    is_testnet = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    broker: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String, nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    equity: Mapped[float] = mapped_column(Float, nullable=False)
+    cash: Mapped[float | None] = mapped_column(Float, nullable=True)
+    positions: Mapped[dict | None] = mapped_column(MutableDict.as_mutable(JSON), nullable=True)
+    bot_weights: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_testnet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 def _migrate_schema() -> None:

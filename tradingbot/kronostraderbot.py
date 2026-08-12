@@ -15,8 +15,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
-from utils.core import Bot, get_db_session
-from utils.db import KronosPrediction
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.db import KronosPrediction, get_db_session
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +118,5 @@ class KronosTraderBot(Bot):
         return 0  # hold
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = KronosTraderBot()
-    bot.run()
+    run_bot(KronosTraderBot)

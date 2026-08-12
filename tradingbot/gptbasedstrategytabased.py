@@ -1,6 +1,8 @@
 from typing import ClassVar
 
-from utils.core import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.indicators import safe_get
+from tradingbot.utils.runner import run_bot
 
 
 class gptbasedstrategytabased(Bot):
@@ -57,30 +59,19 @@ class gptbasedstrategytabased(Bot):
         """
         Improved Decision function using trend-following with a volatility-aware exit.
         """
-        import pandas as pd
-
-        def safe_get(indicator, default=0.0):
-            value = row.get(indicator, default)
-            if pd.isna(value):
-                return default
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return default
-
-        close = safe_get("close", 0.0)
+        close = safe_get(row, "close", 0.0)
         if close <= 0:
             return 0
 
         # 1. Trend Indicators
-        sma_50 = safe_get("trend_sma_fast")  # 50-day proxy
-        sma_200 = safe_get("trend_sma_slow")  # 200-day proxy
-        adx = safe_get("trend_adx")
+        sma_50 = safe_get(row, "trend_sma_fast")  # 50-day proxy
+        sma_200 = safe_get(row, "trend_sma_slow")  # 200-day proxy
+        adx = safe_get(row, "trend_adx")
 
         # 2. Momentum & Volatility
-        rsi = safe_get("momentum_rsi", 50.0)
-        macd_diff = safe_get("trend_macd_diff", 0.0)
-        bbp = safe_get("volatility_bbp", 0.5)
+        rsi = safe_get(row, "momentum_rsi", 50.0)
+        macd_diff = safe_get(row, "trend_macd_diff", 0.0)
+        bbp = safe_get(row, "volatility_bbp", 0.5)
 
         # Check validity
         if sma_50 <= 0 or sma_200 <= 0:
@@ -119,22 +110,6 @@ class gptbasedstrategytabased(Bot):
 
 
 if __name__ == "__main__":
-    bot = gptbasedstrategytabased()
-    bot.run()
-    # Start with a backtest of the new logic
-    # bot.local_backtest()
-    # bot.local_development()
-#  GptBasedStrategyBTCTabased ---
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Yearly Return: 24.20%
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Buy & Hold Return: -16.84%
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Outperformance vs B&H: +41.05%
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Sharpe Ratio: 0.68
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Number of Trades: 3
-# 2026-03-23 16:08:44 - utils.botclass - INFO - Max Drawdown: 14.66%
-# adx_threshold: 25
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   rsi_buy: 65
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   rsi_sell: 25
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   bbp_buy_low: 0.2
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   bbp_buy_high: 0.7
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   mfi_buy: 75
-# 2026-03-23 16:08:17 - utils.botclass - INFO -   mfi_sell: 15
+    run_bot(gptbasedstrategytabased)
+    # Start with a backtest of the new logic: bot.local_backtest()
+# Backtest transcript: see docs/backtests/gptbasedstrategytabased.md

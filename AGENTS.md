@@ -110,7 +110,7 @@ Data Available
 - utils.ta_regime — TA-based regime via ADX + trend filters
 - utils.sentiment — fear/greed or other sentiment adapters
 
-6. Tradeable Universe — utils.portfolio.TRADEABLE
+6. Tradeable Universe — tradingbot.utils.config.TRADEABLE
 
 - Pre-defined list of liquid ETFs/stocks suitable for the portfolio rebalancing bots
 
@@ -683,7 +683,7 @@ the cluster DB.
 **Always use the context manager**:
 
 ```python
-from utils.db import get_db_session
+from tradingbot.utils.db import get_db_session
 
 with get_db_session() as session:
     # Do database operations
@@ -749,7 +749,7 @@ finally:
 Create `tradingbot/{botname}bot.py`:
 
 ```python
-from utils.botclass import Bot
+from tradingbot.utils.botclass import Bot
 
 
 class MyNewBot(Bot):
@@ -902,7 +902,7 @@ tradingbot/utils/telegram_monitor.py   # Implementation: core logic, reusable fu
 ```python
 import os
 from telethon.sessions import StringSession
-from utils.telegram_monitor import monitor_channels
+from tradingbot.utils.telegram_monitor import monitor_channels
 
 
 def main():
@@ -935,7 +935,7 @@ def monitor_channels(api_id: int, api_hash: str, session_string, channels: list[
 
 **Examples in codebase**:
 
-- `calculate_portfolio_worth.py` (wrapper) → imports `utils.portfolio_worth_calculator` (impl)
+- `calculate_portfolio_worth.py` (wrapper) → imports `tradingbot.utils.portfolio_utils` (impl)
 - `aitools.py` (in utils) → provides `run_ai_simple()`, `run_ai_with_tools()` — reusable functions
 
 **When to apply this pattern**:

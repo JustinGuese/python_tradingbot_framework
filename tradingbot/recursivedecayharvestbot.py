@@ -12,7 +12,8 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 
-from utils.core import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,21 @@ class RecursiveDecayHarvestBot(Bot):
         self.interval = "1d"
         self.period = "2y"
 
-    def getYFDataWithTA(self, interval="1d", period="2y", saveToDB=True, **kwargs) -> pd.DataFrame:
-        tqqq_data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB, **kwargs)
+    def getYFDataWithTA(
+        self,
+        symbol: str | None = None,
+        interval: str = "1d",
+        period: str = "2y",
+        saveToDB: bool = True,
+        features: list[str] | None = None,
+    ) -> pd.DataFrame:
+        # Signature must mirror Bot.getYFDataWithTA exactly. It previously omitted
+        # `symbol` and `features`, relying on **kwargs to forward them. That worked
+        # for keyword calls but silently misbound positional ones —
+        # self.getYFDataWithTA("QQQ") assigned "QQQ" to `interval`.
+        tqqq_data = super().getYFDataWithTA(
+            symbol=symbol, interval=interval, period=period, saveToDB=saveToDB, features=features
+        )
         aux = self.getYFDataMultiple(symbols=["QQQ", "UVXY"], interval=interval, period=period, saveToDB=saveToDB)
 
         if aux.empty:
@@ -129,10 +143,5 @@ class RecursiveDecayHarvestBot(Bot):
         return 0
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = RecursiveDecayHarvestBot()
-    # bot.local_development()
-    bot.run()
+    run_bot(RecursiveDecayHarvestBot)

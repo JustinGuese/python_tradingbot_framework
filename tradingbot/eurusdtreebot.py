@@ -1,6 +1,8 @@
 from typing import ClassVar
 
-from utils.core import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.indicators import safe_get
+from tradingbot.utils.runner import run_bot
 
 
 class EURUSDTreeBot(Bot):
@@ -53,35 +55,23 @@ class EURUSDTreeBot(Bot):
              0: Hold (no action)
              1: Buy signal
         """
-        import pandas as pd
-
-        # Helper function to safely get indicator value with NaN handling
-        def safe_get(indicator, default=0.0):
-            value = row.get(indicator, default)
-            if pd.isna(value):
-                return default
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return default
-
-        close = safe_get("close")
+        close = safe_get(row, "close")
         if close <= 0:
             return 0
 
         # 1. Trend Filter: Price vs SMA (Relative)
-        sma = safe_get("trend_sma_slow")
+        sma = safe_get(row, "trend_sma_slow")
 
         # 2. Momentum: RSI (0-100)
-        rsi = safe_get("momentum_rsi", 50.0)
+        rsi = safe_get(row, "momentum_rsi", 50.0)
 
         # 3. Trend Confirmation: MACD Difference (Histogram)
         # trend_macd_diff is (macd - macd_signal)
-        macd_diff = safe_get("trend_macd_diff")
+        macd_diff = safe_get(row, "trend_macd_diff")
 
         # 4. Volatility: Bollinger Band %B (Normalized position)
-        bbh = safe_get("volatility_bbh")
-        bbl = safe_get("volatility_bbl")
+        bbh = safe_get(row, "volatility_bbh")
+        bbl = safe_get(row, "volatility_bbl")
         bb_width = bbh - bbl
         b_percent = (close - bbl) / bb_width if bb_width > 0 else 0.5
 
@@ -110,15 +100,7 @@ class EURUSDTreeBot(Bot):
                 return 0
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = EURUSDTreeBot()
-
-    bot.run()
-    # For local development, run optimization + backtest
-    # bot.local_development()
-
-    # Live execution:
-    # bot.local_backtest()
+    run_bot(EURUSDTreeBot)
+    # For local development, run optimization + backtest: bot.local_development()
+    # Live execution: bot.local_backtest()

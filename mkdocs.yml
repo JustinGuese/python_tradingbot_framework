@@ -37,7 +37,13 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [tradingbot]
+          # Repo root, not `tradingbot/`. Every `:::` target is fully qualified
+          # (`tradingbot.utils.X`), so the search path must be the directory that
+          # *contains* the package. Pointing this at `tradingbot/` put the old flat
+          # root back on sys.path — reintroducing the dual-module-identity bug in
+          # the docs build — and resolved only because the CI workflow also set
+          # PYTHONPATH to the workspace root. A local `mkdocs build` failed outright.
+          paths: ["."]
           options:
             docstring_style: google
             show_source: true

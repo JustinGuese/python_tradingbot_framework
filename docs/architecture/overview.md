@@ -27,8 +27,10 @@ The Trading Bot System consists of several key components:
 - **Backtesting**: Simulate strategies on historical data
 - **Hyperparameter Tuning**: Optimize bot parameters
 - **Helpers**: Timezone handling and data validation
-- **Utils Subpackages**: Domain-focused utilities grouped under `utils.core`, `utils.data`,
-  `utils.portfolio`, and `utils.ai` (see `utils-layout.md` for details)
+- **Utils Modules**: `tradingbot.utils` is a flat set of focused modules — e.g. `botclass` (Bot
+  base class), `data_service`, `portfolio_manager`, `db`, `backtest`, `hyperparameter_tuning`,
+  `config` (constants + TRADEABLE universe), `regime`, `portfolio_utils`, `aitools`,
+  `kronos_client`, `telegram_monitor`
 
 ## Data Flow
 

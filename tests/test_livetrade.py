@@ -13,6 +13,10 @@ class TestLiveTrade(unittest.TestCase):
         self.bot_repo = MagicMock()
         self.data_service = MagicMock()
         self.broker.get_latest_price.return_value = 150.0
+        # Ample cash, so _execute_orders' buy-clamp (copier.py:225-247) is a no-op
+        # and tests asserting order sequencing aren't perturbed by scaling. Without
+        # a value here spec-mock returns a MagicMock and the `> 0` compare raises.
+        self.broker.get_cash.return_value = 100_000.0
 
         self.bot_weights = {"bot1": 1.0}
         self.copier = LiveTradeCopier(broker=self.broker, bot_weights=self.bot_weights, dry_run=True)
@@ -52,6 +56,28 @@ class TestLiveTrade(unittest.TestCase):
         self.assertEqual(orders[0]["symbol"], "AAPL")
         self.assertEqual(orders[0]["side"], "BUY")
         self.assertAlmostEqual(orders[0]["quantity"], 5.0)
+
+    def test_sync_aborts_when_positions_cannot_be_read(self):
+        """
+        A failed positions read must abort, not be treated as a flat account.
+
+        sync() is a full target-state reconciliation, so falling through with
+        no positions makes every target weight look like a fresh buy — doubling
+        exposure on top of holdings the broker still has.
+        """
+        mock_bot = MagicMock(spec=Bot)
+        mock_bot.portfolio = {"USD": 1000, "AAPL": 10}
+        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.data_service.get_latest_prices_batch.return_value = {"AAPL": 150.0}
+        self.broker.map_symbol.return_value = {"symbol": "AAPL", "type": "stock"}
+        self.broker.get_total_equity.return_value = 10_000.0
+        self.broker.get_positions.side_effect = RuntimeError("broker 503")
+
+        with self.assertLogs("tradingbot.livetrade.copier", level="ERROR") as cm:
+            self.copier.sync()
+
+        self.assertTrue(any("could not read positions" in line for line in cm.output))
+        self.broker.place_order.assert_not_called()
 
     def test_strict_mapping(self):
         self.copier.strict_mapping = True

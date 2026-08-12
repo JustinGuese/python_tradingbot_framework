@@ -5,71 +5,8 @@
 {{- if and .Values.liveTrade.collective2.enabled (eq (toString .Values.liveTrade.collective2XauZerifine.systemId) (toString .Values.liveTrade.collective2.systemId)) }}
 {{- fail "liveTrade.collective2XauZerifine.systemId equals liveTrade.collective2.systemId while BOTH are enabled — two copiers on one strategy would liquidate each other's positions every run. Disable liveTrade.collective2.enabled to hand the strategy over, or give this instance its own StrategyId." }}
 {{- end }}
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: livetrade-collective2-xauzerifine
-  namespace: {{ $.Values.namespace }}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    meta.helm.sh/release-name: {{ $.Release.Name }}
-    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
-spec:
-  schedule: {{ $.Values.liveTrade.collective2XauZerifine.schedule | quote }}
-  successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
-  failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
-  concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}
-  jobTemplate:
-    spec:
-      activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
-      ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
-      template:
-        spec:
-          imagePullSecrets:
-          {{- range $.Values.imagePullSecrets }}
-          - name: {{ .name }}
-          {{- end }}
-          containers:
-          - name: livetrade-collective2-xauzerifine
-            image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
-            command:
-            - "python"
-            args:
-            - "livetrade_collective2.py"
-            imagePullPolicy: {{ $.Values.image.pullPolicy }}
-            resources:
-              {{- toYaml $.Values.resources | nindent 14 }}
-            env:
-            {{- if $.Values.postgresql.clusterConnection }}
-            - name: POSTGRES_HOST
-              value: {{ $.Values.postgresql.clusterConnection.host | quote }}
-            - name: POSTGRES_PORT
-              value: {{ $.Values.postgresql.clusterConnection.port | quote }}
-            - name: POSTGRES_USER
-              value: {{ $.Values.postgresql.clusterConnection.user | quote }}
-            - name: POSTGRES_DATABASE
-              value: {{ $.Values.postgresql.clusterConnection.database | quote }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Values.secretName }}
-                  key: POSTGRES_PASSWORD
-            {{- end }}
-            {{- range $.Values.env }}
-            {{- if and $.Values.postgresql.clusterConnection (or (eq .name "POSTGRES_URI") (eq .name "POSTGRES_PASSWORD")) }}
-            {{- else }}
-            - name: {{ .name }}
-            {{- if .value }}
-              value: {{ .value | quote }}
-            {{- else if .valueFrom }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $.Values.secretName }}
-                  key: {{ .valueFrom.secretKeyRef.key }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-collective2-xauzerifine" "schedule" .Values.liveTrade.collective2XauZerifine.schedule "module" "tradingbot.livetrade_collective2") }}
+{{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
             # Collective2 credentials (from secret)
             - name: COLLECTIVE2_API_KEY
               valueFrom:
@@ -78,16 +15,6 @@ spec:
                   key: {{ default "COLLECTIVE2_API_KEY" $.Values.liveTrade.collective2XauZerifine.apiKeySecretKey }}
             - name: COLLECTIVE2_SYSTEM_ID
               value: {{ $.Values.liveTrade.collective2XauZerifine.systemId | quote }}
-            # LiveTrade configuration (from values.yaml)
-            - name: LIVETRADE_BOT_WEIGHTS
-              value: {{ default $.Values.liveTrade.botWeights $.Values.liveTrade.collective2XauZerifine.botWeights | quote }}
-            - name: LIVETRADE_MIN_ORDER_USD
-              value: {{ $.Values.liveTrade.minOrderUsd | quote }}
-            - name: LIVETRADE_DRY_RUN
-              value: {{ default $.Values.liveTrade.dryRun $.Values.liveTrade.collective2XauZerifine.dryRun | quote }}
-            - name: LIVETRADE_PORTFOLIO_FRACTION
-              value: {{ default $.Values.liveTrade.portfolioFraction $.Values.liveTrade.collective2XauZerifine.portfolioFraction | quote }}
-            - name: LIVETRADE_STRICT_MAPPING
-              value: {{ $.Values.liveTrade.strictMapping | quote }}
+{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" .Values.liveTrade.collective2XauZerifine) }}
           restartPolicy: OnFailure
 {{- end }}

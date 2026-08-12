@@ -1,6 +1,6 @@
 """Repository for bot database operations."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -170,7 +170,9 @@ class BotRepository:
                 isBuy=is_buy,
                 quantity=float(quantity),
                 price=float(price),
-                timestamp=datetime.utcnow(),
+                # Persisted as naive UTC (Trade.timestamp column convention); utcnow()
+                # is deprecated in 3.12, so build the same naive value via now(UTC).
+                timestamp=datetime.now(UTC).replace(tzinfo=None),
                 profit=float(profit) if profit is not None else None,
             )
             sess.add(trade)

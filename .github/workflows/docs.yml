@@ -36,9 +36,13 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      # No PYTHONPATH here on purpose. mkdocs.yml's mkdocstrings `paths: ["."]`
+      # (resolved relative to the config file, so it is the repo root regardless
+      # of cwd) is the single source of truth for the import root. This step used
+      # to set PYTHONPATH to the workspace, which was the only reason the build
+      # worked while `paths` pointed at the wrong directory — masking a config
+      # error that made `mkdocs build` fail for anyone running it locally.
       - name: Build documentation
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run mkdocs build
 

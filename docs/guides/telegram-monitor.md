@@ -248,7 +248,7 @@ export TELEGRAM_CHANNELS=channel1,channel2
 export OPENROUTER_API_KEY=your_key
 export POSTGRES_URI=user:password@localhost:5432/postgres
 
-python tradingbot/telegram_monitor.py
+python -m tradingbot.telegram_monitor
 ```
 
 ### Debug Mode

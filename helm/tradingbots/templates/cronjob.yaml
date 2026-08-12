@@ -48,9 +48,12 @@ spec:
             image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
             command:
             - "python"
-            # Script filename is auto-generated from bot name: {name}.py
+            # Invoked as a module, not a script path: the image ships tradingbot/
+            # as a real package (see Dockerfile), so `python <name>.py` no longer
+            # resolves. Module name is auto-generated from bot name.
             args:
-            - {{ printf "%s.py" .name | quote }}
+            - "-m"
+            - {{ printf "tradingbot.%s" .name | quote }}
             imagePullPolicy: {{ $.Values.image.pullPolicy }}
             # CPU and memory limits from values.yaml
             resources:

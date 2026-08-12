@@ -5,8 +5,10 @@ import logging
 
 from langchain_core.tools import tool
 
-from utils.core import Bot
-from utils.portfolio import TRADEABLE
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.config import TRADEABLE
+from tradingbot.utils.runner import run_bot
+from tradingbot.utils.weights import WEIGHT_SUM_TOLERANCE, is_normalized, normalize_weights
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +62,11 @@ class DeepSeekToolBot(Bot):
                 weights = json.loads(weights_json)
                 if not isinstance(weights, dict):
                     return "Error: weights_json must be a JSON object {symbol: weight}"
-                total = sum(weights.values())
-                if abs(total - 1.0) > 0.01:
-                    return f"Error: weights must sum to 1.0, got {total:.4f}"
+                # Rejected rather than normalized: this is the model's own output,
+                # and telling it the weights are wrong is what gets it to fix them.
+                # Silently rescaling would hide a reasoning error from the model.
+                if not is_normalized(weights, tolerance=WEIGHT_SUM_TOLERANCE):
+                    return f"Error: weights must sum to 1.0, got {sum(weights.values()):.4f}"
                 self._submitted_weights = weights
                 return "Weights submitted successfully. You may now stop."
             except json.JSONDecodeError as e:
@@ -136,10 +140,7 @@ class DeepSeekToolBot(Bot):
 
         logger.info(f"Submitted weights: {weights}")
 
-        # Normalize if needed
-        total = sum(w for w in weights.values() if w > 0)
-        if total > 0 and abs(total - 1.0) > 0.001:
-            weights = {k: v / total for k, v in weights.items()}
+        weights = normalize_weights(weights)
 
         self.rebalancePortfolio(weights, onlyOver50USD=True)
         logger.info("Rebalancing completed")
@@ -147,5 +148,4 @@ class DeepSeekToolBot(Bot):
 
 
 if __name__ == "__main__":
-    bot = DeepSeekToolBot()
-    bot.run()
+    run_bot(DeepSeekToolBot)

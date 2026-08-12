@@ -255,7 +255,7 @@ The evolution of momentum strategies in 2026 has moved toward "Cross-Asset Momen
 
 ## **Industry Momentum and Individual Stock Overlap**
 
-Research into the Canadian and US equity markets indicates that industry momentum investment strategies—which buy stocks from past winning industries and sell stocks from past losing industries—frequently outperform individual stock momentum strategies.37 The Pattern B logic addresses this by using the utils.portfolio.TRADEABLE universe to select sector-specific ETFs (XLK for Technology, XLV for Healthcare, XLB for Materials) rather than individual tickers.5 This approach reduces idiosyncratic risk while capturing the persistent return patterns of sector rotation.4
+Research into the Canadian and US equity markets indicates that industry momentum investment strategies—which buy stocks from past winning industries and sell stocks from past losing industries—frequently outperform individual stock momentum strategies.37 The Pattern B logic addresses this by using the tradingbot.utils.config.TRADEABLE universe to select sector-specific ETFs (XLK for Technology, XLV for Healthcare, XLB for Materials) rather than individual tickers.5 This approach reduces idiosyncratic risk while capturing the persistent return patterns of sector rotation.4
 
 The RS-Ratio and RS-Momentum are calculated for these sectors compared to the S\&P 500\. A "Leader-to-Leader" rotation—where capital moves from a weakening leader (e.g., Tech rotating out) to a new leading sector (e.g., Energy rotating in)—is executed seamlessly via the rebalancePortfolio method.18
 

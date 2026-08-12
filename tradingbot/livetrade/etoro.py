@@ -5,9 +5,9 @@ from typing import Literal
 
 import httpx
 
-from livetrade.broker import LiveBroker
-from livetrade.symbol_map import SymbolMapper
-from utils.data_service import DataService
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.livetrade.symbol_map import SymbolMapper
+from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,8 @@ class EtoroBroker(LiveBroker):
         api_key: str,
         user_key: str,
         demo: bool = True,
-        symbol_mapper: SymbolMapper = None,
-        data_service: DataService = None,
+        symbol_mapper: SymbolMapper | None = None,
+        data_service: DataService | None = None,
     ):
         self.name = "etoro"
         self.api_key = api_key
@@ -44,7 +44,16 @@ class EtoroBroker(LiveBroker):
 
         # Caches
         self._instrument_cache: dict[str, str] = {}  # ticker -> instrument_id
-        self._position_id_map: dict[str, str] = {}  # instrument_id -> positionId (last seen)
+        # instrument_id -> [(positionId, units), ...]. eToro closes whole lots,
+        # so a sized SELL needs every lot, not just the most recent one.
+        self._position_lots: dict[str, list[tuple[str, float]]] = {}
+
+    # account_ref stays "" — the eToro API exposes no account identifier on any
+    # endpoint this adapter calls. live_equity rows remain unique because they
+    # key on (broker, account_ref, date) and the broker name is "etoro".
+    @property
+    def is_sandbox(self) -> bool:
+        return self.demo
 
     def _get_headers(self) -> dict:
         """Generate unique request headers for eToro API."""
@@ -111,25 +120,35 @@ class EtoroBroker(LiveBroker):
     def get_positions(self) -> dict[str, float]:
         """
         Return current open positions as a dict: instrument_id -> quantity.
-        Also updates the internal position_id_map for closing orders.
+
+        Also refreshes the per-instrument lot table used by SELL orders. eToro
+        holds one position row per lot and can only close a whole lot at a
+        time, so a sized SELL needs every (positionId, units) pair, not just
+        the last one seen.
+
+        Raises:
+            Exception: propagated from the transport. Deliberately NOT
+                swallowed into an empty dict: sync() does full target-state
+                reconciliation, so "the positions call failed" and "the
+                account is flat" would otherwise be indistinguishable, and the
+                copier would re-buy the entire book on top of real holdings.
         """
-        try:
-            p = self._portfolio()
-            positions: dict[str, float] = {}
-            self._position_id_map = {}
+        p = self._portfolio()
+        positions: dict[str, float] = {}
+        lots: dict[str, list[tuple[str, float]]] = {}
 
-            for pos in p.get("positions", []) or []:
-                instr_id = str(pos.get("instrumentID") or pos.get("instrumentId") or "")
-                if not instr_id:
-                    continue
-                units = float(pos.get("units") or 0.0)
-                positions[instr_id] = positions.get(instr_id, 0.0) + units
-                self._position_id_map[instr_id] = str(pos.get("positionID") or pos.get("positionId") or "")
+        for pos in p.get("positions", []) or []:
+            instr_id = str(pos.get("instrumentID") or pos.get("instrumentId") or "")
+            if not instr_id:
+                continue
+            units = float(pos.get("units") or 0.0)
+            pos_id = str(pos.get("positionID") or pos.get("positionId") or "")
+            positions[instr_id] = positions.get(instr_id, 0.0) + units
+            if pos_id:
+                lots.setdefault(instr_id, []).append((pos_id, units))
 
-            return positions
-        except Exception as e:
-            logger.error(f"Failed to get eToro positions: {e}")
-            return {}
+        self._position_lots = lots
+        return positions
 
     def _get_native_price(self, broker_symbol: str) -> float:
         """Fetch the latest traded price for an instrument ID via market rates."""
@@ -178,25 +197,64 @@ class EtoroBroker(LiveBroker):
                 logger.error(f"eToro BUY order failed: {e}")
 
         else:
-            # SELL -> Close existing position
-            # We need the positionId from the last get_positions() call
-            pos_id = self._position_id_map.get(broker_symbol)
-            if not pos_id:
-                # One retry: refresh positions
-                logger.info(f"Position ID for {broker_symbol} not found, refreshing positions...")
+            # SELL -> close whole lots until `quantity` units are covered.
+            #
+            # eToro has no partial-close endpoint: the only close operation is
+            # POST market-close-orders/positions/{positionId}, which closes that
+            # lot entirely. The previous implementation closed the single
+            # last-seen lot for ANY sell size, so a rebalance asking to trim 20%
+            # exited the whole lot and the next sync bought it back.
+            #
+            # Lots are closed largest-first while they still fit in the
+            # remaining request, so we under-sell rather than overshoot. A trim
+            # that cannot be expressed exactly leaves slightly more exposure
+            # than target; the next reconciliation trims again. Overshooting
+            # would sell inventory the strategy asked to keep.
+            lots = self._position_lots.get(broker_symbol)
+            if not lots:
+                logger.info(f"No known lots for {broker_symbol}, refreshing positions...")
                 self.get_positions()
-                pos_id = self._position_id_map.get(broker_symbol)
+                lots = self._position_lots.get(broker_symbol)
 
-            if not pos_id:
-                logger.error(f"Cannot place SELL order for {broker_symbol}: no positionId found.")
+            if not lots:
+                logger.error(f"Cannot place SELL order for {broker_symbol}: no open position found.")
                 return
 
-            logger.info(f"Submitting eToro SELL (close) order for position {pos_id} (ID: {broker_symbol})")
-            endpoint = f"api/v1/trading/execution/{self._env}market-close-orders/positions/{pos_id}"
-            try:
-                self._post(endpoint, {"InstrumentId": int(broker_symbol)})
-            except Exception as e:
-                logger.error(f"eToro SELL order failed: {e}")
+            held = sum(units for _, units in lots)
+            if quantity <= 0:
+                logger.warning(f"Ignoring eToro SELL for {broker_symbol}: quantity {quantity} is not positive")
+                return
+
+            # Treat "sell essentially everything" as a full exit, so float dust
+            # in the requested quantity cannot strand a lot open.
+            if quantity >= held * 0.999:
+                to_close = list(lots)
+            else:
+                to_close = []
+                remaining = quantity
+                for pos_id, units in sorted(lots, key=lambda lot: lot[1], reverse=True):
+                    if units <= remaining:
+                        to_close.append((pos_id, units))
+                        remaining -= units
+
+            if not to_close:
+                logger.warning(
+                    f"eToro SELL for {broker_symbol}: requested {quantity} units but the smallest open lot "
+                    f"is larger, so no lot can be closed without overshooting. Leaving the position untouched."
+                )
+                return
+
+            closing = sum(units for _, units in to_close)
+            logger.info(
+                f"Submitting eToro SELL for {broker_symbol}: closing {len(to_close)} of {len(lots)} lot(s), "
+                f"{closing} of {held} units (requested {quantity})"
+            )
+            for pos_id, units in to_close:
+                endpoint = f"api/v1/trading/execution/{self._env}market-close-orders/positions/{pos_id}"
+                try:
+                    self._post(endpoint, {"InstrumentId": int(broker_symbol)})
+                except Exception as e:
+                    logger.error(f"eToro SELL order failed for position {pos_id} ({units} units): {e}")
 
     def map_symbol(self, yf_symbol: str) -> dict | None:
         """
@@ -252,28 +310,25 @@ class EtoroBroker(LiveBroker):
             "source": "etoro_search",
         }
 
-    def print_account_summary(self) -> None:
-        portfolio = self._portfolio()
-        cash = float(portfolio.get("credit", 0.0) or 0.0)
-        equity = self.get_total_equity()
-        positions = portfolio.get("positions", []) or []
-        env_label = "DEMO" if self.demo else "LIVE"
-        print(f"\neToro Account ({env_label})")
-        print(f"  Cash:             {cash:>15,.2f}")
-        print(f"  Equity:           {equity:>15,.2f}")
-        print(f"\nPositions ({len(positions)}):")
-        if not positions:
-            print("  (none)")
-            return
-        print(f"  {'InstrumentID':<14} {'Units':>12} {'OpenRate':>12} {'Amount':>12} {'PositionID':<14}")
-        for p in positions:
-            print(
-                f"  {p.get('instrumentID', '')!s:<14} "
-                f"{float(p.get('units', 0) or 0):>12.4f} "
-                f"{float(p.get('openRate', 0) or 0):>12.4f} "
-                f"{float(p.get('amount', 0) or 0):>12.2f} "
-                f"{p.get('positionID', '')!s:<14}"
-            )
+    # print_account_summary() itself lives on LiveBroker; only the identity
+    # line and the positions table (eToro exposes lot/position ids that
+    # get_positions()'s plain symbol->qty dict discards) differ here.
+    def _summary_header(self) -> str:
+        env = "DEMO" if self.demo else "LIVE"
+        return f"eToro Account ({env})"
+
+    def _position_rows(self) -> tuple[str, list[str]]:
+        positions = self._portfolio().get("positions", []) or []
+        header = f"  {'InstrumentID':<14} {'Units':>12} {'OpenRate':>12} {'Amount':>12} {'PositionID':<14}"
+        rows = [
+            f"  {p.get('instrumentID', '')!s:<14} "
+            f"{float(p.get('units', 0) or 0):>12.4f} "
+            f"{float(p.get('openRate', 0) or 0):>12.4f} "
+            f"{float(p.get('amount', 0) or 0):>12.2f} "
+            f"{p.get('positionID', '')!s:<14}"
+            for p in positions
+        ]
+        return header, rows
 
     def search_symbol(self, query: str) -> list[dict]:
         """Search for matching symbols on eToro."""

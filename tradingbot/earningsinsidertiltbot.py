@@ -1,10 +1,12 @@
 """
 Earnings + insider tilt bot: equal-weight base, tilt by earnings/insider scores, rebalance.
-All scoring and tilting logic lives in `utils.portfolio`; this bot only orchestrates.
+All scoring and tilting logic lives in `utils.earnings_insider`; this bot only orchestrates.
 """
 
-from utils.core import Bot
-from utils.portfolio import TRADEABLE, earnings_insider_compute_weights
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.config import TRADEABLE
+from tradingbot.utils.earnings_insider import earnings_insider_compute_weights
+from tradingbot.utils.runner import run_bot
 
 
 class EarningsInsiderTiltBot(Bot):
@@ -30,5 +32,4 @@ class EarningsInsiderTiltBot(Bot):
 
 
 if __name__ == "__main__":
-    bot = EarningsInsiderTiltBot()
-    bot.run()
+    run_bot(EarningsInsiderTiltBot)

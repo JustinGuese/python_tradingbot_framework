@@ -26,7 +26,7 @@ Set environment variables:
 ### Basic prediction
 
 ```python
-from tradingbot.utils.core import KronosClient
+from tradingbot.utils.kronos_client import KronosClient
 
 client = KronosClient()
 pred_df = client.predict("SPY", horizon=5)
@@ -39,13 +39,13 @@ if pred_df is not None:
 ### In a bot context
 
 ```python
-from tradingbot.utils.core import Bot
+from tradingbot.utils.botclass import Bot
 
 
 class MyBot(Bot):
     def decisionFunction(self, row):
         # Get Kronos forecast for this bot's symbol
-        from tradingbot.utils.core import KronosClient
+        from tradingbot.utils.kronos_client import KronosClient
 
         client = KronosClient()
         forecast = client.predict(self.symbol, horizon=5)
@@ -65,7 +65,8 @@ class MyBot(Bot):
 Use the `kronos_forecast` LangChain tool in complex AI flows:
 
 ```python
-from tradingbot.utils.core import Bot, kronos_forecast
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.kronos_client import kronos_forecast
 
 
 class AIBot(Bot):

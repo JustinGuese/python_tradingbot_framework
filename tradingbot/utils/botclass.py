@@ -28,7 +28,7 @@ Example:
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import pandas as pd
 
@@ -65,8 +65,12 @@ class Bot:
     - makeOneIteration() -> int: Custom iteration logic
     """
 
-    # Optional class attribute: subclasses can define their hyperparameter search space
-    param_grid: dict[str, list[Any]] | None = None
+    # Optional class attribute: subclasses can define their hyperparameter search space.
+    # ClassVar because subclasses declare it as a class attribute, never per-instance.
+    # Without ClassVar here mypy reads this as an instance variable and rejects every
+    # subclass's `param_grid: ClassVar[dict] = {...}` with "cannot override instance
+    # variable with class variable" — 11 such errors across the bot layer.
+    param_grid: ClassVar[dict[str, list[Any]] | None] = None
 
     # If True, symbols held but absent from self.tickers are sold to cash on the
     # multi-ticker path. Default False because KronosTraderBot rebuilds its

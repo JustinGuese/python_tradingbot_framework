@@ -2,31 +2,40 @@
   // Use IntelliSense to learn about possible attributes.
   // Hover to view descriptions of existing attributes.
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  //
+  // Invocation note: these configs use "module" (i.e. `python -m tradingbot.X`)
+  // with cwd at the repo root, matching how the Helm CronJobs run in production.
+  // They previously used "program" with PYTHONPATH=${workspaceFolder}/tradingbot,
+  // which put the *inside* of the package on sys.path — the flat import root that
+  // no longer exists. Under a script run Python puts the script's own directory on
+  // sys.path (not the cwd), so nothing would have resolved `tradingbot.utils.*`.
   "version": "0.2.0",
   "configurations": [
     {
+      // The only config that must stay "program": ${file} is not a module path.
+      // PYTHONPATH is the repo root so `import tradingbot.…` resolves, because a
+      // script run adds the edited file's directory to sys.path, never the cwd.
       "name": "Python Debugger: Current File",
       "type": "debugpy",
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "PYTHONPATH": "${workspaceFolder}"
       }
     },
     {
       "name": "LiveTrade: Collective2 (LIVE)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade_collective2.py",
+      "module": "tradingbot.livetrade_collective2",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "LIVETRADE_DRY_RUN": "false",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "LIVETRADE_DRY_RUN": "false"
       }
     },
     {
@@ -35,110 +44,101 @@
       "name": "LiveTrade: Collective2 XAUZerifine (DRY RUN)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade_collective2.py",
+      "module": "tradingbot.livetrade_collective2",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "LIVETRADE_DRY_RUN": "true",
         "LIVETRADE_STRICT_MAPPING": "true",
-        "LIVETRADE_BOT_WEIGHTS": "{\"XAUZenbotTreeBot\": 1.0}",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "LIVETRADE_BOT_WEIGHTS": "{\"XAUZenbotTreeBot\": 1.0}"
       }
     },
     {
       "name": "LiveTrade: Interactive Brokers (paper)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade_interactive_brokers.py",
+      "module": "tradingbot.livetrade_interactive_brokers",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "LIVETRADE_DRY_RUN": "false",
         "IB_GATEWAY_PORT": "4004",
-        "IB_CLIENT_ID": "18",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "IB_CLIENT_ID": "18"
       }
     },
     {
       "name": "LiveTrade: eToro (paper)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade_etoro.py",
+      "module": "tradingbot.livetrade_etoro",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "LIVETRADE_DRY_RUN": "false",
-        "ETORO_DEMO": "true",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "ETORO_DEMO": "true"
       }
     },
     {
       "name": "LiveTrade: Darwinex (paper)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade_darwinex.py",
+      "module": "tradingbot.livetrade_darwinex",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "LIVETRADE_DRY_RUN": "false",
-        "DARWINEX_DEMO": "true",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "DARWINEX_DEMO": "true"
       }
     },
     {
       "name": "Print Portfolio: Darwinex",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade/darwinex.py",
+      "module": "tradingbot.livetrade.darwinex",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "DARWINEX_DEMO": "true",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "DARWINEX_DEMO": "true"
       }
     },
     {
       "name": "Print Portfolio: eToro",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade/etoro.py",
+      "module": "tradingbot.livetrade.etoro",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "ETORO_DEMO": "true",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "ETORO_DEMO": "true"
       }
     },
     {
       "name": "Print Portfolio: Collective2",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade/collective2.py",
+      "module": "tradingbot.livetrade.collective2",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
-      }
+      "env": {}
     },
     {
       "name": "Print Portfolio: Interactive Brokers",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tradingbot/livetrade/interactive_brokers.py",
+      "module": "tradingbot.livetrade.interactive_brokers",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/tradingbot/",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "IB_GATEWAY_PORT": "4004",
-        "IB_CLIENT_ID": "19",
-        "PYTHONPATH": "${workspaceFolder}/tradingbot"
+        "IB_CLIENT_ID": "19"
       }
     }
   ]

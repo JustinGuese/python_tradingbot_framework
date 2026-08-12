@@ -1,7 +1,7 @@
 """Telegram channel monitoring implementation: fetch, summarize, and store messages."""
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from telethon.sync import TelegramClient
 from telethon.tl.types import PeerChannel
@@ -100,7 +100,9 @@ def process_channel(client: TelegramClient, channel: str, fetch_limit: int) -> i
                 # Store as naive UTC (consistent with rest of project)
                 published_at = published_at.replace(tzinfo=None)
             if published_at is None:
-                published_at = datetime.utcnow()
+                # Persisted as naive UTC (consistent with rest of project); utcnow() is
+                # deprecated in 3.12, so build the same naive value via now(UTC).
+                published_at = datetime.now(UTC).replace(tzinfo=None)
 
             record = TelegramMessage(
                 channel=channel,

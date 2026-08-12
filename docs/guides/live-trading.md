@@ -23,7 +23,7 @@ You can verify the copier logic immediately without any complex setup.
     ```
 2.  **Run the Copier**:
     ```bash
-    uv run python tradingbot/livetrade_darwinex.py
+    uv run python -m tradingbot.livetrade_darwinex
     ```
 3.  **Review the Log**: Look for `[DRY RUN] Would BUY/SELL ...` lines to see what the copier would have done.
 
@@ -37,23 +37,21 @@ credentials and account IDs before running the copier:
 
 ```bash
 # Collective2 — reads COLLECTIVE2_API_KEY + COLLECTIVE2_SYSTEM_ID
-uv run python tradingbot/livetrade/collective2.py
+uv run python -m tradingbot.livetrade.collective2
 
 # Interactive Brokers — IBKR Web API via headless OAuth 1.0a.
 # Reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* credentials; prints an account summary.
-# Needs tradingbot/ on PYTHONPATH: the livetrade modules use the container-style
-# `from livetrade.X import ...` imports, so `-m tradingbot.livetrade...` fails.
-PYTHONPATH=tradingbot uv run python tradingbot/livetrade/interactive_brokers.py
+uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
-uv run python tradingbot/livetrade/etoro.py
+uv run python -m tradingbot.livetrade.etoro
 
 # Darwinex — reads DARWINEX_USERNAME + DARWINEX_PASSWORD + DARWINEX_DEMO
-uv run python tradingbot/livetrade/darwinex.py
+uv run python -m tradingbot.livetrade.darwinex
 
 # Hyperliquid — reads HYPERLIQUID_PRIVATE_KEY + _ACCOUNT_ADDRESS + _VAULT_ADDRESS
 # + _TESTNET. Also prints effective leverage, which must stay <= 1.0x.
-PYTHONPATH=tradingbot uv run python tradingbot/livetrade/hyperliquid.py
+uv run python -m tradingbot.livetrade.hyperliquid
 ```
 
 All brokers expose `print_account_summary()` on the broker class, so you can
@@ -307,7 +305,7 @@ Set these environment variables (see the reference table above for full descript
 
 ### 3. Usage
 ```bash
-uv run python tradingbot/livetrade_interactive_brokers.py
+uv run python -m tradingbot.livetrade_interactive_brokers
 ```
 
 ### 4. Ticker Discovery for IB
@@ -343,7 +341,7 @@ eToro uses numeric **Instrument IDs**. The framework automatically resolves thes
 
 ### 5. Usage
 ```bash
-uv run python tradingbot/livetrade_etoro.py
+uv run python -m tradingbot.livetrade_etoro
 ```
 
 ---
@@ -376,7 +374,7 @@ DXtrade REST API does not provide a simple "last price" endpoint (it is WebSocke
 
 ### 5. Usage
 ```bash
-uv run python tradingbot/livetrade_darwinex.py
+uv run python -m tradingbot.livetrade_darwinex
 ```
 
 ---
@@ -484,7 +482,7 @@ generator reads this table via `generator/vault.py`.
 
 ### 7. Usage
 ```bash
-uv run python tradingbot/livetrade_hyperliquid.py
+uv run python -m tradingbot.livetrade_hyperliquid
 ```
 
 ---
@@ -554,7 +552,7 @@ spec:
           containers:
           - name: copier
             image: your-repo/tradingbot:latest
-            command: ["python", "tradingbot/livetrade_collective2.py"]
+            command: ["python", "-m", "tradingbot.livetrade_collective2"]
             envFrom:
             - secretRef:
                 name: tradingbot-secrets

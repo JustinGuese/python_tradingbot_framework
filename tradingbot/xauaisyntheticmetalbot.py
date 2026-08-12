@@ -1,6 +1,7 @@
 from typing import ClassVar
 
-from utils.core import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.runner import run_bot
 
 
 class XAUSyntheticMetalTreeBot(Bot):
@@ -71,31 +72,6 @@ class XAUSyntheticMetalTreeBot(Bot):
             return -1
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = XAUSyntheticMetalTreeBot()
-
-    # bot.local_development()
-    bot.run()
-    #  12:26:01 - utils.botclass - INFO - Backtesting with best parameters...
-    # 2026-03-26 12:26:01 - utils.botclass - INFO - ============================================================
-    # 2026-03-26 12:26:01 - utils.botclass - INFO -   dch_threshold: 350
-    # 2026-03-26 12:26:01 - utils.botclass - INFO -   dcl_threshold: 310
-    # 2026-03-26 12:26:01 - utils.botclass - INFO -   atr_threshold: 0.12
-    # 2026-03-26 12:26:01 - utils.botclass - INFO -   ichimoku_base_threshold: 310
-    # 2026-03-26 12:26:01 - utils.botclass - INFO -   kch_threshold: 315
-    # [*********************100%***********************]  1 of 1 completed
-    # 2026-03-26 12:26:35 - utils.data_service - INFO - Adding only missing DataFrame rows to DB
-    # 2026-03-26 12:26:36 - utils.data_service - INFO - Rows to insert: 0
-    # 2026-03-26 12:26:50 - utils.backtest - INFO - QuantStats report → gs://tradingbotrunresults/XAUSyntheticMetalTreeBot/sharpewinner/report.html
-    # 2026-03-26 12:26:58 - utils.backtest - INFO - QuantStats report → gs://tradingbotrunresults/XAUSyntheticMetalTreeBot/yearlyreturnwinner/report.html
-    # 2026-03-26 12:26:58 - utils.botclass - INFO -
-    # --- Backtest Results: XAUSyntheticMetalTreeBot ---
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Yearly Return: 7.21%
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Buy & Hold Return: -9.73%
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Outperformance vs B&H: +16.94%
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Sharpe Ratio: 7.58
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Number of Trades: 2
-    # 2026-03-26 12:26:58 - utils.botclass - INFO - Max Drawdown: 5.24%
+    run_bot(XAUSyntheticMetalTreeBot)
+# Backtest transcript: see docs/backtests/xauaisyntheticmetalbot.md

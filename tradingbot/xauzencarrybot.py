@@ -35,9 +35,10 @@ Schedule: 35 21 * * 1-5 — after the daily bots, before the 21:50 C2 copier.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-from utils.core import Bot, BotRepository
+from tradingbot.utils.botclass import Bot, BotRepository
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,10 @@ class XAUZenCarryBot(Bot):
         if last_run is None:
             raise RuntimeError(f"Parent bot {bot_name} has never completed a run.")
 
-        age = datetime.utcnow() - last_run
+        # last_run is naive UTC (BotRepository.last_successful_run's documented return
+        # type), so this must stay naive too, or the subtraction raises TypeError.
+        # utcnow() is deprecated in 3.12; now(UTC).replace(tzinfo=None) is the same value.
+        age = datetime.now(UTC).replace(tzinfo=None) - last_run
         if age > max_age:
             raise RuntimeError(
                 f"Parent bot {bot_name} is stale: last successful run {last_run} "
@@ -209,5 +213,4 @@ class XAUZenCarryBot(Bot):
 # connection. The Helm CronJob invokes `python xauzencarrybot.py`, so
 # __name__ == "__main__" and behaviour is unchanged.
 if __name__ == "__main__":
-    bot = XAUZenCarryBot()
-    bot.run()
+    run_bot(XAUZenCarryBot)

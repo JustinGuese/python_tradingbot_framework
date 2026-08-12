@@ -5,8 +5,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from utils.core import Bot
-from utils.db import _database_url
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.db import _database_url
+from tradingbot.utils.runner import run_bot
+from tradingbot.utils.weights import is_normalized, normalize_weights, positive_weight_sum
 
 logger = logging.getLogger(__name__)
 
@@ -190,15 +192,12 @@ class AIHedgeFundBot(Bot):
                 return 0
 
             # Verify weights sum to 1.0 (only buy symbols should have positive weight)
-            total_weight = sum(w for w in weights.values() if w > 0)
-            if abs(total_weight - 1.0) > 0.001:
-                logger.warning(f"Buy symbol weights sum to {total_weight:.4f}, expected 1.0")
-                # Normalize if needed
-                if total_weight > 0:
-                    weights = {k: (v / total_weight if v > 0 else 0.0) for k, v in weights.items()}
-                else:
-                    logger.error("No positive weights to normalize")
-                    return 0
+            if not is_normalized(weights):
+                logger.warning(f"Buy symbol weights sum to {positive_weight_sum(weights):.4f}, expected 1.0")
+            weights = normalize_weights(weights)
+            if not weights:
+                logger.error("No positive weights to normalize")
+                return 0
 
             logger.info("Rebalancing portfolio based on AI hedge fund decisions...")
             logger.info(f"Buy symbols: {[s for s, w in weights.items() if w > 0]}")
@@ -221,11 +220,6 @@ class AIHedgeFundBot(Bot):
             raise
 
 
-# Guarded: without this, importing this module executes bot.run() and trades a
-# live paper portfolio as a side effect of the import. The Helm CronJob invokes
-# `python <name>.py`, so __name__ == "__main__" and production is unchanged.
 if __name__ == "__main__":
-    bot = AIHedgeFundBot()
-
-    # # doesnt make sense for this one , bot.local_development()
-    bot.run()
+    # local_development() doesn't make sense for this bot
+    run_bot(AIHedgeFundBot)

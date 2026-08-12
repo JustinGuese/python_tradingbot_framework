@@ -4,9 +4,9 @@ from typing import Literal
 
 import httpx
 
-from livetrade.broker import LiveBroker
-from livetrade.symbol_map import SymbolMapper
-from utils.data_service import DataService
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.livetrade.symbol_map import SymbolMapper
+from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,8 @@ class DarwinexBroker(LiveBroker):
         password: str,
         account_id: str | None = None,
         demo: bool = True,
-        symbol_mapper: SymbolMapper = None,
-        data_service: DataService = None,
+        symbol_mapper: SymbolMapper | None = None,
+        data_service: DataService | None = None,
     ):
         self.name = "darwinex"
         self.username = username
@@ -46,6 +46,15 @@ class DarwinexBroker(LiveBroker):
         self._session_token: str | None = None
         self._token_expires_at: datetime | None = None
         self._instrument_cache: dict[str, dict] = {}
+
+    @property
+    def account_ref(self) -> str:
+        # May be None until _login() discovers it, so read it late, not at init.
+        return str(self.account_id or "")
+
+    @property
+    def is_sandbox(self) -> bool:
+        return self.demo
 
     def _login(self):
         """Authenticate and get a session token."""
@@ -252,6 +261,12 @@ class DarwinexBroker(LiveBroker):
             logger.error(f"Failed to cancel Darwinex orders: {e}")
             return 0
 
+    # Full override, not hooks: this is the one adapter where a fetch failure
+    # must suppress the *entire* summary (nothing prints, just the log line)
+    # rather than the header/cash/equity printing before positions blow up.
+    # LiveBroker.print_account_summary() prints incrementally as it goes, so it
+    # cannot reproduce that all-or-nothing atomicity — the base skeleton (and
+    # the hooks it calls) is the wrong shape for this adapter's error handling.
     def print_account_summary(self) -> None:
         try:
             metrics = self._get(f"/accounts/{self.account_id}/metrics")

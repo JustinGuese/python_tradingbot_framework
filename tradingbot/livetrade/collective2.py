@@ -3,9 +3,9 @@ from typing import Literal
 
 import httpx
 
-from livetrade.broker import LiveBroker
-from livetrade.symbol_map import SymbolMapper
-from utils.data_service import DataService
+from tradingbot.livetrade.broker import LiveBroker
+from tradingbot.livetrade.symbol_map import SymbolMapper
+from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,11 @@ class Collective2Broker(LiveBroker):
     BASE_URL = "https://api4-general.collective2.com"
 
     def __init__(
-        self, api_key: str, system_id: str, symbol_mapper: SymbolMapper = None, data_service: DataService = None
+        self,
+        api_key: str,
+        system_id: str,
+        symbol_mapper: SymbolMapper | None = None,
+        data_service: DataService | None = None,
     ):
         self.name = "collective2"
         self.api_key = api_key
@@ -23,6 +27,13 @@ class Collective2Broker(LiveBroker):
         self.symbol_mapper = symbol_mapper or SymbolMapper()
         self.client = httpx.Client(timeout=30.0, headers={"Authorization": f"Bearer {self.api_key}"})
         self.data_service = data_service or DataService()
+
+    @property
+    def account_ref(self) -> str:
+        return str(self.system_id)
+
+    # No is_sandbox override: C2 strategies are signal-only, so there is no
+    # demo/live split to reflect — every system is equally "real" to C2.
 
     def _get(self, endpoint: str, params: dict | None = None) -> dict:
         url = f"{self.BASE_URL}/{endpoint}"
@@ -156,29 +167,33 @@ class Collective2Broker(LiveBroker):
             logger.error(f"C2 symbol search failed: {e}")
             return []
 
-    def print_account_summary(self) -> None:
-        obj = self._strategy_details()
-        cash = self.get_cash()
-        equity = self.get_total_equity()
-        print(f"\nCollective2 Strategy {self.system_id}")
-        print(f"  IsAlive:          {obj.get('IsAlive', '?')}")
-        print(f"  Cash:             {cash:>15,.2f}")
-        print(f"  Equity:           {equity:>15,.2f}")
+    # print_account_summary() itself lives on LiveBroker. Identity line, the
+    # IsAlive flag ahead of cash/equity, and the positions table (C2 exposes
+    # SymbolType and OpenPnL that get_positions()'s plain symbol->qty dict
+    # discards) all differ here.
+    def _summary_header(self) -> str:
+        return f"Collective2 Strategy {self.system_id}"
 
+    def _account_lines(self) -> list[str]:
+        obj = self._strategy_details()
+        return [
+            self._summary_line("IsAlive:", obj.get("IsAlive", "?"), fmt=""),
+            self._summary_line("Cash:", self.get_cash()),
+            self._summary_line("Equity:", self.get_total_equity()),
+        ]
+
+    def _position_rows(self) -> tuple[str, list[str]]:
         positions_data = self._get("Strategies/GetStrategyOpenPositions", {"StrategyIds": [int(self.system_id)]})
         results = positions_data.get("Results", [])
-        print(f"\nPositions ({len(results)}):")
-        if not results:
-            print("  (none)")
-            return
-        print(f"  {'Symbol':<14} {'Type':<8} {'Qty':>12} {'AvgPrice':>12} {'OpenPnL':>12}")
-        for p in results:
-            print(
-                f"  {p.get('Symbol', '')!s:<14} {p.get('SymbolType', '')!s:<8} "
-                f"{float(p.get('Quantity', 0)):>12.4f} "
-                f"{float(p.get('OpenPrice', 0) or 0):>12.4f} "
-                f"{float(p.get('OpenPnL', 0) or 0):>12.2f}"
-            )
+        header = f"  {'Symbol':<14} {'Type':<8} {'Qty':>12} {'AvgPrice':>12} {'OpenPnL':>12}"
+        rows = [
+            f"  {p.get('Symbol', '')!s:<14} {p.get('SymbolType', '')!s:<8} "
+            f"{float(p.get('Quantity', 0)):>12.4f} "
+            f"{float(p.get('OpenPrice', 0) or 0):>12.4f} "
+            f"{float(p.get('OpenPnL', 0) or 0):>12.2f}"
+            for p in results
+        ]
+        return header, rows
 
 
 if __name__ == "__main__":

@@ -560,16 +560,16 @@ before running the copier:
 
 ```bash
 # Collective2
-uv run python tradingbot/livetrade/collective2.py
+uv run python -m tradingbot.livetrade.collective2
 
 # Interactive Brokers (IBKR Web API; reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* from .env)
 uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro (reads ETORO_API_KEY, ETORO_USER_KEY, ETORO_DEMO from .env)
-uv run python tradingbot/livetrade/etoro.py
+uv run python -m tradingbot.livetrade.etoro
 
 # Darwinex (reads DARWINEX_USERNAME, DARWINEX_PASSWORD, DARWINEX_DEMO from .env)
-uv run python tradingbot/livetrade/darwinex.py
+uv run python -m tradingbot.livetrade.darwinex
 ```
 
 ### 2. Map Your Tickers
@@ -593,16 +593,16 @@ The copier runs as a standalone script per broker. Deploy as a CronJob to run sh
 
 ```bash
 # Collective2
-uv run python tradingbot/livetrade_collective2.py
+uv run python -m tradingbot.livetrade_collective2
 
 # Interactive Brokers
-uv run python tradingbot/livetrade_interactive_brokers.py
+uv run python -m tradingbot.livetrade_interactive_brokers
 
 # eToro
-uv run python tradingbot/livetrade_etoro.py
+uv run python -m tradingbot.livetrade_etoro
 
 # Darwinex
-uv run python tradingbot/livetrade_darwinex.py
+uv run python -m tradingbot.livetrade_darwinex
 ```
 
 Each broker is its own Helm CronJob gated by an independent flag in `values.yaml` — enable them separately (`liveTrade.collective2.enabled`, `liveTrade.interactiveBrokers.enabled`, `liveTrade.etoro.enabled`, `liveTrade.darwinex.enabled`), so you can run any combination or none. All default to `false`. You can also cap how much of the account each broker mirrors via `LIVETRADE_PORTFOLIO_FRACTION` (default `1.0` = full account; e.g. `0.5` = half).

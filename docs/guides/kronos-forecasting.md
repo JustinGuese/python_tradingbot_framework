@@ -109,7 +109,7 @@ kubectl patch secret tradingbot-secrets -n tradingbots-2025 \
 ### Direct API Usage
 
 ```python
-from tradingbot.utils.core import KronosClient
+from tradingbot.utils.kronos_client import KronosClient
 
 
 class MyBot(Bot):
@@ -132,7 +132,7 @@ class MyBot(Bot):
 Other bots can query the `kronos_predictions` table:
 
 ```python
-from tradingbot.utils.core import get_db_session
+from tradingbot.utils.db import get_db_session
 from tradingbot.utils.db import KronosPrediction
 from datetime import datetime, timedelta
 
@@ -163,7 +163,8 @@ def get_kronos_signal(symbol, days_ahead=1):
 Use Kronos as a tool in AI flows:
 
 ```python
-from tradingbot.utils.core import run_ai_with_tools, kronos_forecast
+from tradingbot.utils.aitools import run_ai_with_tools
+from tradingbot.utils.kronos_client import kronos_forecast
 
 decision = run_ai_with_tools(
     system_prompt="Analyze the symbol and decide buy/hold/sell.",

@@ -3,22 +3,25 @@ import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from utils.bot_repository import BotRepository
-from utils.db import Bot as BotModel
-from utils.db import Trade, get_db_session
+from tradingbot.utils.bot_repository import BotRepository
+from tradingbot.utils.db import Bot as BotModel
+from tradingbot.utils.db import Trade, get_db_session
 
-from .collective2 import Collective2Broker
-from .darwinex import DarwinexBroker
-from .etoro import EtoroBroker
-from .interactive_brokers import InteractiveBrokersBroker
+from .broker import LiveBroker
+from .registry import REGISTRY, ConfigError
 from .symbol_map import SymbolMapper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("discover_symbols")
+
+#: Short --broker values kept working because the guides document them
+#: (docs/guides/live-trading.md uses `--broker ib`).
+_BROKER_ALIASES = {"c2": "collective2", "ib": "interactive_brokers"}
 
 
 class SymbolDiscoverer:
@@ -169,48 +172,42 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Merge approved entries from review file")
     parser.add_argument("--review-file", default="symbol_map.review.json", help="Path to review file")
     parser.add_argument(
-        "--broker", default="c2", choices=["c2", "ib", "etoro", "darwinex"], help="Broker to use for search"
+        "--broker",
+        default="c2",
+        choices=sorted(set(REGISTRY) | set(_BROKER_ALIASES)),
+        help="Broker to use for search",
     )
 
     args = parser.parse_args()
 
-    if args.broker == "ib":
-        account_id = os.getenv("IB_ACCOUNT_ID", "")
-        broker = InteractiveBrokersBroker(account_id=account_id)
-        logger.info("Using Interactive Brokers (Web API / OAuth 1.0a)")
-    elif args.broker == "etoro":
-        api_key = os.getenv("ETORO_API_KEY", "")
-        user_key = os.getenv("ETORO_USER_KEY", "")
-        demo = os.getenv("ETORO_DEMO", "true").lower() == "true"
-        broker = EtoroBroker(api_key=api_key, user_key=user_key, demo=demo)
-        logger.info(f"Using eToro (Demo: {demo})")
-    elif args.broker == "darwinex":
-        username = os.getenv("DARWINEX_USERNAME", "")
-        password = os.getenv("DARWINEX_PASSWORD", "")
-        dx_account_id = os.getenv("DARWINEX_ACCOUNT_ID")
-        demo = os.getenv("DARWINEX_DEMO", "true").lower() == "true"
-        broker = DarwinexBroker(username=username, password=password, account_id=dx_account_id, demo=demo)
-        logger.info(f"Using Darwinex (Demo: {demo})")
-    else:
-        api_key = os.getenv("COLLECTIVE2_API_KEY", "")
-        system_id = os.getenv("COLLECTIVE2_SYSTEM_ID", "")
-        broker = Collective2Broker(api_key, system_id)
-        logger.info(f"Using Collective2 (System {system_id})")
+    # Construction comes from the registry rather than a third hand-rolled copy of
+    # env->broker wiring. Two things follow for free: hyperliquid becomes selectable
+    # (it was missing from the old choices list), and missing credentials now raise
+    # ConfigError instead of constructing an adapter with empty-string secrets that
+    # fails later with an opaque auth error.
+    spec = REGISTRY[_BROKER_ALIASES.get(args.broker, args.broker)]
+    try:
+        spec.check_required_env()
+        broker: LiveBroker = spec.build()
+    except ConfigError as e:
+        logger.error(str(e))
+        return 2
 
     discoverer = SymbolDiscoverer(broker)
 
     try:
-        if args.broker == "ib":
-            broker.connect(readonly=True)
+        # No-op except on IBKR, which needs a session. readonly=True because symbol
+        # discovery only ever searches — it must never be able to place an order.
+        broker.connect(readonly=True)
 
         if args.apply:
             discoverer.apply_review(args.review_file)
         else:
             discoverer.discover(review_file=args.review_file)
     finally:
-        if args.broker == "ib":
-            broker.disconnect()
+        broker.disconnect()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

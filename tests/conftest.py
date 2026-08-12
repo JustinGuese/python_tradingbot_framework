@@ -1,11 +1,18 @@
 """
 Shared pytest fixtures.
 
-Import roots are configured in pyproject.toml ([tool.pytest.ini_options]
-pythonpath), which puts both the repo root and tradingbot/ on sys.path — the
-latter because bots and livetrade modules use the in-container `from utils.X`
-style. Prefer the `tradingbot.` root in tests; mixing the two in one module
-gives you two distinct copies of the same class.
+The import root is configured in pyproject.toml ([tool.pytest.ini_options]
+pythonpath) and is the repo root *only*, so every module is reachable under
+exactly one name: `tradingbot.X`.
+
+This used to also put `tradingbot/` itself on sys.path, because bots and
+livetrade modules imported each other rootlessly (`from utils.X`). Under two
+roots the same file loads twice as two unrelated module objects — two `Bot`
+classes that fail `isinstance`, and two SQLAlchemy `Base` registries, so
+`create_all()` on one would not create the tables the other declared. The
+string-path patches below (`"tradingbot.utils...."`) only bind to one of the
+two copies, so a test could patch the session and still reach real Postgres.
+tests/test_imports.py guards against the second root coming back.
 """
 
 from contextlib import contextmanager

@@ -37,7 +37,7 @@ spec:
             - "python"
             args:
             - "-m"
-            - "record_live_equity"
+            - "tradingbot.record_live_equity"
             imagePullPolicy: {{ $.Values.image.pullPolicy }}
             resources:
               {{- toYaml $.Values.resources | nindent 14 }}

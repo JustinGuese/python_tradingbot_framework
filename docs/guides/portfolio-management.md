@@ -85,7 +85,7 @@ All buy/sell operations automatically:
 Calculate current portfolio value:
 
 ```python
-from tradingbot.utils.portfolio_worth_calculator import calculate_portfolio_worth
+from tradingbot.utils.portfolio_utils import calculate_portfolio_worth
 
 worth = calculate_portfolio_worth(bot.dbBot, bot._data_service)
 print(f"Portfolio worth: ${worth:,.2f}")

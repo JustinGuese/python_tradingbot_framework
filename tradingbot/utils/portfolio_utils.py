@@ -17,6 +17,7 @@ from .data_service import DataService
 from .db import Bot as BotModel
 from .db import PortfolioWorth, get_db_session
 from .helpers import ensure_utc_series, ensure_utc_timestamp
+from .weights import normalize_weights
 
 logger = logging.getLogger(__name__)
 
@@ -243,12 +244,7 @@ def sharpe_compute_weights(df: pd.DataFrame) -> dict[str, float]:
     if not cleaned_weights:
         return {}
 
-    # Normalize weights to sum to 1.0
-    total_weight = sum(cleaned_weights.values())
-    if total_weight == 0:
-        return {}
-
-    return {k: v / total_weight for k, v in cleaned_weights.items()}
+    return normalize_weights(cleaned_weights)
 
 
 # ------------------------------------------------------------------

@@ -171,7 +171,10 @@ class DataService:
             return self.data[self.data["symbol"] == symbol].copy()
         # Cached data is for another symbol; fall through to fetch requested symbol
 
-        assert symbol, "Symbol must be provided"
+        # Plain if/raise (not assert): asserts are stripped under `python -O`,
+        # which would silently disable this validation in optimised interpreters.
+        if not symbol:
+            raise ValueError("Symbol must be provided")
 
         # Calculate date range from period
         start_date, end_date = parse_period_to_date_range(period)
@@ -234,7 +237,10 @@ class DataService:
         # Fetch from yfinance if needed
         if need_yf_fetch:
             yf_data = yf.download(symbol, interval=interval, period=period)
-            assert len(yf_data) > 0, f"No data found for {symbol} with interval {interval} and period {period}"
+            # Plain if/raise (not assert): asserts are stripped under `python -O`,
+            # which would silently disable this validation in optimised interpreters.
+            if len(yf_data) == 0:
+                raise ValueError(f"No data found for {symbol} with interval {interval} and period {period}")
             yf_data = yf_data.swaplevel(axis=1)
             yf_data = yf_data[symbol]
             yf_data = yf_data.reset_index()

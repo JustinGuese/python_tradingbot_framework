@@ -30,7 +30,7 @@ spec:
             - "python"
             args:
             - "-m"
-            - "calculate_portfolio_worth"
+            - "tradingbot.calculate_portfolio_worth"
             imagePullPolicy: {{ $.Values.image.pullPolicy }}
             resources:
               {{- toYaml $.Values.resources | nindent 14 }}

@@ -28,7 +28,7 @@ import os
 
 from telethon.sessions import StringSession
 
-from utils.telegram_monitor import monitor_channels
+from tradingbot.utils.telegram_monitor import monitor_channels
 
 logger = logging.getLogger(__name__)
 

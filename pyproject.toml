@@ -69,11 +69,12 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# Both roots, because tests import via `tradingbot.utils.X` while the modules
-# under test import each other as `utils.X` (the layout the container gets from
-# `COPY tradingbot/ /app/`). Keep a single test module on ONE of these roots:
-# importing the same class under both names yields two distinct classes.
-pythonpath = [".", "tradingbot"]
+# Single root: both tests and the modules under test import via the
+# `tradingbot.` package root (e.g. `tradingbot.utils.X`). This is the only
+# root on sys.path, so a module is never loaded twice under two different
+# names (which used to yield two distinct classes / two SQLAlchemy Base
+# registries for the same module).
+pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -95,7 +96,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tradingbot", "utils", "livetrade"]
+known-first-party = ["tradingbot"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -112,10 +113,6 @@ exclude = [
     "^kronos_space/",
     "^scripts/nilsson_submission/",
 ]
-
-[[tool.mypy.overrides]]
-module = ["utils", "utils.*", "livetrade", "livetrade.*", "adaptivemeanreversionbot"]
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [

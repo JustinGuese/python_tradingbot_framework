@@ -19,14 +19,13 @@ import logging
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tradingbot"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
-from goldenbutterflymombot import GoldenButterflyMomBot  # noqa: E402
-from kronostraderbot import KronosTraderBot  # noqa: E402
-
-from utils.core import BotRepository  # noqa: E402
+from tradingbot.goldenbutterflymombot import GoldenButterflyMomBot  # noqa: E402
+from tradingbot.kronostraderbot import KronosTraderBot  # noqa: E402
+from tradingbot.utils.bot_repository import BotRepository  # noqa: E402
 
 
 def preview(bot) -> None:

@@ -45,7 +45,8 @@ from typing import ClassVar
 
 import pandas as pd
 
-from utils.botclass import Bot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +115,23 @@ class AdaptiveMeanReversionBot(Bot):
 
     def getYFDataWithTA(
         self,
+        symbol: str | None = None,
         interval: str = "1d",
         period: str = "1y",
         saveToDB: bool = True,
-        **kwargs,
+        features: list[str] | None = None,
     ) -> pd.DataFrame:
-        """Fetch standard TA data, then add the custom columns decisionFunction needs."""
-        data = super().getYFDataWithTA(interval=interval, period=period, saveToDB=saveToDB, **kwargs)
+        """
+        Fetch standard TA data, then add the custom columns decisionFunction needs.
+
+        Signature must mirror Bot.getYFDataWithTA exactly. It previously omitted
+        `symbol` and `features`, relying on **kwargs to forward them. That worked
+        for keyword calls but silently misbound positional ones —
+        self.getYFDataWithTA("QQQ") assigned "QQQ" to `interval`.
+        """
+        data = super().getYFDataWithTA(
+            symbol=symbol, interval=interval, period=period, saveToDB=saveToDB, features=features
+        )
         return self._enrich(data)
 
     @staticmethod
@@ -182,20 +193,5 @@ class AdaptiveMeanReversionBot(Bot):
 # adaptivemeanreversionbot.py`, so __name__ == "__main__" and behaviour is
 # unchanged.
 if __name__ == "__main__":
-    bot = AdaptiveMeanReversionBot()
-    # bot.local_development()
-    bot.run()
-# ============================================================
-# 2026-03-22 11:51:07 - utils.botclass - INFO - Backtesting with best parameters...
-# 2026-03-22 11:51:07 - utils.botclass - INFO - ============================================================
-# 2026-03-22 11:51:07 - utils.botclass - INFO -   atr_multiplier: 1.5
-# 2026-03-22 11:51:07 - utils.botclass - INFO -   sell_buffer: 0.03
-
-# 2026-03-22 11:51:13 - utils.botclass - INFO -
-# --- Backtest Results: AdaptiveMeanReversionBot ---
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Yearly Return: 25.25%
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Buy & Hold Return: 21.67%
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Outperformance vs B&H: +3.59%
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Sharpe Ratio: 1.40
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Number of Trades: 2
-# 2026-03-22 11:51:13 - utils.botclass - INFO - Max Drawdown: 7.88%
+    run_bot(AdaptiveMeanReversionBot)
+# Backtest transcript: see docs/backtests/adaptivemeanreversionbot.md

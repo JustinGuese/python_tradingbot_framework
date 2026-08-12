@@ -6,19 +6,20 @@ portfolio dicts into one target-weight dict, so the parents are stubbed at
 BotRepository and the effect is asserted on the rebalancePortfolio call.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tradingbot.utils.botclass import Bot
 from tradingbot.xauzencarrybot import (
     ALPHA_BOT,
     ALPHA_SYMBOL,
     CARRY_BOT,
     XAUZenCarryBot,
 )
-from utils.core import Bot
 
-FRESH = datetime.utcnow() - timedelta(minutes=5)
+# Naive UTC: stands in for BotRepository.last_successful_run's naive return value.
+FRESH = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
 
 
 @pytest.fixture
@@ -199,7 +200,7 @@ def test_stale_alpha_parent_aborts_the_run(make_bot, parents):
     parents(
         alpha={"USD": 0.0, ALPHA_SYMBOL: 32.7},
         carry={"USD": 10000.0},
-        alpha_run=datetime.utcnow() - timedelta(hours=48),
+        alpha_run=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=48),
     )
 
     with pytest.raises(RuntimeError, match="stale"):
@@ -213,7 +214,7 @@ def test_weekly_carry_parent_is_not_considered_stale(make_bot, parents):
     parents(
         alpha={"USD": 10000.0},
         carry={"USD": 10000.0},
-        carry_run=datetime.utcnow() - timedelta(days=7),
+        carry_run=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7),
     )
 
     assert bot.makeOneIteration() == 0

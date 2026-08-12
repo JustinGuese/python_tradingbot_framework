@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 from .botclass import Bot
-from .config import EXECUTION_CONFIG
+from .config import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT, EXECUTION_CONFIG
+from .portfolio_manager import should_trade
 
 logger = logging.getLogger(__name__)
 
@@ -335,8 +336,13 @@ def backtest_bot(
     initial_capital: float = 10000.0,
     save_to_db: bool = True,
     data: pd.DataFrame | dict[str, pd.DataFrame] | None = None,
-    slippage_pct: float = 0.0005,
-    commission_pct: float = 0.0,
+    # Defaulted from config.py's constants rather than repeating the literals.
+    # config.py's ExecutionConfig carries a comment saying its values "MUST mirror
+    # backtest_bot()'s defaults ... or the live equity curve stops being comparable
+    # to the backtested one" — an invariant that was enforced only by 0.0005 being
+    # typed correctly in two files. Now there is one source of truth.
+    slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
+    commission_pct: float = DEFAULT_COMMISSION_PCT,
     risk_free_rate: float = 0.0,
     save_results_to_db: bool = True,
 ) -> dict:
@@ -642,8 +648,17 @@ def backtest_bot(
         cash = portfolio.get("USD", 0.0)
         holdings = portfolio.get(symbol, 0.0)
 
+        # No-trade band, mirroring the live path. This was previously applied on
+        # the multi-ticker branch only, so a single-ticker bot traded on every
+        # signal in backtest while the same bot live went through
+        # PortfolioManager.should_trade and skipped sub-band adjustments. The
+        # backtested trade count and equity curve therefore did not describe the
+        # strategy that actually ran.
+        position_value = holdings * current_price
+
         if decision == 1:
-            if cash > 0:
+            # An entry does not bypass the band: easy to exit, hard to enter.
+            if cash > 0 and should_trade(cash, cash + position_value):
                 execution_price = current_price * (1 + slippage_pct)
                 commission_cost = cash * commission_pct
                 available = cash - commission_cost
@@ -651,7 +666,9 @@ def backtest_bot(
                 portfolio["USD"] = 0.0
                 portfolio[symbol] = holdings + quantity
                 nrtrades += 1
-        elif decision == -1 and holdings > 0:
+        # Selling the whole position is a full exit, which always trades —
+        # otherwise a position smaller than the band could never be closed.
+        elif decision == -1 and holdings > 0 and should_trade(position_value, position_value, is_full_exit=True):
             execution_price = current_price * (1 - slippage_pct)
             cash_proceeds = holdings * execution_price
             commission_cost = cash_proceeds * commission_pct
