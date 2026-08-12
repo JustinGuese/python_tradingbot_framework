@@ -27,7 +27,15 @@ pytest:
     # bogus, so a test that escapes its mocks fails instead of touching a real DB.
     POSTGRES_URI: "postgresql://ci:ci@localhost:5432/ci"
   before_script:
+  # git is required, not optional: pyproject pins imbalanced-learn to a git
+  # source ([tool.uv.sources]), so `uv sync` shells out to git to fetch it and
+  # fails with "Git executable not found" on python:3.12-slim, which ships
+  # without it. The failure happens during dependency resolution, so the whole
+  # job dies before a single test runs.
+  - apt-get update -qq && apt-get install -y -qq --no-install-recommends git
   - pip install uv
+  # --extra dev is the optional-dependencies group holding pytest/pytest-mock;
+  # the [dependency-groups] dev group (ruff, mypy) is synced by default.
   - uv sync --frozen --extra dev
   script:
   - uv run ruff check .
