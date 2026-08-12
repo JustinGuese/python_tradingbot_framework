@@ -72,11 +72,56 @@ def _published_at_from_unix(ts) -> datetime:
     return _naive_utc(ts)
 
 
+def _url_of(value) -> str:
+    """Accept either a bare URL string or yfinance's {"url": ..., "site": ...} dict."""
+    if isinstance(value, dict):
+        return value.get("url") or ""
+    return value or ""
+
+
+def _news_fields(item: dict) -> dict:
+    """Flatten one get_news() entry, tolerating both payload shapes.
+
+    yfinance moved every field into a nested "content" object: an entry is now
+    `{"id": ..., "content": {"title": ..., "canonicalUrl": {"url": ...}, ...}}`.
+    The old flat keys (`link`, `title`, `date`, `publisher`) all read back as
+    None, so `link` was always empty and every article hit the `continue` below —
+    which is why `stock_news` never held a single row, and why
+    StockNewsSentimentBot has never had anything to act on.
+
+    Both shapes are handled rather than just the current one: this is an
+    undeclared third-party schema that has already changed once, and the failure
+    mode is silent (an empty table, not an error).
+    """
+    raw_content = item.get("content")
+    content: dict = raw_content if isinstance(raw_content, dict) else {}
+    raw_provider = content.get("provider")
+    provider: dict = raw_provider if isinstance(raw_provider, dict) else {}
+
+    link = (
+        item.get("link")
+        or item.get("url")
+        or _url_of(content.get("canonicalUrl"))
+        or _url_of(content.get("clickThroughUrl"))
+        or _url_of(content.get("previewUrl"))
+    )
+    # displayTime is often an empty string, so fall through to pubDate.
+    published_raw = item.get("date") or content.get("pubDate") or content.get("displayTime") or None
+
+    return {
+        "link": link,
+        "title": item.get("title") or content.get("title") or "",
+        "publisher": item.get("publisher") or provider.get("displayName"),
+        "publisher_url": item.get("publisher_url") or provider.get("url"),
+        "published_raw": published_raw,
+        "related_tickers": item.get("related_tickers"),
+    }
+
+
 def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
     """Fetch news for one symbol and return list of StockNews to insert (new only)."""
     try:
         ticker = yf.Ticker(symbol)
-        # get_news returns list of dicts: title, link, publisher, date, etc.
         raw = ticker.get_news(count=NEWS_COUNT, tab="news")
     except Exception as e:
         logger.warning("Failed to fetch news for %s: %s", symbol, e)
@@ -87,15 +132,18 @@ def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
 
     to_add = []
     for item in raw:
-        link = item.get("link") or item.get("url") or ""
+        if not isinstance(item, dict):
+            continue
+        fields = _news_fields(item)
+        link = fields["link"]
         if not link:
             continue
         key = (symbol, link)
         if key in existing_links:
             continue
-        title = item.get("title") or ""
-        published_at = _published_at_from_unix(item.get("date"))
-        related = item.get("related_tickers")
+        title = fields["title"]
+        published_at = _published_at_from_unix(fields["published_raw"])
+        related = fields["related_tickers"]
         related_tickers = related if isinstance(related, list) else None
 
         to_add.append(
@@ -103,8 +151,8 @@ def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
                 symbol=symbol,
                 title=title,
                 link=link,
-                publisher=item.get("publisher"),
-                publisher_url=item.get("publisher_url"),
+                publisher=fields["publisher"],
+                publisher_url=fields["publisher_url"],
                 published_at=published_at,
                 related_tickers=related_tickers,
             )

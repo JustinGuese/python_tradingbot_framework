@@ -28,6 +28,11 @@ dependencies = [
     "tqdm>=4.67.1",
     "uvicorn>=0.32.0",
     "yfinance>=0.2.65",
+    # yfinance does not declare lxml, but Ticker.get_earnings_dates() imports it
+    # and raises ImportError without it. stock_fundamentals_loader catches that as
+    # a per-symbol warning, so the only symptom was stock_earnings silently never
+    # growing past its 213 seed rows. Explicit dependency, not an extra.
+    "lxml>=5.0.0",
     "boto3>=1.35.0",
     "huggingface_hub>=0.20.0",
     "httpx>=0.25.0",

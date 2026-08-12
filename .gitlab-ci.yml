@@ -4,7 +4,12 @@ variables:
   # the SAME Helm revision, so a job can never start with new code and old args.
   # It also makes `helm rollback` a real rollback — rolling back a mutable :main
   # restores the old args while still pointing at the new image.
-  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_BRANCH
+  # CI_COMMIT_REF_SLUG, not CI_COMMIT_BRANCH: a Docker tag may not contain "/", so
+  # any branch following the usual fix/... or feat/... convention made this an
+  # invalid reference and `docker build` failed before it ran a single step.
+  # The slug lowercases and replaces every non-alphanumeric with "-"; for "main"
+  # it is identical to the branch name, so the deployed tag is unchanged.
+  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_REF_SLUG
   IMAGE_SHA: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_SHA
   DOCKER_TLS_CERTDIR: "/certs"
 

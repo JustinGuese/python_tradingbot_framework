@@ -23,8 +23,116 @@ import pandas as pd
 from tradingbot.utils.stock_fundamentals_loader import (
     _insider_key,
     _naive_utc,
+    _news_fields,
     _published_at_from_unix,
 )
+
+# Verbatim shape of a real yfinance get_news() entry, captured 2026-08-12. Every
+# field the loader wants now lives under "content"; the flat keys it used to read
+# are simply absent.
+NESTED_NEWS_ITEM = {
+    "id": "abc123",
+    "content": {
+        "title": "Forget big tech: the real AI money is in plumbing",
+        "canonicalUrl": {
+            "url": "https://finance.yahoo.com/video/forget-big-tech-real-ai-100000112.html",
+            "site": "finance",
+        },
+        "clickThroughUrl": {"url": "https://finance.yahoo.com/video/other.html"},
+        "previewUrl": None,
+        "pubDate": "2026-08-12T10:00:00Z",
+        "displayTime": "",
+        "provider": {"displayName": "Yahoo Finance Video", "url": "https://finance.yahoo.com/"},
+    },
+}
+
+# The pre-2024 flat shape, still handled so a schema flip back cannot silently
+# empty the table again.
+FLAT_NEWS_ITEM = {
+    "title": "Legacy headline",
+    "link": "https://example.com/legacy",
+    "publisher": "Reuters",
+    "publisher_url": "https://reuters.com",
+    "date": 1786528800,
+    "related_tickers": ["AAPL", "MSFT"],
+}
+
+
+class TestNewsFieldShapes:
+    """stock_news held zero rows for its entire existence.
+
+    yfinance nested every field under "content", so `link` resolved to "" and the
+    loader skipped every article. StockNewsSentimentBot reads this table as its
+    whole strategy, so it has never had anything to act on.
+    """
+
+    def test_nested_payload_resolves_every_field(self):
+        f = _news_fields(NESTED_NEWS_ITEM)
+        assert f["link"] == "https://finance.yahoo.com/video/forget-big-tech-real-ai-100000112.html"
+        assert f["title"] == "Forget big tech: the real AI money is in plumbing"
+        assert f["publisher"] == "Yahoo Finance Video"
+        assert f["publisher_url"] == "https://finance.yahoo.com/"
+        assert f["published_raw"] == "2026-08-12T10:00:00Z"
+
+    def test_nested_link_is_non_empty(self):
+        """The single condition that silently emptied the table."""
+        assert _news_fields(NESTED_NEWS_ITEM)["link"], "empty link means the article is skipped"
+
+    def test_empty_display_time_falls_through_to_pubdate(self):
+        """displayTime is often "" — a naive `or` chain ordering would lose the date."""
+        assert _news_fields(NESTED_NEWS_ITEM)["published_raw"] == "2026-08-12T10:00:00Z"
+
+    def test_nested_pubdate_parses_to_naive_utc(self):
+        published = _published_at_from_unix(_news_fields(NESTED_NEWS_ITEM)["published_raw"])
+        assert published.tzinfo is None
+        assert published == datetime(2026, 8, 12, 10, 0)
+
+    def test_flat_payload_still_works(self):
+        f = _news_fields(FLAT_NEWS_ITEM)
+        assert f["link"] == "https://example.com/legacy"
+        assert f["title"] == "Legacy headline"
+        assert f["publisher"] == "Reuters"
+        assert f["related_tickers"] == ["AAPL", "MSFT"]
+
+    def test_unusable_item_yields_empty_link(self):
+        """No URL anywhere -> caller skips it rather than writing a blank row."""
+        assert _news_fields({"content": {"title": "no url"}})["link"] == ""
+        assert _news_fields({})["link"] == ""
+
+    def test_falls_back_through_url_candidates(self):
+        """canonicalUrl missing -> clickThroughUrl is used rather than giving up."""
+        item = {"content": {"clickThroughUrl": {"url": "https://example.com/click"}}}
+        assert _news_fields(item)["link"] == "https://example.com/click"
+
+    def test_constructed_row_carries_every_resolved_field(self, monkeypatch):
+        """Asserts on the StockNews object, not just the extraction helper.
+
+        Checking `_news_fields` alone is not enough: the row constructor has its
+        own set of lookups, and publisher/publisher_url were still reading the
+        dead flat keys after the extractor was fixed — so articles loaded with a
+        NULL publisher. Only building the row catches that.
+        """
+        import tradingbot.utils.stock_fundamentals_loader as loader
+
+        class FakeTicker:
+            def __init__(self, symbol):
+                pass
+
+            def get_news(self, count, tab):
+                return [NESTED_NEWS_ITEM]
+
+        monkeypatch.setattr(loader.yf, "Ticker", FakeTicker)
+
+        rows = loader._load_news_for_symbol("AAPL", set())
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.symbol == "AAPL"
+        assert row.title == "Forget big tech: the real AI money is in plumbing"
+        assert row.link.endswith("forget-big-tech-real-ai-100000112.html")
+        assert row.publisher == "Yahoo Finance Video", "publisher must not fall back to the dead flat key"
+        assert row.publisher_url == "https://finance.yahoo.com/"
+        assert row.published_at == datetime(2026, 8, 12, 10, 0)
+        assert row.published_at.tzinfo is None
 
 
 class TestNaiveUtc:
