@@ -26,6 +26,7 @@ import contextlib
 import logging
 import os
 import time
+from datetime import UTC, datetime
 
 from tradingbot.utils.config import setup_logging
 from tradingbot.utils.db import Bot as BotModel
@@ -132,9 +133,14 @@ def main() -> None:
     logger.info(f"Predicting {HORIZON} days ahead for {len(symbols)} symbols: {symbols}")
 
     all_predictions = []
-    import pandas as pd
 
-    made_at = pd.Timestamp.utcnow().to_pydatetime()
+    # KronosPrediction.prediction_made_at is a bare DateTime, so this must be naive
+    # UTC to match every row already stored. The previous pd.Timestamp.utcnow() was
+    # both deprecated (a Pandas4Warning on every run) and tz-AWARE — it round-tripped
+    # correctly only because the offset was +00:00 and Postgres truncates it. That is
+    # the same shape as the bug that froze stock_insider_trades for six months; it is
+    # harmless here only because uq_kronos_predictions_key excludes this column.
+    made_at = datetime.now(UTC).replace(tzinfo=None)
 
     for symbol in symbols:
         logger.info(f"  Predicting {symbol}...")

@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tradingbot.utils.bot_repository import BotRepository
@@ -43,7 +43,9 @@ class SymbolDiscoverer:
                             tickers.add(s)
 
             # 2. Tickers from recent Trades (90 days)
-            cutoff = datetime.utcnow() - timedelta(days=90)
+            # Naive UTC: Trade.timestamp is a bare DateTime, so an aware cutoff would
+            # raise on comparison. utcnow() is deprecated in 3.12 — same value, no warning.
+            cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)
             trades = session.query(Trade.symbol).filter(Trade.timestamp > cutoff).distinct().all()
             for (s,) in trades:
                 tickers.add(s)

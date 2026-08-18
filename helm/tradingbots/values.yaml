@@ -5,8 +5,21 @@
 # All bots run from the same container image
 image:
   repository: registry.gitlab.com/datafortress/tradingbot25
-  tag: main # Image tag (typically branch name or version)
-  pullPolicy: Always # Always pull latest image (use IfNotPresent for production)
+  # Fallback only. Every real deploy comes from .gitlab-ci.yml, which passes
+  # --set image.tag=$CI_COMMIT_SHA, so what actually runs is always an immutable
+  # digest-equivalent tag. A manual `helm upgrade` without that flag pins the
+  # mutable :main and, under IfNotPresent below, would keep whatever :main a node
+  # happens to have cached — so always pass the SHA when deploying by hand.
+  tag: main
+  # IfNotPresent, not Always. The tag CI deploys is a commit SHA and therefore
+  # immutable, so re-pulling can only ever fetch bytes the node already has —
+  # while costing a registry auth round-trip on every single job start. With five
+  # CronJobs on */5 that was ~1.4k pulls/day against gitlab.com, and when one of
+  # them timed out the job died: xauzenbot and xauaisyntheticmetalbot both failed
+  # at 13:45 and again at 13:53 on 2026-08-17, and xauaisyntheticmetalbot hit
+  # ErrImagePull again on 2026-08-18 ("Client.Timeout exceeded while awaiting
+  # headers"). Nothing was wrong with the code — the bots simply never started.
+  pullPolicy: IfNotPresent
 
 # Kubernetes namespace for all resources
 namespace: tradingbots-2025
