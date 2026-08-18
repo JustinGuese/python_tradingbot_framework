@@ -1,16 +1,5 @@
 variables:
-  # Branch tag is mutable and kept for convenience/manual pulls. The SHA tag is
-  # what actually gets deployed: a CronJob's image and its args then change in
-  # the SAME Helm revision, so a job can never start with new code and old args.
-  # It also makes `helm rollback` a real rollback — rolling back a mutable :main
-  # restores the old args while still pointing at the new image.
-  # CI_COMMIT_REF_SLUG, not CI_COMMIT_BRANCH: a Docker tag may not contain "/", so
-  # any branch following the usual fix/... or feat/... convention made this an
-  # invalid reference and `docker build` failed before it ran a single step.
-  # The slug lowercases and replaces every non-alphanumeric with "-"; for "main"
-  # it is identical to the branch name, so the deployed tag is unchanged.
-  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_REF_SLUG
-  IMAGE_SHA: $CI_REGISTRY/$CI_PROJECT_PATH:$CI_COMMIT_SHA
+  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:main
   DOCKER_TLS_CERTDIR: "/certs"
 
 default:
@@ -56,9 +45,8 @@ build-docker:
   #   - dfserver
   script:
   - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
-  - docker build --pull -t $IMAGE -t $IMAGE_SHA .
+  - docker build --pull -t $IMAGE .
   - docker push $IMAGE
-  - docker push $IMAGE_SHA
 
 helm-kubectl-deploy:
   stage: deploy
@@ -81,6 +69,6 @@ helm-kubectl-deploy:
       ./helm/tradingbots \
       --create-namespace \
       --namespace tradingbots-2025 \
-      --set image.tag=$CI_COMMIT_SHA
+      --set image.tag=latest
 
   environment: production
