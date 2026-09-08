@@ -159,6 +159,8 @@ def main() -> None:
         # when the leading bars below are dropped.
         for step, (_, row) in enumerate(pred_df.iterrows(), start=1):
             target = row["target_date"].to_pydatetime()
+            if target.tzinfo is not None:
+                target = target.astimezone(UTC).replace(tzinfo=None)
 
             # When yfinance hands us stale history (the European listings routinely lag
             # a session), the Space forecasts forward from that stale bar and the first
