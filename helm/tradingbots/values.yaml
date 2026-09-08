@@ -274,6 +274,12 @@ bots:
 - name: kronostraderbot
   schedule: "15 22 * * 1-5" # Daily 10:15 PM UTC Mon-Fri (10 min after kronosbot writes predictions)
 
+# NOTE: the strategy-builder runner is NOT in this list. Entries here use one
+# field as both the CronJob's name and its module path, and `run_user_strategies`
+# is not a legal Kubernetes object name (RFC 1123 forbids underscores). It has
+# its own template, `user-strategies-cronjob.yaml`, exactly as
+# calculate_portfolio_worth does.
+
 - name: xauzencarrybot
   # Meta-bot: mirrors xauzenbot's ^XAU position when it has one, else mirrors
   # goldenbutterflymombot's basket. It reads both parents' `bots.portfolio` rows,
@@ -291,12 +297,20 @@ bots:
   # 21:20 IBKR copier. See docs/backtests/tsmomtrendbot.md.
   schedule: "5 21 * * 1-5" # Daily 9:05 PM UTC Mon-Fri
 
-# NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented and
-# tested but deliberately not deployed: both lose money in backtest over their
-# full history. Their code and the measured results are kept because the negative
-# result is the useful part — see docs/backtests/multiassetcarrybot.md and
-# docs/backtests/shortvolcarrybot.md before rebuilding either idea. Adding a
-# `- name:` block here is all it takes to turn one on, so read those first.
+# NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
+# tested, and have each been through one round of diagnosed-and-fixed design
+# errors. Both improved materially; neither cleared the bar, so neither is
+# deployed:
+#   * multiassetcarrybot  −2.49% -> −1.36% CAGR over 19.45y. Still negative, and
+#     both sleeves still lose independently. The cause is the long-only
+#     constraint, not the parameters — do not re-attempt without signed exposure.
+#   * shortvolcarrybot    +0.02% -> +0.80% CAGR post-2018 (Sharpe 0.14). The
+#     rules are now sound and February 2018 costs −9.1%, but the premium is gone
+#     from the −0.5x instrument: unhedged, the short leg's return is negative.
+# The measured negative results are the useful part — read
+# docs/backtests/multiassetcarrybot.md and docs/backtests/shortvolcarrybot.md
+# before rebuilding either idea. Adding a `- name:` block here is all it takes to
+# turn one on, so read those first.
 
 # Live Trade Copier — mirrors weighted paper-bot portfolios to a real brokerage.
 # See docs/guides/live-trading.md for the full guide.

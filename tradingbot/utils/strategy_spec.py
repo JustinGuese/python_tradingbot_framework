@@ -269,8 +269,7 @@ def validate_spec(raw: Any, known_columns: frozenset[str] | None = None) -> Stra
     available = PERIODS_BY_INTERVAL.get(interval, ALLOWED_PERIODS)
     if period not in available:
         raise SpecError(
-            f"period: {period!r} is not available at the {interval!r} interval; "
-            f"choose one of {list(available)}"
+            f"period: {period!r} is not available at the {interval!r} interval; choose one of {list(available)}"
         )
 
     return StrategySpec(

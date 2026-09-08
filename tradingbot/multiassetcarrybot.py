@@ -14,14 +14,37 @@ currency; the matching `=X` pair is pure spot. So over the same window:
 
     carry_i  ≈  return(FXi)  −  spot_return(pair_i)
 
-which is the interest-rate differential minus the fund's expense ratio. The fee
-is the same 0.40% for all six CurrencyShares funds, so it cancels entirely in a
-cross-sectional ranking — the thing this bot actually uses. No rate feed, no
+which is the currency's own deposit rate net of the fund's expense ratio. Note
+what this is NOT: it is a *level*, not a differential against USD. Getting that
+wrong is what broke the first version of this bot — see below. No rate feed, no
 second data source, no key to rotate.
+
+**Carry must clear USD cash, not merely rank well.** The original design ranked
+the six and held the top three. That loses money by construction, and not
+because of any parameter: for a long-only book the alternative to holding a
+foreign currency is holding USD, so the sleeve was permanently short USD carry.
+Through 2023-24, with the 3-month bill at 5.24%, all six currencies carried
+below USD (best: CAD at +1.47%) and the bot held three of them anyway. The gate
+is therefore absolute — `carry_i > USD cash + carry_margin`, USD cash read off
+^IRX over the same window — and the sleeve is simply empty whenever nothing
+clears it. Sitting in cash is the correct answer to "no currency pays more than
+cash", and the ranking still decides which of the survivors to hold.
+
+**Why the window is a year.** Measured against known 3-month market rates over
+2023-24, this estimator's mean absolute error is 4.4pp at a 63-day window and
+2.1pp at 252 days — the ETF/spot snapshot mismatch is large next to a quarter's
+interest accrual, and annualizing a short window multiplies it. 63 days is fine
+for ranking, where a common bias cancels, and useless for a threshold. The
+residual ~1.5pp by which the estimate sits below policy rates is mostly not
+error at all: it is the 0.40% fee plus deposit rates below the policy benchmark,
+i.e. real drag you pay for using the vehicle, which is exactly what belongs in a
+comparison against T-bills. `carry_margin` covers what is left.
 
 Bond carry. The term spread, ^TNX − ^IRX. On a Treasury future the roll yield
 *is* the term spread net of financing, so this is the roll-yield leg the brief
-asked for, measured on the cash curve instead of the futures curve.
+asked for, measured on the cash curve instead of the futures curve. The spread
+being positive already *is* the "beats cash" test for this sleeve, since ^IRX is
+the cash leg of it.
 
 **Commodity roll yield is deliberately absent.** It needs a futures curve, and
 the framework has no source for one. The available hack — reading a front-month
@@ -39,7 +62,10 @@ backtest of it as a replication.
 one-directional: high-carry currencies pay a small premium for months and then
 gap. A 12-month momentum filter on each leg — hold it only if it is also
 trending up — is the cheapest known mitigation, and it is in the rules here
-rather than left to judgement.
+rather than left to judgement. It applies to **every** leg including the bonds:
+a positive term spread says the roll pays, but duration P&L swamps the roll, and
+2022 is the standing example — the curve was upward-sloping into a year that
+took TLT down 31%.
 
 Schedule: 10 21 * * 1-5 — after the US close, before the 21:20 IBKR copier.
 """
@@ -82,13 +108,19 @@ class MultiAssetCarryBot(Bot):
     Long the highest-carry currencies and, when the curve pays, the bond legs.
 
     Args:
-        carry_window: Trading days over which carry is measured. ~63 is three
-            months: long enough that the interest differential dominates the
-            tracking noise between an ETF and its spot pair, short enough to
-            still reflect the current rate regime.
-        n_fx: How many of the six currencies to hold. 3 of 6 is the usual
+        carry_window: Trading days over which carry is measured. A year, not a
+            quarter: the estimate is compared against an absolute threshold, and
+            at 63 days its error (4.4pp) dwarfs the thing being measured. See
+            the module docstring.
+        carry_margin: How far above USD cash a currency's carry must sit before
+            it is worth holding, in annualized return terms. Absorbs the
+            residual estimator noise and the round-trip cost, so the sleeve does
+            not switch on for a few basis points of apparent edge.
+        n_fx: Cap on how many of the six currencies to hold. 3 of 6 is the usual
             top-half construction; holding more dilutes the signal, fewer makes
-            the sleeve a bet on one central bank.
+            the sleeve a bet on one central bank. It is a cap and not a target —
+            far fewer clear the absolute gate in a high-USD-rate regime, and in
+            2023-24 none of them did.
         momentum_days: Lookback for the crash filter. A leg must have positive
             total return over this window to be held, however well it ranks on
             carry.
@@ -98,9 +130,9 @@ class MultiAssetCarryBot(Bot):
     """
 
     param_grid: ClassVar[dict] = {
-        "carry_window": [42, 63, 126],
+        "carry_window": [189, 252, 378],
+        "carry_margin": [0.0, 0.005, 0.01],
         "n_fx": [2, 3, 4],
-        "target_vol": [0.04, 0.06, 0.08],
     }
 
     # The momentum filter needs a year of history before the bot can hold
@@ -109,7 +141,8 @@ class MultiAssetCarryBot(Bot):
 
     def __init__(
         self,
-        carry_window: int = 63,
+        carry_window: int = 252,
+        carry_margin: float = 0.005,
         n_fx: int = 3,
         momentum_days: int = 252,
         target_vol: float = 0.06,
@@ -129,6 +162,7 @@ class MultiAssetCarryBot(Bot):
             interval="1d",
             period="2y",
             carry_window=carry_window,
+            carry_margin=carry_margin,
             n_fx=n_fx,
             momentum_days=momentum_days,
             target_vol=target_vol,
@@ -138,6 +172,7 @@ class MultiAssetCarryBot(Bot):
             **kwargs,
         )
         self.carry_window = carry_window
+        self.carry_margin = carry_margin
         self.n_fx = n_fx
         self.momentum_days = momentum_days
         self.target_vol = target_vol
@@ -185,6 +220,21 @@ class MultiAssetCarryBot(Bot):
             carry[etf] = etf_return - spot_return
         return carry
 
+    def _usd_cash_carry(self) -> float | None:
+        """
+        What USD cash paid over the carry window, in the same units as _fx_carry.
+
+        This is the hurdle every FX leg has to clear, because it is literally the
+        alternative: weights that do not go to a currency stay in USD. ^IRX is
+        the 3-month bill yield quoted in percent, so its mean over the window
+        scaled by window/year is the return cash earned across the same bars.
+        """
+        three = self._closes(YIELD_3M)
+        if three is None or len(three) < self.carry_window + 1:
+            return None
+        window_yield = three.iloc[-self.carry_window - 1 :]
+        return float(window_yield.mean()) / 100.0 * (self.carry_window / 252.0)
+
     def _bond_carry_positive(self) -> bool:
         """True when the curve is upward-sloping, i.e. the roll pays."""
         ten = self._closes(YIELD_10Y)
@@ -194,6 +244,30 @@ class MultiAssetCarryBot(Bot):
         # Both series are quoted in percent, so the difference is in percentage
         # points and only its sign is used.
         return float(ten.iloc[-1]) - float(three.iloc[-1]) > 0
+
+    def _passes_momentum(self, ticker: str) -> bool:
+        """
+        The crash filter, applied identically to every leg in both sleeves.
+
+        Returns False while still warming up, so a leg is held only once there is
+        enough history to have actually checked it.
+        """
+        closes = self._closes(ticker)
+        if closes is None:
+            return False
+        momentum = self._window_return(closes, self.momentum_days)
+        if momentum is None:
+            return False
+        if momentum <= 0:
+            logger.info(
+                "%s: %s filtered out — %dd momentum %.2f%%",
+                self.bot_name,
+                ticker,
+                self.momentum_days,
+                momentum * 100,
+            )
+            return False
+        return True
 
     def _sleeve(self, candidates: list[str], gross: float, ppy: float) -> dict[str, float]:
         """Vol-target `candidates` into a `gross` budget."""
@@ -214,33 +288,33 @@ class MultiAssetCarryBot(Bot):
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
         ppy = periods_per_year(self.interval)
 
-        # --- FX sleeve: rank on carry, then survive the crash filter ---
+        # --- FX sleeve: clear USD cash first, then rank, then the crash filter ---
+        # Order matters. Ranking first and gating second would still hold the
+        # least-bad currency in a regime where USD out-carries all six; the
+        # absolute hurdle has to come first so the sleeve can be empty.
         carry = self._fx_carry()
-        ranked = sorted(carry, key=lambda t: carry[t], reverse=True)[: self.n_fx]
-
-        fx_candidates = []
-        for ticker in ranked:
-            closes = self._closes(ticker)
-            if closes is None:
-                continue
-            momentum = self._window_return(closes, self.momentum_days)
-            if momentum is None:
-                continue  # still warming up
-            if momentum <= 0:
+        usd_carry = self._usd_cash_carry()
+        eligible: dict[str, float]
+        if usd_carry is None:
+            logger.info("%s: no USD cash rate yet — FX sleeve stays flat", self.bot_name)
+            eligible = {}
+        else:
+            hurdle = usd_carry + self.carry_margin * (self.carry_window / 252.0)
+            eligible = {t: c for t, c in carry.items() if c > hurdle}
+            if carry and not eligible:
                 logger.info(
-                    "%s: %s ranks top-%d on carry (%.2f%%) but its %dd momentum is %.2f%% — filtered out",
+                    "%s: no currency out-carries USD cash (hurdle %.2f%%, best %s at %.2f%%) — FX sleeve flat",
                     self.bot_name,
-                    ticker,
-                    self.n_fx,
-                    carry[ticker] * 100,
-                    self.momentum_days,
-                    momentum * 100,
+                    hurdle * 100,
+                    max(carry, key=lambda t: carry[t]),
+                    max(carry.values()) * 100,
                 )
-                continue
-            fx_candidates.append(ticker)
 
-        # --- Bond sleeve: on only when the curve pays ---
-        bond_candidates = BOND_ETFS if self._bond_carry_positive() else []
+        ranked = sorted(eligible, key=lambda t: eligible[t], reverse=True)[: self.n_fx]
+        fx_candidates = [t for t in ranked if self._passes_momentum(t)]
+
+        # --- Bond sleeve: the curve must pay AND the leg must be trending ---
+        bond_candidates = [t for t in BOND_ETFS if self._passes_momentum(t)] if self._bond_carry_positive() else []
 
         weights = {
             **self._sleeve(fx_candidates, self.fx_gross, ppy),
