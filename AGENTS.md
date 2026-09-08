@@ -323,11 +323,50 @@ The `Bot` class (`tradingbot/utils/botclass.py`) is the foundation. All trading 
    └── Executes trade if decision != 0
 ```
 
+### `targetWeights` returns a target book, not a signal
+
+A bot may override **`targetWeights(rows) -> dict[str, float]`** instead of
+`decisionFunction`, and the framework will size, execute and backtest it. Use it
+whenever the strategy *sizes* positions rather than merely signalling them —
+vol targeting, risk parity, cross-sectional ranking. `decisionFunction` can only
+say -1/0/1, which becomes equal weights; before this existed, expressing anything
+else meant `makeOneIteration` and forfeiting backtesting entirely.
+
+The contract:
+
+- `rows` is the current bar for **every** ticker in `self.tickers`, benchmarks
+  included — cross-sectional strategies must see the whole universe. History is
+  `self.datas[ticker]`, already truncated to bars at or before the current one.
+- Return long-only weights over **tradeable** tickers summing to `<= 1.0`.
+  **`"USD"` must not be a key** — cash is the derived residual. An omitted ticker
+  means weight 0, i.e. a full exit that bypasses the no-trade band. `{}` goes
+  fully to cash.
+- Output is validated by `Bot._coerce_target_weights`, which clamps and logs
+  rather than raising: over-1.0 sums are rescaled, negatives clamped to 0,
+  non-finite dropped. A weight on a symbol the bot may not trade (a benchmark, or
+  anything outside the universe) is **dropped and NOT redistributed**, so a buggy
+  bot under-invests visibly instead of silently over-weighting its other legs.
+
+**Precedence is `targetWeights` > `decisionFunction` > `makeOneIteration`**, in
+both `backtest_type` and `makeOneIteration`'s dispatch. A bot defining both is one
+whose weights function calls the other as a helper. Ticker count is irrelevant —
+a single-ticker `targetWeights` bot is legal and backtestable.
+
+Live and backtest call the *same* `targetWeights` and the *same*
+`_coerce_target_weights`; only execution differs. That parity is pinned by
+`tests/test_multi_ticker_iteration.py::test_target_weights_live_and_backtest_agree_on_one_bar`.
+
+Related: **`BACKTEST_PERIOD`**. `_get_backtest_period("1d")` is `"1y"`, so a bot
+whose lookback approaches a year backtests on almost no evaluable bars and reports
+a confident number derived from a handful of trades. Any such bot must set
+`BACKTEST_PERIOD` (e.g. `"max"`). See `TSMOMTrendBot`.
+
 ### Position-sizing semantics (easy to get wrong)
 
-Anything that reasons about what a bot *holds* — a meta-bot, a live-trade copier,
-a backtest, an analysis script — has to reproduce these three rules exactly.
-They are not conventions; they are what the live code does.
+These are the rules for **`decisionFunction`** bots. Anything that reasons about
+what such a bot *holds* — a meta-bot, a live-trade copier, a backtest, an analysis
+script — has to reproduce these three rules exactly. They are not conventions;
+they are what the live code does.
 
 **1. `decisionFunction` returning `0` means "hold, but stay capped".** A `0` leg
 is never *funded* — the signal is a statement about initiating exposure — but it

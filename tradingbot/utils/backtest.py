@@ -14,6 +14,40 @@ from .portfolio_manager import should_trade
 logger = logging.getLogger(__name__)
 
 
+def _iso(timestamp: Any) -> str | None:
+    """Render a bar timestamp as ISO-8601 for the API/chart layer, or None if unusable."""
+    if timestamp is None:
+        return None
+    try:
+        return pd.Timestamp(timestamp).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_series(
+    portfolio_values: list,
+    portfolio_timestamps: list,
+    benchmark_values: list,
+    trade_log: list[dict],
+) -> dict:
+    """
+    Package the intra-backtest series for charting.
+
+    The three lists are appended in lockstep inside the bar loop, so `strict=True`
+    is a real assertion: a mismatch means a bar updated equity without updating the
+    benchmark (or vice versa), which would silently mis-align the two chart lines.
+    """
+    return {
+        "equity_curve": [
+            {"t": _iso(t), "v": float(v)} for t, v in zip(portfolio_timestamps, portfolio_values, strict=True)
+        ],
+        "buy_hold_curve": [
+            {"t": _iso(t), "v": float(v)} for t, v in zip(portfolio_timestamps, benchmark_values, strict=True)
+        ],
+        "trades": trade_log,
+    }
+
+
 def _get_periods_per_year(interval: str) -> float:
     """
     Calculate approximate number of periods per trading year for a given interval.
@@ -50,6 +84,24 @@ def _get_periods_per_year(interval: str) -> float:
     else:
         # Default: assume daily frequency
         return 252.0
+
+
+def _resolve_backtest_period(bot: Bot) -> str:
+    """
+    The history to fetch for `bot`: its BACKTEST_PERIOD override, else the
+    interval default.
+
+    The override exists because the interval default is chosen for strategies
+    whose signal needs a handful of bars, and it is silently wrong for one whose
+    lookback approaches it. _get_backtest_period("1d") is "1y", so a 12-month
+    momentum bot would be handed exactly enough data to compute its first signal
+    on the last bar — and the backtest would report a Sharpe ratio derived from
+    almost no trades rather than failing, which is the dangerous kind of wrong.
+    """
+    override = getattr(bot, "BACKTEST_PERIOD", None)
+    if override:
+        return str(override)
+    return _get_backtest_period(bot.interval)
 
 
 def _get_backtest_period(interval: str) -> str:
@@ -345,6 +397,7 @@ def backtest_bot(
     commission_pct: float = DEFAULT_COMMISSION_PCT,
     risk_free_rate: float = 0.0,
     save_results_to_db: bool = True,
+    return_series: bool = False,
 ) -> dict:
     """
     Backtest a trading bot over historical data.
@@ -365,18 +418,41 @@ def backtest_bot(
         commission_pct: Commission as fraction of trade value (default: 0.0).
         risk_free_rate: Annualized risk-free rate for Sharpe (default: 0.0).
         save_results_to_db: Whether to save best result to database.
+        return_series: Also return the intra-backtest series for charting
+                       (default: False, so existing callers are unaffected).
 
     Returns:
         Dictionary with keys: yearly_return, buy_hold_return, sharpe_ratio,
-        nrtrades, maxdrawdown.
+        nrtrades, maxdrawdown, sortino_ratio, calmar_ratio, win_rate, volatility.
+
+        Note that `yearly_return` is the TOTAL return over the backtest window,
+        not an annualized figure, despite the name. Presentation layers should
+        relabel it rather than this function renaming it, which would break every
+        bot and the `backtest_results` table.
+
+        With return_series=True, three more keys are added:
+          equity_curve:    [{"t": iso8601, "v": portfolio value in USD}, ...]
+          buy_hold_curve:  same shape, same timestamps — equal-weight buy-and-hold
+                           over the tradeable tickers, scaled to initial_capital
+          trades:          [{"t", "symbol", "side": "buy"|"sell", "qty", "price"}, ...]
+                           where price is the execution price actually paid or
+                           received (slippage included), not the bar's close.
+
+        The curves cover only bars the backtest actually evaluated: bars with an
+        invalid price, and TA warmup bars (trend_adx == 0.0), are skipped, so both
+        curves are shorter than the input data and start after the warmup.
 
     Raises:
-        NotImplementedError: If bot doesn't implement decisionFunction.
+        NotImplementedError: If bot implements neither decisionFunction nor targetWeights.
         ValueError: If insufficient data is available for backtesting.
     """
-    if type(bot).decisionFunction is Bot.decisionFunction:
+    # targetWeights takes precedence over decisionFunction — the same order
+    # Bot.backtest_type and Bot.makeOneIteration use, so a bot cannot be sized
+    # one way live and another way here.
+    uses_weights = type(bot).targetWeights is not Bot.targetWeights
+    if not uses_weights and type(bot).decisionFunction is Bot.decisionFunction:
         raise NotImplementedError(
-            "Bot must implement decisionFunction() for backtesting. "
+            "Bot must implement decisionFunction() or targetWeights() for backtesting. "
             "Bots that only override makeOneIteration() are not supported."
         )
 
@@ -386,9 +462,13 @@ def backtest_bot(
     N = len(tickers)
 
     # ------------------------------------------------------------------ #
-    #  Multi-ticker path (N > 1)                                          #
+    #  Multi-ticker path (N > 1), and every targetWeights bot             #
     # ------------------------------------------------------------------ #
-    if N > 1:
+    # A one-ticker targetWeights bot takes this path too: the inner-join loop
+    # below is trivially correct for a single series, and the single-asset path
+    # can only express all-in/all-out, which is the one thing a sizing strategy
+    # must not be forced into.
+    if N > 1 or uses_weights:
         # Benchmark tickers are loaded and kept aligned like any other ticker
         # (a strategy may need one as a relative-strength baseline) but are
         # excluded from the divisor and never traded — matching
@@ -408,7 +488,7 @@ def backtest_bot(
                 "For multi-ticker bots, 'data' must be a dict[str, pd.DataFrame]. Pass None to fetch automatically."
             )
         else:
-            backtest_period = _get_backtest_period(bot.interval)
+            backtest_period = _resolve_backtest_period(bot)
             for ticker in tickers:
                 try:
                     df = bot.getYFDataWithTA(
@@ -449,6 +529,12 @@ def backtest_bot(
         portfolio: dict[str, float] = {"USD": initial_capital}
         portfolio_values: list = []
         portfolio_timestamps: list = []
+        # Benchmark and trade log are only populated for return_series, but the
+        # appends are unconditional: branching inside the hot loop for a flag that
+        # costs two list appends per bar would be a worse trade than the memory.
+        benchmark_values: list = []
+        trade_log: list[dict] = []
+        first_prices: dict[str, float] = {}
         nrtrades = 0
 
         for ts in common_ts:
@@ -479,37 +565,67 @@ def backtest_bot(
                 continue
 
             total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
-            target = total_value / n_trade
-            band = EXECUTION_CONFIG.no_trade_threshold(target)
 
-            # Decide for every tradeable ticker before trading any of them, so
-            # exits can fund entries — mirroring the live path, where
-            # rebalance_portfolio executes all sells before any buy.
-            decisions: dict[str, int] = {}
-            for ticker in tradeable:
+            # Resolve this bar into a target USD value per ticker, a per-ticker
+            # no-trade band reference, and the set of full exits (which bypass
+            # the band, so a position told to leave cannot be stranded by it).
+            # Both bot types converge here, so everything below — exits before
+            # entries, slippage, commission, the band — is shared code and
+            # cannot drift between them.
+            if uses_weights:
+                # Decide for the whole universe at once: a cross-sectional bot
+                # cannot rank its legs one at a time.
                 try:
-                    bot._current_ticker = ticker
-                    decisions[ticker] = bot.decisionFunction(rows[ticker])
+                    raw_weights = bot.targetWeights(rows)
                 except Exception as e:
-                    logger.warning(f"Error in decisionFunction for {ticker} at {ts}: {e}")
-                    decisions[ticker] = 0
+                    logger.warning(f"Error in targetWeights at {ts}: {e}")
+                    raw_weights = {}
+                # held_weights=None: a backtest portfolio starts as pure cash and
+                # only ever trades tickers in the universe, so an untracked
+                # holding cannot arise here. That case is live-path only.
+                weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
+                targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
+                # Band against the LARGER of target and current value, so
+                # trimming a big position uses a band scaled to that position
+                # rather than to the small target it is heading for.
+                band_ref = {t: max(targets[t], portfolio.get(t, 0.0) * prices[t]) for t in tradeable}
+                full_exit = {t for t in tradeable if targets[t] <= 0.0}
+            else:
+                # Decide for every tradeable ticker before trading any of them, so
+                # exits can fund entries — mirroring the live path, where
+                # rebalance_portfolio executes all sells before any buy.
+                decisions: dict[str, int] = {}
+                for ticker in tradeable:
+                    try:
+                        bot._current_ticker = ticker
+                        decisions[ticker] = bot.decisionFunction(rows[ticker])
+                    except Exception as e:
+                        logger.warning(f"Error in decisionFunction for {ticker} at {ts}: {e}")
+                        decisions[ticker] = 0
+                sleeve = total_value / n_trade
+                # decision 0 caps at one sleeve but is never funded; decision -1
+                # exits fully. Identical arithmetic to the pre-targetWeights code.
+                targets = {
+                    t: 0.0
+                    if decisions[t] == -1
+                    else sleeve
+                    if decisions[t] == 1
+                    else min(portfolio.get(t, 0.0) * prices[t], sleeve)
+                    for t in tradeable
+                }
+                band_ref = dict.fromkeys(tradeable, sleeve)
+                full_exit = {t for t, d in decisions.items() if d == -1}
 
-            # Phase 1: exits and trims. decision 0 caps at one sleeve but is
-            # never funded; decision -1 exits fully and ignores the band.
-            for ticker, decision in decisions.items():
+            # Phase 1: exits and trims.
+            for ticker in tradeable:
                 price = prices[ticker]
                 holding = portfolio.get(ticker, 0.0)
                 if holding <= 0:
                     continue
                 holding_value = holding * price
-                if decision == -1:
-                    wanted = 0.0
-                elif decision == 1:
-                    wanted = target
-                else:
-                    wanted = min(holding_value, target)
+                wanted = targets[ticker]
                 excess = holding_value - wanted
-                if excess <= (0.0 if decision == -1 else band):
+                if excess <= (0.0 if ticker in full_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])):
                     continue
                 qty = min(holding, excess / price)
                 execution_price = price * (1 - slippage_pct)
@@ -518,15 +634,26 @@ def backtest_bot(
                 portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
                 portfolio[ticker] = holding - qty
                 nrtrades += 1
+                trade_log.append(
+                    {
+                        "t": _iso(ts),
+                        "symbol": ticker,
+                        "side": "sell",
+                        "qty": float(qty),
+                        "price": float(execution_price),
+                    }
+                )
 
             # Phase 2: entries and top-ups, funded by the proceeds above.
-            for ticker, decision in decisions.items():
-                if decision != 1:
-                    continue
+            # No decision filter is needed: for a hold the target is capped at
+            # the current value and for an exit it is zero, so both give a
+            # shortfall <= 0 and skip below exactly as the old `if decision != 1`
+            # made them.
+            for ticker in tradeable:
                 price = prices[ticker]
                 holding = portfolio.get(ticker, 0.0)
-                shortfall = target - holding * price
-                if shortfall <= band:
+                shortfall = targets[ticker] - holding * price
+                if shortfall <= EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker]):
                     continue
                 cash = portfolio.get("USD", 0.0)
                 buy_amount = min(shortfall, cash)
@@ -535,13 +662,33 @@ def backtest_bot(
                 commission_cost = buy_amount * commission_pct
                 available = buy_amount - commission_cost
                 execution_price = price * (1 + slippage_pct)
+                bought_qty = available / execution_price
                 portfolio["USD"] = cash - buy_amount
-                portfolio[ticker] = holding + available / execution_price
+                portfolio[ticker] = holding + bought_qty
                 nrtrades += 1
+                trade_log.append(
+                    {
+                        "t": _iso(ts),
+                        "symbol": ticker,
+                        "side": "buy",
+                        "qty": float(bought_qty),
+                        "price": float(execution_price),
+                    }
+                )
 
             current_total = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
             portfolio_values.append(current_total)
             portfolio_timestamps.append(ts)
+
+            # Equal-weight buy-and-hold over the tradeable tickers, rebased to the
+            # first bar the backtest actually evaluated (not the first bar of the
+            # input data) so the two chart lines start at the same point.
+            if not first_prices:
+                first_prices = {t: prices[t] for t in tradeable}
+            benchmark_values.append(
+                initial_capital
+                * float(np.mean([prices[t] / first_prices[t] for t in tradeable if first_prices.get(t)]))
+            )
 
         metrics = _compute_backtest_metrics(portfolio_values, bot.interval, risk_free_rate)
 
@@ -570,6 +717,11 @@ def backtest_bot(
                 data_for_qs=data_dict[tickers[0]],
             )
 
+        # Added after the DB save so the persisted `result` stays exactly the nine
+        # scalars `backtest_results` expects.
+        if return_series:
+            result.update(_build_series(portfolio_values, portfolio_timestamps, benchmark_values, trade_log))
+
         return result
 
     # ------------------------------------------------------------------ #
@@ -579,7 +731,7 @@ def backtest_bot(
     backtest_period = None
 
     if data is None:
-        backtest_period = _get_backtest_period(bot.interval)
+        backtest_period = _resolve_backtest_period(bot)
         try:
             data = bot.getYFDataWithTA(
                 symbol=symbol,
@@ -623,6 +775,11 @@ def backtest_bot(
     portfolio = {"USD": initial_capital}
     portfolio_values = []
     portfolio_timestamps = []
+    # No annotations here: the multi-ticker branch above already declared these
+    # names in this same function scope, and re-annotating is a mypy no-redef.
+    benchmark_values = []
+    trade_log = []
+    first_price: float | None = None
     nrtrades = 0
 
     for idx, row in data.iterrows():
@@ -666,6 +823,15 @@ def backtest_bot(
                 portfolio["USD"] = 0.0
                 portfolio[symbol] = holdings + quantity
                 nrtrades += 1
+                trade_log.append(
+                    {
+                        "t": _iso(row["timestamp"] if "timestamp" in row.index else None),
+                        "symbol": symbol,
+                        "side": "buy",
+                        "qty": float(quantity),
+                        "price": float(execution_price),
+                    }
+                )
         # Selling the whole position is a full exit, which always trades —
         # otherwise a position smaller than the band could never be closed.
         elif decision == -1 and holdings > 0 and should_trade(position_value, position_value, is_full_exit=True):
@@ -676,12 +842,27 @@ def backtest_bot(
             portfolio["USD"] = cash + net_proceeds
             portfolio[symbol] = 0.0
             nrtrades += 1
+            trade_log.append(
+                {
+                    "t": _iso(row["timestamp"] if "timestamp" in row.index else None),
+                    "symbol": symbol,
+                    "side": "sell",
+                    "qty": float(holdings),
+                    "price": float(execution_price),
+                }
+            )
 
         current_cash = portfolio.get("USD", 0.0)
         current_holdings = portfolio.get(symbol, 0.0)
         portfolio_value = current_cash + (current_holdings * current_price)
         portfolio_values.append(portfolio_value)
         portfolio_timestamps.append(row["timestamp"] if "timestamp" in row.index else None)
+
+        # Buy-and-hold rebased to the first evaluated bar, so it starts level with
+        # the strategy curve rather than at the pre-warmup close.
+        if first_price is None:
+            first_price = current_price
+        benchmark_values.append(initial_capital * current_price / first_price)
 
     metrics = _compute_backtest_metrics(portfolio_values, bot.interval, risk_free_rate)
 
@@ -707,5 +888,8 @@ def backtest_bot(
             portfolio_timestamps=portfolio_timestamps,
             data_for_qs=data,
         )
+
+    if return_series:
+        result.update(_build_series(portfolio_values, portfolio_timestamps, benchmark_values, trade_log))
 
     return result

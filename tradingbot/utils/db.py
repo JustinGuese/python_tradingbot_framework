@@ -516,10 +516,31 @@ def _migrate_schema() -> None:
         conn.commit()
 
 
-def init_db() -> None:
-    """Initialize database tables and run schema migrations."""
+_schema_initialized = False
+
+
+def init_db(force: bool = False) -> None:
+    """
+    Initialize database tables and run schema migrations.
+
+    Memoized per process. `Bot.__init__` calls this on every instantiation, which
+    was fine when a process built one bot but is not once a single run builds many
+    (the user-strategy runner, or a web process): `create_all` costs a reflection
+    round-trip and `_migrate_schema` issues real ALTER TABLE statements every time.
+    Both are idempotent, so repeating them is waste rather than damage — but it is
+    waste proportional to the number of bots.
+
+    The module-level `engine` never changes within a process, so one successful run
+    is always enough. Pass force=True to re-run anyway.
+    """
+    global _schema_initialized
+    if _schema_initialized and not force:
+        return
     Base.metadata.create_all(engine)
     _migrate_schema()
+    # Set only on success, so a failed first attempt (e.g. Postgres not up yet)
+    # does not mark the schema done and let the next call skip it silently.
+    _schema_initialized = True
 
 
 @contextmanager

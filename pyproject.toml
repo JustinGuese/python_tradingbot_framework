@@ -1,7 +1,9 @@
 [project]
-name = "myfxbookcopying"
+# Renamed from the stale "myfxbookcopying". The name is now load-bearing:
+# tradingbot-ui-backend depends on this project by name as a git dependency.
+name = "tradingbot-framework"
 version = "0.1.0"
-description = "Add your description here"
+description = "Kubernetes-native algorithmic trading framework: bots, backtesting and live brokers."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -61,6 +63,20 @@ docs = [
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Ship only the package. Without this, hatchling cannot infer what to include
+# (the project name no longer matches a top-level directory) and the build fails.
+#
+# Adding a build-system makes this a *packaged* project rather than a virtual
+# one, so `uv sync` now wants to build and install the root. The Dockerfile syncs
+# dependencies before COPYing the source, so it passes --no-install-project; the
+# package reaches the image via COPY + PYTHONPATH=/app as it always has.
+packages = ["tradingbot"]
 
 [tool.uv.sources]
 imbalanced-learn = { git = "https://github.com/scikit-learn-contrib/imbalanced-learn", rev = "master" }

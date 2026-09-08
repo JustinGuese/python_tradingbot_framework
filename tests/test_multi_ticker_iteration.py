@@ -185,3 +185,238 @@ def test_prices_are_prewarmed_before_the_rebalance(runner, mocker):
 
     assert order.index("rebalance") == len(order) - 1
     assert "prewarm" in order
+
+
+# ======================================================================
+#  targetWeights live path
+# ======================================================================
+
+
+@pytest.fixture
+def weights_runner(runner, mocker):
+    """
+    A runner whose bot returns a fixed target book instead of -1/0/1 signals.
+
+    targetWeights has to live on a real subclass, not on the instance: dispatch
+    tests `type(self).targetWeights is not Bot.targetWeights`, so an instance
+    attribute would be invisible to it. Building a throwaway subclass per bot
+    also keeps the patch off Bot itself, where it would leak into every other
+    test in the session.
+    """
+
+    def _make(tickers, benchmarks, weights, prices, portfolio, name="WeightsRunnerBot", frames=None):
+        bot = runner(
+            tickers=tickers,
+            benchmarks=benchmarks,
+            decisions={},
+            prices=prices,
+            portfolio=portfolio,
+            name=name,
+        )
+        bot.__class__ = type("_WeightsRunnerBot", (Bot,), {"targetWeights": lambda self, rows: dict(weights)})
+        # `runner` builds bots for _run_multi_ticker_iteration, which never reads
+        # .symbol; makeOneIteration's dispatch does, so set it here.
+        bot.symbol = None
+
+        # One bar per ticker is enough: the live path only reads .iloc[-1].
+        default = pd.DataFrame({"close": [1.0]})
+        by_ticker = frames or {}
+        bot.getYFDataWithTA = mocker.MagicMock(side_effect=lambda symbol, **kw: by_ticker.get(symbol, default))
+        return bot
+
+    return _make
+
+
+def test_target_weights_live_path_applies_the_book(weights_runner, db_session):
+    """A 60/40 target on a $10k cash book buys 60 and 40 units at $100."""
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights={"AAA": 0.6, "BBB": 0.4},
+        prices={"AAA": 100.0, "BBB": 100.0},
+        portfolio={"USD": 10000.0},
+    )
+
+    bot._run_target_weights_iteration()
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert final["AAA"] == pytest.approx(60.0)
+    assert final["BBB"] == pytest.approx(40.0)
+    assert final.get("USD", 0.0) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_target_weights_live_path_leaves_the_residual_in_cash(weights_runner, db_session):
+    """Weights below 1.0 must not be levered back up to fully invested."""
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights={"AAA": 0.25, "BBB": 0.25},
+        prices={"AAA": 100.0, "BBB": 100.0},
+        portfolio={"USD": 10000.0},
+    )
+
+    bot._run_target_weights_iteration()
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert final["AAA"] == pytest.approx(25.0)
+    assert final["USD"] == pytest.approx(5000.0)
+
+
+def test_target_weights_live_path_liquidates_a_held_benchmark(weights_runner, db_session):
+    """
+    A benchmark can never be given weight, so if it were also pinned as an
+    untracked holding nothing could ever exit it.
+    """
+    bot = weights_runner(
+        tickers=["AAA", BENCHMARK],
+        benchmarks=[BENCHMARK],
+        weights={"AAA": 1.0},
+        prices={"AAA": 100.0, BENCHMARK: 100.0},
+        portfolio={"USD": 5000.0, BENCHMARK: 50.0},
+    )
+
+    bot._run_target_weights_iteration()
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert BENCHMARK not in final
+    assert final["AAA"] == pytest.approx(100.0)
+
+
+def test_target_weights_live_path_fetches_benchmark_data(weights_runner):
+    """The benchmark is unfundable but must still reach targetWeights."""
+    bot = weights_runner(
+        tickers=["AAA", BENCHMARK],
+        benchmarks=[BENCHMARK],
+        weights={"AAA": 1.0},
+        prices={"AAA": 100.0, BENCHMARK: 100.0},
+        portfolio={"USD": 10000.0},
+    )
+
+    bot._run_target_weights_iteration()
+
+    fetched = {c.kwargs["symbol"] for c in bot.getYFDataWithTA.call_args_list}
+    assert BENCHMARK in fetched
+
+
+def test_target_weights_live_path_skips_the_run_on_missing_data(weights_runner, db_session):
+    """
+    A data outage must not read as a deliberate exit. An absent ticker would
+    come back with no weight and get liquidated — so the run aborts instead.
+    """
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights={"AAA": 0.5, "BBB": 0.5},
+        prices={"AAA": 100.0, "BBB": 100.0},
+        portfolio={"USD": 0.0, "AAA": 50.0},
+        frames={"AAA": pd.DataFrame({"close": [1.0]}), "BBB": pd.DataFrame({"close": []})},
+    )
+
+    assert bot._run_target_weights_iteration() == 0
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert final["AAA"] == pytest.approx(50.0), "the position must survive a data outage"
+
+
+def test_target_weights_dispatches_from_make_one_iteration(weights_runner, mocker):
+    """makeOneIteration must route to the weights path, ahead of the N>1 check."""
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights={"AAA": 1.0},
+        prices={"AAA": 100.0, "BBB": 100.0},
+        portfolio={"USD": 10000.0},
+    )
+    weights_path = mocker.patch.object(type(bot), "_run_target_weights_iteration", return_value=7)
+    multi_path = mocker.patch.object(type(bot), "_run_multi_ticker_iteration", return_value=0)
+
+    assert bot.makeOneIteration() == 7
+    assert weights_path.called
+    assert not multi_path.called
+
+
+def _bar_frame(price, bars=3):
+    idx = pd.date_range("2026-01-01", periods=bars, freq="D")
+    return pd.DataFrame(
+        {
+            "open": [price] * bars,
+            "high": [price] * bars,
+            "low": [price] * bars,
+            "close": [price] * bars,
+            "volume": [1000.0] * bars,
+            "trend_adx": [25.0] * bars,
+        },
+        index=idx,
+    )
+
+
+def test_target_weights_live_and_backtest_agree_on_one_bar(weights_runner, db_session, mocker):
+    """
+    THE parity assertion. Both paths call the same targetWeights and the same
+    _coerce_target_weights; only execution differs. With costs and the no-trade
+    band zeroed on both sides, one bar through each must land on identical
+    per-symbol dollar values — otherwise a backtest stops predicting live
+    behaviour, which is the only reason to run one.
+    """
+    from tradingbot.utils.backtest import backtest_bot
+
+    target = {"AAA": 0.6, "BBB": 0.3}
+    prices = {"AAA": 100.0, "BBB": 50.0}
+
+    # --- live: the `runner` fixture already wires PortfolioManager with FREE ---
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights=target,
+        prices=prices,
+        portfolio={"USD": 10000.0},
+    )
+    bot._run_target_weights_iteration()
+    live = _portfolio(db_session, "WeightsRunnerBot")
+    live_values = {sym: live.get(sym, 0.0) * px for sym, px in prices.items()}
+    live_values["USD"] = live.get("USD", 0.0)
+
+    # --- backtest: same decision, same prices, costs and band zeroed ---
+    class _Fixed(Bot):
+        def __init__(self):
+            self.bot_name = "ParityWeights"
+            self.tickers = ["AAA", "BBB"]
+            self.benchmark_tickers = []
+            self.symbol = None
+            self.interval = "1d"
+            self.period = "1y"
+            self.datas = {}
+            self.data = None
+            self.params = {}
+            self.LIQUIDATE_UNTRACKED = False
+
+        def targetWeights(self, rows):
+            return dict(target)
+
+    mocker.patch("tradingbot.utils.backtest.EXECUTION_CONFIG", FREE)
+    result = backtest_bot(
+        _Fixed(),
+        initial_capital=10000.0,
+        data={sym: _bar_frame(px) for sym, px in prices.items()},
+        save_to_db=False,
+        save_results_to_db=False,
+        slippage_pct=0.0,
+        commission_pct=0.0,
+        return_series=True,
+    )
+
+    # Prices are flat, so the book never drifts: the first bar's fills ARE the
+    # steady state, and comparing final values is comparing the same thing live
+    # settled on.
+    bt_values = dict.fromkeys(prices, 0.0)
+    first_ts = result["trades"][0]["t"]
+    for trade in result["trades"]:
+        if trade["t"] != first_ts:
+            break
+        bt_values[trade["symbol"]] += trade["qty"] * trade["price"]
+    bt_values["USD"] = 10000.0 - sum(v for k, v in bt_values.items() if k != "USD")
+
+    for symbol in ("AAA", "BBB", "USD"):
+        assert live_values[symbol] == pytest.approx(bt_values[symbol], abs=1e-6), (
+            f"{symbol}: live {live_values[symbol]} != backtest {bt_values[symbol]}"
+        )

@@ -5,7 +5,11 @@ ENV PYTHONPATH="/app"
 RUN pip install uv
 WORKDIR /app
 COPY pyproject.toml uv.lock /app/
-RUN uv sync --frozen --no-dev
+# --no-install-project is required now that pyproject declares a build-system:
+# without it uv tries to build the root package here, before `tradingbot/` has
+# been COPYed in, and the build fails. The package still reaches the image via
+# the COPY below plus PYTHONPATH=/app.
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy the package AS a package, preserving the `tradingbot/` directory.
 #

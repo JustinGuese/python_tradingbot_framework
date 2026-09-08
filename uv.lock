@@ -2276,122 +2276,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/17/0d/74f0293dfd7dcc3837746d0138cbedd60b31701ecc75caec7d3f281feba0/multitasking-0.0.12.tar.gz", hash = "sha256:2fba2fa8ed8c4b85e227c5dd7dc41c7d658de3b6f247927316175a57349b84d1", size = 19984, upload-time = "2025-07-20T21:27:51.636Z" }
 
 [[package]]
-name = "myfxbookcopying"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "boto3" },
-    { name = "cachetools" },
-    { name = "fastapi" },
-    { name = "fear-and-greed" },
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "hyperliquid-python-sdk" },
-    { name = "ibind", extra = ["oauth"] },
-    { name = "ipython" },
-    { name = "jinja2" },
-    { name = "langchain" },
-    { name = "langchain-openai" },
-    { name = "lxml" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "plotly" },
-    { name = "psycopg2-binary" },
-    { name = "pyportfolioopt" },
-    { name = "python-dotenv" },
-    { name = "quantstats" },
-    { name = "scikit-learn" },
-    { name = "sqlalchemy" },
-    { name = "ta" },
-    { name = "telethon" },
-    { name = "tqdm" },
-    { name = "uvicorn" },
-    { name = "yfinance" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "catboost" },
-    { name = "imbalanced-learn" },
-    { name = "ipykernel" },
-    { name = "matplotlib" },
-    { name = "pandas" },
-    { name = "pytest" },
-    { name = "pytest-mock" },
-    { name = "scikit-learn" },
-    { name = "tqdm" },
-    { name = "xgboost" },
-    { name = "yfinance" },
-]
-docs = [
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings", extra = ["python"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "debugpy" },
-    { name = "mypy" },
-    { name = "openpyxl" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", specifier = ">=1.35.0" },
-    { name = "cachetools", specifier = ">=5.3.0" },
-    { name = "catboost", marker = "extra == 'dev'", specifier = ">=1.2.8" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "fear-and-greed", specifier = ">=0.4" },
-    { name = "httpx", specifier = ">=0.25.0" },
-    { name = "huggingface-hub", specifier = ">=0.20.0" },
-    { name = "hyperliquid-python-sdk", specifier = ">=0.24.0" },
-    { name = "ibind", extras = ["oauth"], specifier = ">=0.1.23" },
-    { name = "imbalanced-learn", marker = "extra == 'dev'", git = "https://github.com/scikit-learn-contrib/imbalanced-learn?rev=master" },
-    { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.30.0" },
-    { name = "ipython", specifier = ">=9.4.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain", specifier = ">=0.3.0" },
-    { name = "langchain-openai", specifier = ">=0.2.0" },
-    { name = "lxml", specifier = ">=5.0.0" },
-    { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.10.5" },
-    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
-    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
-    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
-    { name = "numpy", specifier = "<2.4" },
-    { name = "pandas", specifier = ">=2.3.1" },
-    { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.3.1" },
-    { name = "plotly", specifier = ">=5.24.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.10" },
-    { name = "pyportfolioopt", specifier = ">=1.5.6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "quantstats", specifier = ">=0.0.62" },
-    { name = "scikit-learn", specifier = ">=1.7.1" },
-    { name = "scikit-learn", marker = "extra == 'dev'", specifier = ">=1.7.1" },
-    { name = "sqlalchemy", specifier = ">=2.0.42" },
-    { name = "ta", specifier = ">=0.11.0" },
-    { name = "telethon", specifier = ">=1.36.0" },
-    { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "tqdm", marker = "extra == 'dev'", specifier = ">=4.67.1" },
-    { name = "uvicorn", specifier = ">=0.32.0" },
-    { name = "xgboost", marker = "extra == 'dev'", specifier = ">=3.0.3" },
-    { name = "yfinance", specifier = ">=0.2.65" },
-    { name = "yfinance", marker = "extra == 'dev'", specifier = ">=0.2.65" },
-]
-provides-extras = ["dev", "docs"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "debugpy", specifier = ">=1.8.20" },
-    { name = "mypy", specifier = ">=2.3.0" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "ruff", specifier = ">=0.16.2" },
-]
-
-[[package]]
 name = "mypy"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4018,6 +3902,122 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
+]
+
+[[package]]
+name = "tradingbot-framework"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "boto3" },
+    { name = "cachetools" },
+    { name = "fastapi" },
+    { name = "fear-and-greed" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "hyperliquid-python-sdk" },
+    { name = "ibind", extra = ["oauth"] },
+    { name = "ipython" },
+    { name = "jinja2" },
+    { name = "langchain" },
+    { name = "langchain-openai" },
+    { name = "lxml" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "psycopg2-binary" },
+    { name = "pyportfolioopt" },
+    { name = "python-dotenv" },
+    { name = "quantstats" },
+    { name = "scikit-learn" },
+    { name = "sqlalchemy" },
+    { name = "ta" },
+    { name = "telethon" },
+    { name = "tqdm" },
+    { name = "uvicorn" },
+    { name = "yfinance" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "catboost" },
+    { name = "imbalanced-learn" },
+    { name = "ipykernel" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "pytest-mock" },
+    { name = "scikit-learn" },
+    { name = "tqdm" },
+    { name = "xgboost" },
+    { name = "yfinance" },
+]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings", extra = ["python"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "debugpy" },
+    { name = "mypy" },
+    { name = "openpyxl" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.35.0" },
+    { name = "cachetools", specifier = ">=5.3.0" },
+    { name = "catboost", marker = "extra == 'dev'", specifier = ">=1.2.8" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fear-and-greed", specifier = ">=0.4" },
+    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "huggingface-hub", specifier = ">=0.20.0" },
+    { name = "hyperliquid-python-sdk", specifier = ">=0.24.0" },
+    { name = "ibind", extras = ["oauth"], specifier = ">=0.1.23" },
+    { name = "imbalanced-learn", marker = "extra == 'dev'", git = "https://github.com/scikit-learn-contrib/imbalanced-learn?rev=master" },
+    { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.30.0" },
+    { name = "ipython", specifier = ">=9.4.0" },
+    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "langchain", specifier = ">=0.3.0" },
+    { name = "langchain-openai", specifier = ">=0.2.0" },
+    { name = "lxml", specifier = ">=5.0.0" },
+    { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.10.5" },
+    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
+    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
+    { name = "numpy", specifier = "<2.4" },
+    { name = "pandas", specifier = ">=2.3.1" },
+    { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.3.1" },
+    { name = "plotly", specifier = ">=5.24.0" },
+    { name = "psycopg2-binary", specifier = ">=2.9.10" },
+    { name = "pyportfolioopt", specifier = ">=1.5.6" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "quantstats", specifier = ">=0.0.62" },
+    { name = "scikit-learn", specifier = ">=1.7.1" },
+    { name = "scikit-learn", marker = "extra == 'dev'", specifier = ">=1.7.1" },
+    { name = "sqlalchemy", specifier = ">=2.0.42" },
+    { name = "ta", specifier = ">=0.11.0" },
+    { name = "telethon", specifier = ">=1.36.0" },
+    { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "tqdm", marker = "extra == 'dev'", specifier = ">=4.67.1" },
+    { name = "uvicorn", specifier = ">=0.32.0" },
+    { name = "xgboost", marker = "extra == 'dev'", specifier = ">=3.0.3" },
+    { name = "yfinance", specifier = ">=0.2.65" },
+    { name = "yfinance", marker = "extra == 'dev'", specifier = ">=0.2.65" },
+]
+provides-extras = ["dev", "docs"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "debugpy", specifier = ">=1.8.20" },
+    { name = "mypy", specifier = ">=2.3.0" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
+    { name = "ruff", specifier = ">=0.16.2" },
 ]
 
 [[package]]

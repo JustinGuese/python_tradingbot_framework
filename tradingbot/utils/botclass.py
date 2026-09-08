@@ -27,6 +27,7 @@ Example:
 """
 
 import logging
+import math
 from collections.abc import Callable
 from typing import Any, ClassVar
 
@@ -37,6 +38,7 @@ from .config import setup_logging
 from .data_service import DataService
 from .db import RunLog, get_db_session, init_db
 from .portfolio_manager import PortfolioManager
+from .weights import WEIGHT_SUM_TOLERANCE, normalize_weights, positive_weight_sum, require_normalized
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,14 @@ class Bot:
     # universe from the predictions table on every run, so a single day's gap
     # would otherwise liquidate and re-enter the whole book.
     LIQUIDATE_UNTRACKED: bool = False
+
+    # Optional override for the history backtest_bot fetches. None means "use
+    # _get_backtest_period(interval)", which is right for strategies whose signal
+    # needs a handful of bars. A strategy whose LOOKBACK approaches that default
+    # must set this or it backtests on nothing: _get_backtest_period("1d") is
+    # "1y", so a 12-month momentum signal has zero usable bars after warmup and
+    # the backtest reports a confident number computed from almost no data.
+    BACKTEST_PERIOD: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -193,14 +203,25 @@ class Bot:
         because the single-asset path fetches only self.symbol (None for a
         tickers= bot) and would never load the benchmark's data.
 
+        Precedence is targetWeights > decisionFunction > makeOneIteration, and it
+        is deliberate: targetWeights is strictly more expressive than a -1/0/1
+        signal, so a bot defining both is one whose weights function calls its
+        own decisionFunction as a helper. Ticker count does not enter into it —
+        a single-ticker targetWeights bot is legal, because sizing a lone
+        position between 0 and 1 is a strategy in its own right.
+
         Returns:
+            "target_weights" — targetWeights overridden (any ticker count)   → backtestable
             "single_asset"  — decisionFunction overridden + single ticker  → backtestable
             "multi_asset"   — decisionFunction overridden + multiple tickers → backtestable
             "event_driven"  — only makeOneIteration overridden              → NOT backtestable
             "unknown"       — neither method overridden                      → NOT backtestable
         """
+        has_tw = type(self).targetWeights is not Bot.targetWeights
         has_df = type(self).decisionFunction is not Bot.decisionFunction
         has_moi = type(self).makeOneIteration is not Bot.makeOneIteration
+        if has_tw:
+            return "target_weights"
         if has_df and len(self.tickers) > 1:
             return "multi_asset"
         if has_df and len(self.tickers) == 1:
@@ -214,10 +235,11 @@ class Bot:
         """
         True if this bot can be backtested with local_backtest() / local_optimize().
 
-        Only data-driven bots that implement decisionFunction() are backtestable.
-        Event-driven bots (makeOneIteration only) must use run() for live execution.
+        Only data-driven bots that implement decisionFunction() or targetWeights()
+        are backtestable. Event-driven bots (makeOneIteration only) must use run()
+        for live execution.
         """
-        return self.backtest_type in ("single_asset", "multi_asset")
+        return self.backtest_type in ("single_asset", "multi_asset", "target_weights")
 
     def _assert_backtestable(self) -> None:
         """Raise a clear error if this bot is not backtestable."""
@@ -225,8 +247,8 @@ class Bot:
             raise NotImplementedError(
                 f"{self.__class__.__name__} is not backtestable "
                 f"(backtest_type='{self.backtest_type}'). "
-                "Only data-driven bots that implement decisionFunction() support "
-                "local_backtest() / local_optimize(). "
+                "Only data-driven bots that implement decisionFunction() or "
+                "targetWeights() support local_backtest() / local_optimize(). "
                 "Use bot.run() for live execution."
             )
 
@@ -545,6 +567,46 @@ class Bot:
         """
         raise NotImplementedError("You need to overwrite the decisionFunction!!!!")
 
+    def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
+        """
+        Cross-sectional alternative to decisionFunction: return the target book.
+
+        Override this instead of decisionFunction when the strategy sizes
+        positions rather than merely signalling them — vol targeting, risk
+        parity, cross-sectional ranking. decisionFunction can only say -1/0/1,
+        which the framework turns into equal weights; that is a different
+        strategy from "hold each leg at constant ex-ante volatility", and
+        expressing the latter used to require makeOneIteration and thereby
+        forfeit backtesting entirely.
+
+        Args:
+            rows: The current bar for EVERY ticker in self.tickers, benchmarks
+                included — cross-sectional strategies need to see the whole
+                universe before weighting any of it. For history, read
+                self.datas[ticker], which the caller has already truncated to
+                bars at or before the current one (so there is no way to peek
+                ahead by accident).
+
+        Returns:
+            Long-only weights over TRADEABLE tickers, summing to <= 1.0.
+
+            * "USD" must NOT be a key — cash is the residual, derived by the
+              framework, so a bot cannot accidentally double-count it.
+            * An omitted ticker means weight 0, i.e. a full exit that bypasses
+              the no-trade band (the same semantics decisionFunction gives -1).
+            * Weights are validated and clamped by _coerce_target_weights(), so
+              returning something slightly off is corrected and logged rather
+              than silently traded.
+            * Returning {} goes fully to cash.
+
+        Example:
+            def targetWeights(self, rows):
+                longs = [t for t in self.tradeable_tickers
+                         if rows[t]["close"] > self.datas[t]["close"].iloc[-200:].mean()]
+                return {t: 1.0 / len(longs) for t in longs} if longs else {}
+        """
+        raise NotImplementedError("You need to overwrite targetWeights!!!!")
+
     def getLatestDecision(self, data: pd.DataFrame, nrMedianLatest: int = 1) -> int:
         """
         Get the latest trading decision by applying decisionFunction to data.
@@ -730,6 +792,11 @@ class Bot:
                 "Pass symbol= for single-asset or tickers= for multi-asset bots."
             )
 
+        # targetWeights path: takes precedence over the -1/0/1 paths, and works
+        # for any ticker count. Must come before the multi-ticker check.
+        if type(self).targetWeights is not Bot.targetWeights:
+            return self._run_target_weights_iteration()
+
         # Multi-ticker path: delegate to _run_multi_ticker_iteration
         if len(self.tickers) > 1:
             return self._run_multi_ticker_iteration()
@@ -875,6 +942,109 @@ class Bot:
         weights["USD"] = max(0.0, 1.0 - non_usd)
         return weights
 
+    def _coerce_target_weights(
+        self,
+        raw: dict[str, float],
+        allowed: set[str],
+        held_weights: dict[str, float] | None = None,
+    ) -> dict[str, float]:
+        """
+        Validate and clamp a targetWeights() return value into a tradeable book.
+
+        Pure: no I/O, no DB, no mutation of self — the same discipline as
+        _multi_ticker_target_weights and for the same reason. The caller
+        reconciles the WHOLE book against this, so a mistake here liquidates
+        positions rather than merely mis-sizing them.
+
+        Every correction is logged rather than raised. A strategy that returns
+        weights summing to 1.02 should trade at 1.00, not fail its CronJob; a
+        strategy that names a ticker it cannot trade should skip that leg, not
+        take the whole book to cash. The one thing never silently corrected is a
+        weight going somewhere it was not allowed — that is dropped, and
+        crucially NOT redistributed, so a buggy bot under-invests (visible in
+        the cash balance) instead of quietly over-weighting its other legs.
+
+        Args:
+            raw: What targetWeights() returned. Untrusted.
+            allowed: Tickers that may receive weight — always derived from
+                tradeable_tickers, which is what keeps benchmarks unfundable.
+            held_weights: Current weight of each held symbol, for pinning
+                holdings outside the universe. None on the backtest path, where
+                the portfolio starts as pure cash and only ever trades tickers
+                in the universe, so untracked holdings cannot arise.
+
+        Returns:
+            Weights including a "USD" residual, summing to 1.0. Never empty:
+            an empty or all-zero input means "go flat", which is {"USD": 1.0}.
+            (Deliberately unlike _multi_ticker_target_weights' {}, which means
+            "cannot size this run" — a targetWeights bot saying nothing is
+            making a statement, not failing to make one.)
+        """
+        bot_name = getattr(self, "bot_name", self.__class__.__name__)
+
+        weights: dict[str, float] = {}
+        dropped_unknown: list[str] = []
+        for symbol, value in (raw or {}).items():
+            if symbol == "USD":
+                continue  # cash is the residual; a bot cannot dictate it
+            try:
+                weight = float(value)
+            except (TypeError, ValueError):
+                logger.error("%s: targetWeights gave non-numeric weight for %s: %r", bot_name, symbol, value)
+                continue
+            if not math.isfinite(weight):
+                logger.error("%s: targetWeights gave non-finite weight for %s: %r", bot_name, symbol, value)
+                continue
+            if symbol not in allowed:
+                dropped_unknown.append(symbol)
+                continue
+            # Clamp rather than drop: normalize_weights documents that a key at
+            # 0.0 means "sell it" while an absent key means "leave it alone",
+            # and a bot asking for a negative weight is asking to be out.
+            weights[symbol] = max(0.0, weight)
+
+        if dropped_unknown:
+            logger.warning(
+                "%s: targetWeights named symbols it may not trade (%s) — dropped, NOT redistributed",
+                bot_name,
+                sorted(dropped_unknown),
+            )
+
+        total = positive_weight_sum(weights)
+        if total > 1.0:
+            if total > 1.0 + WEIGHT_SUM_TOLERANCE:
+                logger.error("%s: targetWeights summed to %.6f — scaling down to 1.0", bot_name, total)
+            weights = normalize_weights(weights)
+            total = positive_weight_sum(weights)
+
+        # Holdings outside the universe keep their exact current weight and are
+        # excluded from the strategy's budget — same rule as
+        # _multi_ticker_target_weights, so the two paths cannot disagree about
+        # what "untracked" means. Benchmarks are excluded from the pin, so a
+        # held benchmark is absent from the target and gets liquidated.
+        if held_weights and not getattr(self, "LIQUIDATE_UNTRACKED", False):
+            universe = set(getattr(self, "tickers", ()) or ())
+            keep = {s: w for s, w in held_weights.items() if s != "USD" and s not in universe and w > 0}
+            if keep:
+                kept_total = min(sum(keep.values()), 1.0)
+                logger.warning(
+                    "%s: holding %.1f%% in symbols outside its universe (%s); pinned and "
+                    "excluded from the sizing budget. Set LIQUIDATE_UNTRACKED to sell them.",
+                    bot_name,
+                    kept_total * 100,
+                    sorted(keep),
+                )
+                budget = max(0.0, 1.0 - kept_total)
+                if total > budget and total > 0:
+                    weights = {s: w * budget / total for s, w in weights.items()}
+                weights.update(keep)
+
+        residual = 1.0 - positive_weight_sum(weights)
+        weights["USD"] = max(0.0, residual)
+        # Free invariant assert: every caller downstream assumes this holds.
+        require_normalized(weights, context=f"{bot_name} targetWeights")
+        return weights
+
     def _run_multi_ticker_iteration(self) -> int:
         """
         Execute one live-trading iteration for a multi-ticker bot.
@@ -935,6 +1105,103 @@ class Bot:
                 logger.warning("Price prewarm failed for %s: %s", ticker, exc)
 
         total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(s, 0.0) * (prices.get(s) or 0.0) for s in symbols)
+        moves = sum(
+            1
+            for sym, w in weights.items()
+            if sym != "USD" and abs(w * total_value - portfolio.get(sym, 0.0) * (prices.get(sym) or 0.0)) > 1.0
+        )
+        logger.info(
+            "%s target weights: %s",
+            self.bot_name,
+            {s: round(w, 4) for s, w in sorted(weights.items())},
+        )
+        self.rebalancePortfolio(weights)
+        return moves
+
+    def _run_target_weights_iteration(self) -> int:
+        """
+        Execute one live-trading iteration for a targetWeights bot.
+
+        Deliberately mirrors _run_multi_ticker_iteration phase for phase — load
+        every ticker, read prices in one batch, reconcile the whole book in a
+        single rebalancePortfolio call — so the only thing that differs between
+        the two bot types is how the target is computed. Both then share the
+        backtest's execution semantics, which is what makes live/backtest parity
+        assertable rather than hoped for.
+
+        Returns:
+            Number of legs whose target differs materially from their current value
+        """
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+
+        # Load ALL tickers, benchmarks included: targetWeights is handed the
+        # whole universe because cross-sectional strategies rank across it.
+        for ticker in self.tickers:
+            self.datas[ticker] = self.getYFDataWithTA(
+                symbol=ticker,
+                saveToDB=True,
+                interval=self.interval,
+                period=self.period,
+            )
+
+        rows: dict[str, pd.Series] = {}
+        for ticker in self.tickers:
+            df = self.datas.get(ticker)
+            if df is None or df.empty:
+                # Refuse to trade a partial universe. A missing ticker would
+                # reach targetWeights as an absent row, come back with no
+                # weight, and be read as a deliberate full exit — liquidating a
+                # position because of a data outage. Failing loud beats that.
+                logger.error(
+                    "%s: no data for %s — skipping this run rather than trading a partial universe",
+                    self.bot_name,
+                    ticker,
+                )
+                return 0
+            rows[ticker] = df.iloc[-1]
+
+        portfolio = dict(self.dbBot.portfolio or {})
+        symbols = sorted({*self.tickers, *(s for s in portfolio if s != "USD")})
+        prices = self.getLatestPricesBatch(symbols)
+
+        # An unpriceable ticker leaves the universe rather than being sized
+        # against an assumed value of zero.
+        allowed = {t for t in self.tradeable_tickers if (prices.get(t) or 0.0) > 0}
+        dropped = [t for t in self.tradeable_tickers if t not in allowed]
+        if dropped:
+            logger.error("%s: dropping unpriceable tickers from this run: %s", self.bot_name, dropped)
+        if not allowed:
+            logger.error("%s: no priceable tradeable tickers — skipping rebalance", self.bot_name)
+            return 0
+
+        total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(s, 0.0) * (prices.get(s) or 0.0) for s in symbols)
+        if total_value <= 0:
+            logger.warning("%s: portfolio values at $0 — nothing to rebalance", self.bot_name)
+            return 0
+
+        held_weights = {
+            s: (q * (prices.get(s) or 0.0)) / total_value for s, q in portfolio.items() if s != "USD" and q > DUST_QTY
+        }
+
+        try:
+            raw = self.targetWeights(rows)
+        except Exception:
+            # Let run() record a failed RunLog. Trading a half-computed book is
+            # worse than not trading: the CronJob goes red and someone looks.
+            logger.exception("%s: targetWeights raised", self.bot_name)
+            raise
+
+        weights = self._coerce_target_weights(raw, allowed, held_weights=held_weights)
+
+        # Warm the module-level TTL price cache from data we already hold, so the
+        # per-leg get_latest_price calls inside the rebalance are cache hits
+        # rather than yfinance I/O executed while holding the bots row lock.
+        for ticker in sorted(allowed):
+            try:
+                self.getLatestPrice(ticker)
+            except Exception as exc:
+                logger.warning("Price prewarm failed for %s: %s", ticker, exc)
+
         moves = sum(
             1
             for sym, w in weights.items()

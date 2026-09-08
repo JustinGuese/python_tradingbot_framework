@@ -285,6 +285,19 @@ bots:
   # Moving this later than :40 would publish a stale target for a day.
   schedule: "35 21 * * 1-5" # Daily 9:35 PM UTC Mon-Fri
 
+- name: tsmomtrendbot
+  # Long-only time-series momentum across 18 sector-proxy ETFs, each leg sized to
+  # constant ex-ante vol. The trend sleeve. Runs after the US close and before the
+  # 21:20 IBKR copier. See docs/backtests/tsmomtrendbot.md.
+  schedule: "5 21 * * 1-5" # Daily 9:05 PM UTC Mon-Fri
+
+# NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented and
+# tested but deliberately not deployed: both lose money in backtest over their
+# full history. Their code and the measured results are kept because the negative
+# result is the useful part — see docs/backtests/multiassetcarrybot.md and
+# docs/backtests/shortvolcarrybot.md before rebuilding either idea. Adding a
+# `- name:` block here is all it takes to turn one on, so read those first.
+
 # Live Trade Copier — mirrors weighted paper-bot portfolios to a real brokerage.
 # See docs/guides/live-trading.md for the full guide.
 # Shared settings apply to every enabled broker; broker-specific blocks below

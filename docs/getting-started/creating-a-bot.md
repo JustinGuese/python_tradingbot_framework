@@ -141,6 +141,31 @@ if __name__ == "__main__":
 - `bot.datas` dict holds the per-ticker DataFrames after a backtest
 - `bot.backtest_type` returns `"multi_asset"`
 
+### Sizing Strategies: Override `targetWeights()`
+
+When the strategy decides *how much* to hold rather than just whether to hold —
+vol targeting, risk parity, cross-sectional ranking — return a weight dict instead
+of a -1/0/1 signal. Still fully backtestable (`backtest_type == "target_weights"`).
+
+```python
+class MySizedBot(Bot):
+    BACKTEST_PERIOD = "max"  # required if your lookback approaches the 1y default
+
+    def targetWeights(self, rows):
+        # rows: current bar for EVERY ticker, benchmarks included.
+        # History: self.datas[t], already truncated to <= the current bar.
+        longs = [t for t in self.tradeable_tickers
+                 if rows[t]["close"] > self.datas[t]["close"].iloc[-200:].mean()]
+        return {t: 0.5 / len(longs) for t in longs} if longs else {}
+```
+
+Rules: long-only, sum `<= 1.0`, **no `"USD"` key** (cash is the residual), an
+omitted ticker means a full exit, `{}` means go to cash. Weights on benchmarks or
+unknown symbols are dropped and not redistributed. `targetWeights` takes
+precedence over `decisionFunction` and `makeOneIteration`. See
+`tradingbot/tsmomtrendbot.py` for a worked example and
+`tradingbot/utils/vol_target.py` for the sizing helpers.
+
 ### Medium Complexity: Override `makeOneIteration()`
 
 For external APIs or custom data processing:
