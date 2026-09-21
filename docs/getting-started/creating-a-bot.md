@@ -154,8 +154,7 @@ class MySizedBot(Bot):
     def targetWeights(self, rows):
         # rows: current bar for EVERY ticker, benchmarks included.
         # History: self.datas[t], already truncated to <= the current bar.
-        longs = [t for t in self.tradeable_tickers
-                 if rows[t]["close"] > self.datas[t]["close"].iloc[-200:].mean()]
+        longs = [t for t in self.tradeable_tickers if rows[t]["close"] > self.datas[t]["close"].iloc[-200:].mean()]
         return {t: 0.5 / len(longs) for t in longs} if longs else {}
 ```
 
