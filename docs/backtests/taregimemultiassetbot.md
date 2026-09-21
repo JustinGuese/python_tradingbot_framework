@@ -34,6 +34,12 @@ Same parameters in every row. SPY-only is what TARegimeAdaptiveBot trades.
 | 2023-03 → 2026-09 | SPY only | 22.9% | 0.62 | 16.5% | 0.38 | −3.5% | −0.85 |
 | | macro8 | 26.7% | 1.40 | 4.7% | 0.11 | +4.0% | 1.65 |
 
+**A second split** (from the re-tune on 2026-09-21; see retune-2026-09.md) cuts at
+2023-01 instead: alpha was +3.1% in 2019–2022 (t 1.18) and +3.1% in 2023–2026
+(t 1.36), with beta 0.11 in both halves and a full-sample t of 1.72. The H1-tuned
+parameters did slightly worse on the unseen half, so the defaults stay. That makes
+the alpha steadier than the first split suggested. It still does not clear t ≥ 2.
+
 ## Verdict
 
 - **What holds up in both halves is lower risk, not alpha.** Beta is 0.10–0.11

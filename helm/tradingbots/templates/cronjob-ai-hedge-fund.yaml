@@ -10,6 +10,7 @@ metadata:
     meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
 spec:
   schedule: "0 22 * * 3"
+  suspend: {{ (.Values.aiHedgeFund).suspend | default false }}
   successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ $.Values.cronjob.failedJobsHistoryLimit }}
   concurrencyPolicy: {{ $.Values.cronjob.concurrencyPolicy }}

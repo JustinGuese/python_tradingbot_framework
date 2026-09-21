@@ -80,3 +80,15 @@ default (buy at ≤30, exit at ≥50). TARegimeMultiAssetBot runs as paper only.
 of those reliably cut beta by about half or more in backtests, but neither has
 alpha that holds up in both halves of the sample. See
 docs/backtests/taregimemultiassetbot.md and the comment in feargreedbot.py.
+
+Second pass (same day):
+- **Also paused:** SynthesizedHyperConvexityBot (−26%/yr alpha, 3x TQQQ/SQQQ),
+  AIHedgeFundBot and DeepSeekToolBot. The two AI bots had beta ~0.7 with negative
+  alpha, and every run makes paid LLM calls. `aiHedgeFund.suspend` pauses the
+  AIHedgeFundBot feeder too.
+- **`TRADEABLE` has no leveraged or inverse ETFs.** RegimeAdaptive,
+  EarningsInsiderTilt and SharpePortfolioOpt sell TQQQ/UPRO/FAS/TMF/SQQQ on their
+  next rebalance.
+- **Re-tunes are walk-forward.** Grid-search on 2019–2022, then judge the winner
+  against the defaults on 2023–2026. New parameters ship only if they beat the
+  defaults out of sample. For the harness, see docs/backtests/retune-2026-09.md.

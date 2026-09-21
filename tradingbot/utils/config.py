@@ -52,6 +52,12 @@ REQUIRED_DATA_COLUMNS = [
 ]
 
 # Canonical tradeable symbol universe shared by Sharpe, earnings-insider, regime, and AI tool bots.
+#
+# No leveraged or inverse ETFs (TQQQ, UPRO, FAS, TMF and SQQQ were removed on
+# 2026-09-21). The bots on this universe start from equal weight, so 3x legs
+# only add beta and daily-reset decay; there is no alpha in holding them, and
+# the target is alpha vs QQQ (CLAUDE.md). A bot still holding one sells it on
+# its next rebalance, because a symbol outside the target is a full exit there.
 TRADEABLE = [
     "GLD",
     "AAPL",
@@ -82,17 +88,12 @@ TRADEABLE = [
     "BTC-USD",
     "ETH-USD",
     "AVAX-USD",
-    "TMF",
-    "FAS",
-    "TQQQ",
     "QQQ",
     "UUP",
     "META",
     "PYPL",
     "ADBE",
-    "UPRO",
     "BSV",
-    "SQQQ",
     "NTSX",
     "DBMF",
     "VDE",

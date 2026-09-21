@@ -29,7 +29,7 @@ except ImportError:
             pass
 
 
-from .backtest import ALPHA_BENCHMARK, _close_series, _get_backtest_period, backtest_bot
+from .backtest import ALPHA_BENCHMARK, _close_series, _resolve_backtest_period, backtest_bot
 from .botclass import Bot
 
 logger = logging.getLogger(__name__)
@@ -239,8 +239,11 @@ def tune_hyperparameters(
         temp_bot = bot_class()  # type: ignore[call-arg]
         is_multi = len(getattr(temp_bot, "tickers", [])) > 1
 
-        # Determine appropriate period based on interval (respects Yahoo Finance limits)
-        backtest_period = _get_backtest_period(temp_bot.interval)
+        # The same period backtest_bot would fetch: the bot's BACKTEST_PERIOD
+        # override, else the interval default. This used _get_backtest_period
+        # directly, which ignores the override, so TSMOMTrendBot ("max") was
+        # tuned on 1y of data while its own backtest used its full history.
+        backtest_period = _resolve_backtest_period(temp_bot)
 
         if is_multi:
             # Multi-ticker: pre-fetch a dict of DataFrames, one per ticker

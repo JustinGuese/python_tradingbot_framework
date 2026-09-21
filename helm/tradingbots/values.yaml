@@ -201,6 +201,11 @@ postgresql:
 #   "0 17 * * 2"        - Weekly on Tuesday at 5:00 PM
 #   "0 */4 * * 1-5"     - Every 4 hours, Monday-Friday
 #   "30 17 * * 1-5"     - Daily at 5:30 PM, Monday-Friday
+# Feeder CronJob for aihedgefundbot (templates/cronjob-ai-hedge-fund.yaml). It
+# makes paid LLM calls, so it is paused together with that bot.
+aiHedgeFund:
+  suspend: true
+
 bots:
 - name: eurusdtreebot
   schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
@@ -231,9 +236,15 @@ bots:
 - name: aihedgefundbot
   # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
   schedule: "10 22 * * 3" # Weekly on Wednesday at 10:10 PM
+  # PAUSED 2026-09-21: beta 0.76 with alpha -13%/yr (t -0.36), max DD -15%. That is worse
+  # than holding QQQ, and it runs on paid LLM calls. aiHedgeFund.suspend pauses its feeder.
+  suspend: true
 
 - name: aideepseektoolbot
   schedule: "18 18 * * 4" #  at 6:18 PM, Thursday
+  # PAUSED 2026-09-21: beta 0.67 with alpha -11%/yr (t -0.64). Worse than QQQ, and it
+  # runs on paid LLM calls.
+  suspend: true
 
 - name: regimeadaptivebot
   schedule: "20 20 * * 3" # Weekly on Wednesday at 8:20 PM
@@ -267,6 +278,9 @@ bots:
 
 - name: synthesizedhyperconvexitybot
   schedule: "30 21 * * 1-5" # Daily 9:30 PM UTC (30 min after US close), Mon-Fri
+  # PAUSED 2026-09-21: 3x TQQQ/SQQQ, alpha -26%/yr (t -0.93), max DD -16%. Holds TQQQ,
+  # which stays frozen: liquidate the paper row if you want it flat.
+  suspend: true
 
 - name: recursivedecayharvestbot
   schedule: "45 21 * * 1-5" # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
