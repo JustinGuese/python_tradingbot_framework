@@ -33,7 +33,7 @@ namespace: tradingbots-2025
 # Kubernetes secret name
 # This secret must be created manually before deploying (see README.md)
 # All secrets (database, API keys, passwords) are stored in this single secret
-secretName: tradingbot-secrets # Secret name created from .env file
+secretName: tradingbot-secrets # managed by `ske apply` from .env.secret.enc (see [tool.ske] in pyproject.toml)
 
 # Image pull secrets for private Docker registry authentication
 imagePullSecrets:

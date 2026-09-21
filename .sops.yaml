@@ -1,0 +1,5 @@
+creation_rules:
+  - path_regex: \.env\.secret$
+    age: age1rnv7ywg5pgzjpwn404vhqltg7d8l0vusugdegq5j0f6vnekre39s0z2v90
+# NOTE: `input_type: dotenv` here would be silently ignored by sops.
+# Per-key encryption comes from the CLI flags, which ske always passes.

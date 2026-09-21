@@ -126,7 +126,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+# (.env is committed: public defaults only. Credentials -> /.env.secret below.)
 .venv
 env/
 venv/
@@ -178,3 +178,6 @@ oauth.env
 
 # Claude Code scratch worktrees
 .claude/worktrees/
+
+# Plaintext credentials. The encrypted copy (.env.secret.enc) is committed.
+/.env.secret

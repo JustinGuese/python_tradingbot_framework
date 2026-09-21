@@ -142,3 +142,9 @@ module = [
     "fear_and_greed", "cachetools.*", "scipy.*", "tqdm.*",
 ]
 ignore_missing_imports = true
+
+[tool.ske]
+namespace = "tradingbots-2025"
+configmap = "tradingbot-env"     # non-secret env (from .env.cloud)
+secret    = "tradingbot-secrets" # must match .Values.secretName in the Helm chart
+config_files = [".env.cloud"]    # .env holds local-dev values; pods take settings from values.yaml
