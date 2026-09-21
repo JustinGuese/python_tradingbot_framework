@@ -50,7 +50,11 @@ class LiveTradeCopier:
         broker_target_weights = {}  # broker_symbol -> {"weight": float, "type": str}
         unmapped_tickers = []
 
+        dropped: dict[str, float] = {}
         for yf_symbol, weight in target_weights.items():
+            if not self.broker.is_tradeable(yf_symbol):
+                dropped[yf_symbol] = weight
+                continue
             meta = self.broker.map_symbol(yf_symbol)
             mapped = meta.get("symbol") if meta else None
             # A leading "^" means the default rules passed an index ticker through
@@ -63,6 +67,12 @@ class LiveTradeCopier:
             else:
                 logger.warning(f"Ticker {yf_symbol} is unmapped")
                 unmapped_tickers.append(yf_symbol)
+
+        if dropped:
+            logger.warning(
+                f"{self.broker.name} cannot trade {sorted(dropped)}; dropping "
+                f"{sum(dropped.values()):.1%} of target weight (held as cash, not redistributed)"
+            )
 
         if unmapped_tickers and self.strict_mapping:
             logger.error(f"STRICT MODE: Aborting sync due to unmapped tickers: {unmapped_tickers}")

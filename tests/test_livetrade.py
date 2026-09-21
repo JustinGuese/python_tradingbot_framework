@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.copier import LiveTradeCopier
@@ -113,6 +113,28 @@ class TestLiveTrade(unittest.TestCase):
             self.copier.sync()
         self.assertTrue(any("STRICT MODE: Aborting sync" in line for line in cm.output))
         self.broker.place_order.assert_not_called()
+
+    def test_untradeable_leg_is_dropped_to_cash_not_redistributed(self):
+        """A leg the broker structurally cannot trade (foreign listing, crypto) is
+        dropped, NOT counted as unmapped — so strict mapping does not abort the
+        whole sync — and its weight is not pushed onto the remaining legs."""
+        self.copier.strict_mapping = True
+        mock_bot = MagicMock(spec=Bot)
+        mock_bot.portfolio = {"USD": 0, "QQQ": 10, "RENW.DE": 10}
+        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.data_service.get_latest_prices_batch.return_value = {"QQQ": 100.0, "RENW.DE": 100.0}
+        self.broker.is_tradeable.side_effect = lambda s: not s.endswith(".DE")
+        self.broker.map_symbol.side_effect = lambda s: {"symbol": s, "type": "stock"}
+        self.broker.get_total_equity.return_value = 1000.0
+        self.broker.get_positions.return_value = {}
+        self.broker.cancel_open_orders.return_value = 0
+
+        with patch.object(self.copier, "_calculate_orders", return_value=[]) as calc:
+            self.copier.sync()
+
+        targets = calc.call_args.args[0]
+        self.assertEqual(set(targets), {"QQQ"})
+        self.assertAlmostEqual(targets["QQQ"]["weight"], 0.5)  # 50% stays cash
 
     def test_translated_index_ticker_still_maps(self):
         """Regression: ^GSPC -> SPX loses the caret and must keep working."""

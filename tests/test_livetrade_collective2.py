@@ -210,3 +210,15 @@ def test_c2_place_order_reports_field_level_rejection(broker, caplog):
             broker.place_order("ZZZZNOTREAL", 1, "SELL", symbol_type="stock")
     assert "C2 Order Failed: Symbol: Invalid symbol" in caplog.text
     assert "C2 Order Success" not in caplog.text
+
+
+@pytest.mark.parametrize("symbol", ["QQQ", "TQQQ", "TMF", "DBO", "^XAU", "EURUSD=X"])  # ^XAU maps to GDX
+def test_c2_is_tradeable_accepts_us_listings(broker, symbol):
+    assert broker.is_tradeable(symbol) is True
+
+
+@pytest.mark.parametrize("symbol", ["RENW.DE", "IWDA.AS", "BTEC.L", "BTC-USD", "AVAX-USD", "^DJI"])
+def test_c2_is_tradeable_rejects_venues_c2_cannot_fill(broker, symbol):
+    """The default mapper passes these through unchanged, so nothing else stops
+    a nightly order C2 rejects."""
+    assert broker.is_tradeable(symbol) is False

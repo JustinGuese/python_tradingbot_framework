@@ -36,6 +36,16 @@ class LiveBroker(ABC):
     def disconnect(self) -> None:  # noqa: B027
         """Close any session opened by connect(). No-op by default."""
 
+    def is_tradeable(self, yf_symbol: str) -> bool:
+        """Whether this broker can trade the symbol at all.
+
+        Distinct from map_symbol: a symbol the broker structurally cannot
+        trade (a foreign listing, crypto on an equities venue) is DROPPED from
+        the target — its weight stays in cash — rather than counted as
+        "unmapped", which under strict mapping aborts the whole sync.
+        """
+        return True
+
     def __enter__(self) -> "LiveBroker":
         self.connect()
         return self

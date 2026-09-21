@@ -359,7 +359,14 @@ liveTrade:
     enabled: true
     schedule: "50 21 * * 1-5" # 9:50 PM UTC (C2 :10, IB :20, eToro :30, Darwinex :40)
     systemId: "155809898"
-    botWeights: '{"AdaptiveMeanReversionBot": 0.5,"SynthesizedHyperConvexityBot": 0.5}'
+    # Switched 2026-09-21 from AdaptiveMeanReversionBot + SynthesizedHyperConvexityBot,
+    # which was ~leveraged QQQ (corr 0.93, beta 0.82, max DD -12% vs QQQ's -7%) and had
+    # made 1 trade in 5 months — nothing to sell on C2. Over the common live window
+    # (2026-04-15..09-18, 79d) this blend: Sharpe 2.17, max DD -2.9%, corr to QQQ 0.45.
+    # Short sample and paper fills before Aug 2026 carried no costs — treat as a
+    # shortlist, not proof. Legs C2 cannot trade (.DE/.AS/.L listings, crypto) are
+    # dropped to cash by Collective2Broker.is_tradeable, not redistributed.
+    botWeights: '{"KronosTraderBot": 0.34,"RegimeAdaptiveBot": 0.33,"EarningsInsiderTiltBot": 0.33}'
     # LIVE, and now genuinely reconciling. sync() is a full target-state sync, so the
     # first run with a non-empty target WILL liquidate whatever strategy 155809898 still
     # holds from the old handover and rebuild to QQQ/TQQQ. That did not happen while the

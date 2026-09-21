@@ -205,6 +205,21 @@ class Collective2Broker(LiveBroker):
             logger.error(f"Exception submitting C2 order: {e}")
             raise
 
+    def is_tradeable(self, yf_symbol: str) -> bool:
+        """C2 trades US stocks/ETFs only here.
+
+        Judged on the *mapped* symbol so an explicit override (^XAU -> GDX)
+        still counts. Any remaining exchange suffix (RENW.DE, IWDA.AS,
+        BTEC.L), index caret, or a crypto pair (BTC-USD, mapped to type
+        "crypto" — C2 lists only stock/forex/futures) is a venue C2 rejects, and
+        the default mapper passes those through, so nothing else would catch them.
+        """
+        meta = self.map_symbol(yf_symbol)
+        if not meta or not meta.get("symbol") or meta.get("type") == "crypto":
+            return False
+        mapped = meta["symbol"]
+        return not any(ch in mapped for ch in ".-^")
+
     def map_symbol(self, yf_symbol: str) -> dict | None:
         return self.symbol_mapper.map_symbol(yf_symbol, broker_name=self.name)
 
