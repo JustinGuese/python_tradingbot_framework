@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -129,12 +130,65 @@ class TestLiveTrade(unittest.TestCase):
         self.broker.get_positions.return_value = {}
         self.broker.cancel_open_orders.return_value = 0
 
+        self.copier.cash_proxy = None  # isolate the drop rule from cash parking
+
         with patch.object(self.copier, "_calculate_orders", return_value=[]) as calc:
             self.copier.sync()
 
         targets = calc.call_args.args[0]
         self.assertEqual(set(targets), {"QQQ"})
         self.assertAlmostEqual(targets["QQQ"]["weight"], 0.5)  # 50% stays cash
+
+    # ------------------------------------------------------------------ #
+    #  Idle cash -> cash proxy (SHV)                                      #
+    # ------------------------------------------------------------------ #
+
+    def _park(self, targets, proxy="SHV", buffer=0.02, tradeable=True):
+        self.copier.cash_proxy = proxy
+        self.copier.cash_buffer = buffer
+        self.broker.is_tradeable.side_effect = lambda s: tradeable
+        self.broker.map_symbol.side_effect = lambda s: {"symbol": s, "type": "stock"}
+        self.copier._park_idle_cash(targets)
+        return targets
+
+    def test_idle_cash_parked_in_proxy_minus_buffer(self):
+        targets = self._park({"QQQ": {"weight": 0.6, "type": "stock"}})
+        self.assertAlmostEqual(targets["SHV"]["weight"], 0.38)
+        self.assertAlmostEqual(targets["QQQ"]["weight"], 0.6)
+
+    def test_proxy_already_held_by_a_bot_is_topped_up_not_replaced(self):
+        targets = self._park({"QQQ": {"weight": 0.5, "type": "stock"}, "SHV": {"weight": 0.1, "type": "stock"}})
+        self.assertAlmostEqual(targets["SHV"]["weight"], 0.1 + 0.38)
+
+    def test_fully_invested_book_parks_nothing(self):
+        targets = self._park({"QQQ": {"weight": 0.99, "type": "stock"}})
+        self.assertNotIn("SHV", targets)
+
+    def test_untradeable_or_disabled_proxy_leaves_cash(self):
+        self.assertNotIn("SHV", self._park({"QQQ": {"weight": 0.5, "type": "stock"}}, tradeable=False))
+        self.assertEqual(
+            self._park({"QQQ": {"weight": 0.5, "type": "stock"}}, proxy=None), {"QQQ": {"weight": 0.5, "type": "stock"}}
+        )
+
+    def test_cash_proxy_comes_from_broker_and_env_overrides(self):
+        self.broker.cash_proxy = "SHV"
+        with patch.dict("os.environ"):
+            os.environ.pop("LIVETRADE_CASH_PROXY", None)
+            self.assertEqual(LiveTradeCopier(broker=self.broker, bot_weights={}).cash_proxy, "SHV")
+        self.broker.cash_proxy = None
+        self.assertIsNone(LiveTradeCopier(broker=self.broker, bot_weights={}).cash_proxy)
+        for value, expected in (("BIL", "BIL"), ("none", None), ("", None)):
+            with patch.dict("os.environ", {"LIVETRADE_CASH_PROXY": value}):
+                self.assertEqual(LiveTradeCopier(broker=self.broker, bot_weights={}).cash_proxy, expected)
+
+    def test_venues_without_us_etfs_default_to_plain_cash(self):
+        from tradingbot.livetrade.collective2 import Collective2Broker
+        from tradingbot.livetrade.darwinex import DarwinexBroker
+        from tradingbot.livetrade.hyperliquid import HyperliquidBroker
+
+        self.assertEqual(Collective2Broker.cash_proxy, "SHV")
+        self.assertIsNone(DarwinexBroker.cash_proxy)
+        self.assertIsNone(HyperliquidBroker.cash_proxy)
 
     def test_translated_index_ticker_still_maps(self):
         """Regression: ^GSPC -> SPX loses the caret and must keep working."""

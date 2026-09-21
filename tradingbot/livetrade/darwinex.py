@@ -17,6 +17,9 @@ class DarwinexBroker(LiveBroker):
     Docs: https://dxtrade.darwinex.com/dxsca-web/specs (if available)
     """
 
+    # DXtrade carries no stocks or ETFs, so there is no T-bill ETF to park cash in.
+    cash_proxy = None
+
     # Darwinex serves both demo and live accounts off the same DXtrade host;
     # the account_id distinguishes them. Override LIVE_URL here if Darwinex
     # ever splits them onto separate subdomains.

@@ -113,6 +113,8 @@ If you have $100,000 in your live account and configure:
 | `LIVETRADE_DRY_RUN` | `true`: Logs orders without sending them. **Always start here.** |
 | `LIVETRADE_STRICT_MAPPING` | `true`: **Aborts the sync** if any target ticker is unmapped, instead of silently skipping it. |
 | `LIVETRADE_PORTFOLIO_FRACTION` | Fraction of broker equity to allocate to copy-trading. Default `1.0` (use the full account); `0.5` would mirror the bot portfolios into half the account and leave the rest as cash. Range: `(0, 1]`. |
+| `LIVETRADE_CASH_PROXY` | T-bill ETF that idle target weight (bot cash plus legs the broker cannot trade) is parked in, so it earns ~4–5%/yr at zero beta instead of 0%. It is netted across bots and only trades when the cash share moves by more than `LIVETRADE_MIN_ORDER_USD`. Unset means the broker's default: `SHV` for Collective2, IBKR and eToro, plain cash for Darwinex and Hyperliquid (no US ETFs there). `none` means always plain cash. |
+| `LIVETRADE_CASH_BUFFER` | Share of equity kept as real cash for fees and fills when parking in the cash proxy (default `0.02`). |
 
 ### Enabling the Copiers in Helm
 

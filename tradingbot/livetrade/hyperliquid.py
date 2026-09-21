@@ -43,6 +43,9 @@ HL_MIN_ORDER_USD = 10.0
 
 
 class HyperliquidBroker(LiveBroker):
+    # Perps venue: idle margin stays USDC, there is no T-bill ETF to park it in.
+    cash_proxy = None
+
     def __init__(
         self,
         private_key: str,

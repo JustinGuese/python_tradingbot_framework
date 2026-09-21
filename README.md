@@ -15,6 +15,29 @@ This framework allows developers to build, backtest, and deploy automated tradin
 - **Data Consistency**: Built-in caching and PostgreSQL persistence for trade history and market data.
 - **Backtesting to Production**: One class handles local testing, hyperparameter optimization, and live execution.
 
+## 🎯 The Target: Alpha vs QQQ, Not Return
+
+Bots are judged by their **annualised alpha against QQQ**: the daily return left
+over after removing the bot's QQQ exposure (beta), along with that alpha's
+t-stat. Raw return and Sharpe alone are not the target.
+
+**Why:** QQQ exposure costs nothing, since you can just buy QQQ. In a bull market,
+raw return rewards bots that merely *are* QQQ, or leveraged QQQ, and punishes
+low-beta bots that are doing exactly their job. A bot with beta ≈ 1 and zero
+alpha adds nothing to a portfolio that already holds QQQ. A low-correlation
+bot with positive alpha is the only kind that makes the whole book better.
+
+Rules of thumb:
+- `beta = cov(bot, QQQ) / var(QQQ)`, `alpha = mean(bot − beta·QQQ) × 252`,
+  computed on weekday `portfolio_worth` returns.
+- **t-stat ≥ 2 before calling an edge real.** A few months of live data rarely
+  gets there, so treat anything less as unproven.
+- Prefer **beta / correlation < 0.5**. A high-beta, zero-alpha bot should be
+  replaced with QQQ itself.
+- Pause bots whose alpha is significantly negative (t ≤ −2).
+
+See [CLAUDE.md](CLAUDE.md) for the full method and the latest fleet snapshot.
+
 ## 🛠 System Architecture
 
 The system is designed to be lightweight and stateless. Each "Bot" is a containerized instance triggered by a schedule.
@@ -104,8 +127,13 @@ class RSIBot(Bot):
 
 # Optimize and backtest
 bot = RSIBot()
-bot.local_development()  # Finds best params, then backtests
+bot.local_development()  # Finds best params (by alpha t-stat vs QQQ), then backtests
 ```
+
+Every backtest reports `alpha`, `alpha_t`, `beta` and `benchmark_corr` against QQQ.
+The optimizer ranks by `alpha_t` by default. Pass `objective="sharpe_ratio"` or
+`"yearly_return"` to rank the old way, but in a bull market both of those favour
+bots that are just QQQ.
 
 **Key Features**:
 

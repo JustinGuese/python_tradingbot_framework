@@ -1218,7 +1218,7 @@ class Bot:
     def local_optimize(
         self,
         param_grid: dict[str, list[Any]] | None = None,
-        objective: str = "sharpe_ratio",
+        objective: str = "alpha_t",
         initial_capital: float = 10000.0,
         n_jobs: int | None = None,
         param_sample_ratio: float = 1.0,
@@ -1231,7 +1231,8 @@ class Bot:
 
         Args:
             param_grid: Optional parameter grid to use. If None, uses self.param_grid or class attribute.
-            objective: Metric to maximize ("sharpe_ratio" or "yearly_return")
+            objective: Metric to maximize, one of hyperparameter_tuning.OBJECTIVES
+                       (default "alpha_t": t-stat of alpha vs QQQ)
             initial_capital: Starting capital for backtests
             n_jobs: Number of parallel jobs (None = auto-detect)
             param_sample_ratio: Fraction of param combinations to test (0.0–1.0). 1.0 = all (default).
@@ -1295,6 +1296,13 @@ class Bot:
         logger.info(f"Buy & Hold Return: {results['buy_hold_return']:.2%}")
         logger.info(f"Outperformance vs B&H: {(results['yearly_return'] - results['buy_hold_return']):+.2%}")
         logger.info(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+        if results.get("alpha") is not None:
+            logger.info(
+                f"Alpha vs QQQ: {results['alpha']:+.2%}/yr (t={results['alpha_t']:.2f}), "
+                f"Beta: {results['beta']:.2f}, Corr: {results['benchmark_corr']:.2f}"
+            )
+        else:
+            logger.info("Alpha vs QQQ: n/a (no QQQ data overlapping the backtest)")
         logger.info(f"Number of Trades: {results['nrtrades']}")
         logger.info(f"Max Drawdown: {results['maxdrawdown']:.2%}")
         return results
@@ -1302,7 +1310,7 @@ class Bot:
     def local_development(
         self,
         param_grid: dict[str, list[Any]] | None = None,
-        objective: str = "sharpe_ratio",
+        objective: str = "alpha_t",
         initial_capital: float = 10000.0,
         n_jobs: int | None = None,
         param_sample_ratio: float = 1.0,
@@ -1317,7 +1325,8 @@ class Bot:
 
         Args:
             param_grid: Optional parameter grid to use. If None, uses self.param_grid or class attribute.
-            objective: Metric to maximize ("sharpe_ratio" or "yearly_return")
+            objective: Metric to maximize, one of hyperparameter_tuning.OBJECTIVES
+                       (default "alpha_t": t-stat of alpha vs QQQ)
             initial_capital: Starting capital for backtests
             n_jobs: Number of parallel jobs (None = auto-detect)
             param_sample_ratio: Fraction of param combinations to test (0.0–1.0). 1.0 = all (default).

@@ -13,6 +13,14 @@ from .portfolio_manager import should_trade
 
 logger = logging.getLogger(__name__)
 
+# What alpha is measured against. QQQ exposure is free (anyone can buy QQQ), so
+# a bot is only worth running for the return it adds beyond its QQQ beta — see
+# CLAUDE.md "The target: alpha vs QQQ, not return".
+ALPHA_BENCHMARK = "QQQ"
+ALPHA_KEYS = ("alpha", "alpha_t", "beta", "benchmark_corr")
+# Intervals whose bars are one per session, so timestamps align on the date.
+_SESSION_INTERVALS = {"1d", "5d", "1wk", "1mo", "3mo"}
+
 
 def _iso(timestamp: Any) -> str | None:
     """Render a bar timestamp as ISO-8601 for the API/chart layer, or None if unusable."""
@@ -294,6 +302,111 @@ def _compute_backtest_metrics(
     }
 
 
+def _close_series(df: pd.DataFrame) -> pd.Series:
+    """Close prices indexed by timestamp, from a long-format OHLCV frame."""
+    if "timestamp" in df.columns:
+        return pd.Series(df["close"].to_numpy(dtype=float), index=pd.Index(df["timestamp"])).dropna()
+    return df["close"].astype(float).dropna()
+
+
+def _align_index(timestamps: Any, interval: str) -> pd.DatetimeIndex:
+    """Tz-naive UTC timestamps, truncated to the date for session bars.
+
+    Daily bars from different sources disagree on the time of day (midnight vs
+    the close, local vs UTC), so an exact-timestamp join of the strategy curve
+    against the benchmark can silently match nothing.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(pd.Index(timestamps), utc=True)).tz_convert(None)
+    return idx.normalize() if interval in _SESSION_INTERVALS else idx
+
+
+def _compute_alpha_metrics(
+    portfolio_values: list,
+    portfolio_timestamps: list,
+    benchmark_close: pd.Series | None,
+    interval: str,
+) -> dict[str, float | None]:
+    """
+    Alpha, its t-stat, beta and correlation of the strategy against the benchmark.
+
+    OLS of per-bar strategy returns on benchmark returns over the bars both
+    series share: beta = cov/var, alpha = mean residual annualised, and
+    t = mean residual / its std * sqrt(n). Every key is None when there is no
+    benchmark to measure against — deliberately not 0.0, which would read as
+    "measured, no edge" and let an optimizer rank on nothing.
+    """
+    unavailable: dict[str, float | None] = dict.fromkeys(ALPHA_KEYS)
+    if benchmark_close is None or len(benchmark_close) < 3:
+        return unavailable
+    if not portfolio_timestamps or any(t is None for t in portfolio_timestamps):
+        return unavailable
+
+    port = pd.Series(portfolio_values, index=_align_index(portfolio_timestamps, interval), dtype=float)
+    bench = pd.Series(
+        benchmark_close.to_numpy(dtype=float), index=_align_index(benchmark_close.index, interval), dtype=float
+    )
+    port = port[~port.index.duplicated(keep="last")]
+    bench = bench[~bench.index.duplicated(keep="last")]
+    joined = pd.concat({"p": port, "b": bench}, axis=1, join="inner").sort_index()
+    rets = joined.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    if len(rets) < 3:
+        return unavailable
+
+    var_b = float(rets["b"].var())
+    if not np.isfinite(var_b) or var_b <= 0:
+        return unavailable
+
+    beta = float(rets["p"].cov(rets["b"]) / var_b)
+    resid = rets["p"] - beta * rets["b"]
+    resid_std = float(resid.std())
+    alpha_t = float(resid.mean() / resid_std * np.sqrt(len(resid))) if resid_std > 0 else 0.0
+    # A flat (all-cash) curve has no correlation to define; corr would divide by 0.
+    corr = float(rets["p"].corr(rets["b"])) if rets["p"].std() > 0 else 0.0
+    return {
+        "alpha": float(resid.mean() * _get_periods_per_year(interval)),
+        "alpha_t": alpha_t if np.isfinite(alpha_t) else 0.0,
+        "beta": beta,
+        "benchmark_corr": corr if np.isfinite(corr) else 0.0,
+    }
+
+
+def _resolve_benchmark_close(
+    bot: Bot,
+    benchmark_close: pd.Series | None,
+    data: pd.DataFrame | dict[str, pd.DataFrame],
+    data_was_given: bool,
+    period: str | None,
+    save_to_db: bool,
+) -> pd.Series | None:
+    """
+    The benchmark close series to measure alpha against, or None.
+
+    Reuses the backtest's own data when it already contains the benchmark. A
+    caller that supplied `data` owns data fetching (the UI backend, the tuner),
+    so the benchmark is never fetched behind its back — it passes
+    `benchmark_close` instead, or gets None.
+    """
+    if benchmark_close is not None:
+        return benchmark_close
+    if isinstance(data, dict) and ALPHA_BENCHMARK in data:
+        return _close_series(data[ALPHA_BENCHMARK])
+    if isinstance(data, pd.DataFrame) and bot.symbol == ALPHA_BENCHMARK:
+        return _close_series(data)
+    if data_was_given or period is None:
+        return None
+    try:
+        # The data service, not bot.getYFData: on a single-ticker bot that would
+        # overwrite bot.data with the benchmark's bars.
+        return _close_series(
+            bot._data_service.get_yf_data(
+                symbol=ALPHA_BENCHMARK, interval=bot.interval, period=period, save_to_db=save_to_db, use_cache=True
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch {ALPHA_BENCHMARK} for alpha metrics: {e}")
+        return None
+
+
 def _save_backtest_to_db(
     bot: Bot,
     symbol_key: str,
@@ -398,6 +511,7 @@ def backtest_bot(
     risk_free_rate: float = 0.0,
     save_results_to_db: bool = True,
     return_series: bool = False,
+    benchmark_close: pd.Series | None = None,
 ) -> dict:
     """
     Backtest a trading bot over historical data.
@@ -420,10 +534,17 @@ def backtest_bot(
         save_results_to_db: Whether to save best result to database.
         return_series: Also return the intra-backtest series for charting
                        (default: False, so existing callers are unaffected).
+        benchmark_close: ALPHA_BENCHMARK (QQQ) close prices indexed by timestamp,
+                       for the alpha metrics. Optional: when omitted it is taken
+                       from `data` if present there, else fetched — but only
+                       when `data` is None too.
 
     Returns:
         Dictionary with keys: yearly_return, buy_hold_return, sharpe_ratio,
-        nrtrades, maxdrawdown, sortino_ratio, calmar_ratio, win_rate, volatility.
+        nrtrades, maxdrawdown, sortino_ratio, calmar_ratio, win_rate, volatility,
+        plus alpha, alpha_t, beta, benchmark_corr against ALPHA_BENCHMARK
+        (see _compute_alpha_metrics; each is None when no benchmark was
+        available).
 
         Note that `yearly_return` is the TOTAL return over the backtest window,
         not an annualized figure, despite the name. Presentation layers should
@@ -456,6 +577,7 @@ def backtest_bot(
             "Bots that only override makeOneIteration() are not supported."
         )
 
+    data_was_given = data is not None
     tickers = getattr(bot, "tickers", None) or ([bot.symbol] if bot.symbol else [])
     if not tickers:
         raise ValueError("Bot must have tickers or symbol defined for backtesting.")
@@ -691,6 +813,8 @@ def backtest_bot(
             )
 
         metrics = _compute_backtest_metrics(portfolio_values, bot.interval, risk_free_rate)
+        bench = _resolve_benchmark_close(bot, benchmark_close, data_dict, data_was_given, backtest_period, save_to_db)
+        metrics.update(_compute_alpha_metrics(portfolio_values, portfolio_timestamps, bench, bot.interval))
 
         # Buy-and-hold: equal-weight mean of individual B&H returns across the
         # TRADEABLE tickers. Including a benchmark here would average SPY into
@@ -865,6 +989,8 @@ def backtest_bot(
         benchmark_values.append(initial_capital * current_price / first_price)
 
     metrics = _compute_backtest_metrics(portfolio_values, bot.interval, risk_free_rate)
+    bench = _resolve_benchmark_close(bot, benchmark_close, data, data_was_given, backtest_period, save_to_db)
+    metrics.update(_compute_alpha_metrics(portfolio_values, portfolio_timestamps, bench, bot.interval))
 
     close = data["close"].dropna()
     if len(close) < 2:

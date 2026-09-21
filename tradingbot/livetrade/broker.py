@@ -14,6 +14,9 @@ class LiveBroker(ABC):
     name: str
     symbol_mapper: "SymbolMapper"
     data_service: "DataService"
+    # T-bill ETF the copier parks idle cash in (see LiveTradeCopier). None on a
+    # venue that cannot hold US ETFs; LIVETRADE_CASH_PROXY overrides either way.
+    cash_proxy: str | None = "SHV"
 
     # ------------------------------------------------------------------
     # Session lifecycle

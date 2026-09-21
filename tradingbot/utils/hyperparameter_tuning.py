@@ -29,10 +29,14 @@ except ImportError:
             pass
 
 
-from .backtest import _get_backtest_period, backtest_bot
+from .backtest import ALPHA_BENCHMARK, _close_series, _get_backtest_period, backtest_bot
 from .botclass import Bot
 
 logger = logging.getLogger(__name__)
+
+OBJECTIVES = ("alpha_t", "alpha", "sharpe_ratio", "yearly_return")
+# Objectives that need the benchmark series; without it every score is None.
+ALPHA_OBJECTIVES = {"alpha_t", "alpha"}
 
 
 def _evaluate_params(
@@ -44,6 +48,7 @@ def _evaluate_params(
     idx: int,
     total: int,
     verbose: bool,
+    benchmark_close: Any | None = None,
 ) -> dict[str, Any] | None:
     """
     Helper function to evaluate a single parameter combination.
@@ -53,11 +58,12 @@ def _evaluate_params(
         bot_class: Bot class to instantiate
         params: Parameter combination to test
         initial_capital: Starting capital for backtest
-        objective: Metric to optimize ("sharpe_ratio" or "yearly_return")
+        objective: Metric to optimize, one of OBJECTIVES
         shared_data: Pre-fetched DataFrame to reuse (avoids redundant data fetching)
         idx: Index of this parameter combination (for progress tracking)
         total: Total number of combinations (for progress tracking)
         verbose: Whether to print progress information
+        benchmark_close: Pre-fetched ALPHA_BENCHMARK closes for the alpha metrics
 
     Returns:
         Dictionary with results (params, score, metrics) or None if evaluation failed
@@ -76,22 +82,34 @@ def _evaluate_params(
             save_to_db=False,
             save_results_to_db=False,
             data=shared_data,
+            benchmark_close=benchmark_close,
         )
         score = results[objective]
+        if score is None:
+            # Only the alpha metrics can be None: no benchmark bars overlapped
+            # this run. Ranking it as 0 would let it beat real negative alphas.
+            if verbose:
+                logger.error(f"[{idx}/{total}] No {ALPHA_BENCHMARK} overlap to score {objective}; skipping")
+            return None
 
         result_entry = {
             "params": params.copy(),
             "score": score,
             "yearly_return": results["yearly_return"],
             "sharpe_ratio": results["sharpe_ratio"],
+            "alpha": results.get("alpha"),
+            "alpha_t": results.get("alpha_t"),
+            "beta": results.get("beta"),
             "nrtrades": results["nrtrades"],
             "maxdrawdown": results["maxdrawdown"],
         }
 
         if verbose:
+            beta = results.get("beta")
             logger.info(
                 f"[{idx}/{total}] Score ({objective}): {score:.4f}, "
                 f"Return: {results['yearly_return']:.2%}, "
+                f"Beta: {'n/a' if beta is None else f'{beta:.2f}'}, "
                 f"Trades: {results['nrtrades']}, "
                 f"Drawdown: {results['maxdrawdown']:.2%}"
             )
@@ -107,7 +125,7 @@ def _evaluate_params(
 def tune_hyperparameters(
     bot_class: type[Bot],
     param_grid: dict[str, list[Any]],
-    objective: str = "sharpe_ratio",
+    objective: str = "alpha_t",
     initial_capital: float = 10000.0,
     verbose: bool = True,
     n_jobs: int | None = None,
@@ -120,9 +138,15 @@ def tune_hyperparameters(
         bot_class: Bot class (not instance) to tune. Must be a subclass of Bot.
         param_grid: Dictionary mapping parameter names to lists of values to try.
                     e.g., {"adx_threshold": [15, 20, 25], "rsi_buy": [65, 70, 75]}
-        objective: Metric to maximize. Must be one of:
-                   - "sharpe_ratio" (default): Risk-adjusted returns
-                   - "yearly_return": Absolute returns
+        objective: Metric to maximize. Must be one of OBJECTIVES:
+                   - "alpha_t" (default): t-stat of alpha vs QQQ. Rewards
+                     consistent QQQ-independent return; raw "alpha" also
+                     rewards a few lucky bars, which a grid search finds.
+                   - "alpha": annualised alpha vs QQQ
+                   - "sharpe_ratio": risk-adjusted returns
+                   - "yearly_return": absolute returns
+                   Return and Sharpe select for beta in a bull market — see
+                   CLAUDE.md "The target: alpha vs QQQ, not return".
         initial_capital: Starting capital in USD for backtests (default: $10,000)
         verbose: If True, print progress information (default: True)
         n_jobs: Number of parallel jobs to run. If None, uses number of CPU cores.
@@ -139,6 +163,7 @@ def tune_hyperparameters(
           - score: Objective value
           - yearly_return: Yearly return
           - sharpe_ratio: Sharpe ratio
+          - alpha, alpha_t, beta: vs QQQ (None if the benchmark was unavailable)
           - nrtrades: Number of trades
           - maxdrawdown: Maximum drawdown
 
@@ -155,17 +180,17 @@ def tune_hyperparameters(
         >>> results = tune_hyperparameters(
         ...     gptbasedstrategytabased,
         ...     param_grid,
-        ...     objective="sharpe_ratio"
+        ...     objective="alpha_t"
         ... )
         >>> print(f"Best params: {results['best_params']}")
-        >>> print(f"Best Sharpe: {results['best_score']:.2f}")
+        >>> print(f"Best alpha t-stat: {results['best_score']:.2f}")
     """
     # Validate inputs
     if not issubclass(bot_class, Bot):
         raise TypeError(f"bot_class must be a subclass of Bot, got {type(bot_class)}")
 
-    if objective not in ["sharpe_ratio", "yearly_return"]:
-        raise ValueError(f"objective must be 'sharpe_ratio' or 'yearly_return', got '{objective}'")
+    if objective not in OBJECTIVES:
+        raise ValueError(f"objective must be one of {OBJECTIVES}, got '{objective}'")
 
     if not param_grid:
         raise ValueError("param_grid cannot be empty")
@@ -253,6 +278,25 @@ def tune_hyperparameters(
             logger.info("Will fetch data individually for each parameter combination (slower)")
         shared_data = None
 
+    # With shared_data passed, backtest_bot never fetches the benchmark itself,
+    # so fetch it once here. A universe that already contains it is reused as-is.
+    benchmark_close = None
+    if shared_data is not None and not (isinstance(shared_data, dict) and ALPHA_BENCHMARK in shared_data):
+        try:
+            benchmark_close = _close_series(
+                temp_bot._data_service.get_yf_data(
+                    symbol=ALPHA_BENCHMARK,
+                    interval=temp_bot.interval,
+                    period=backtest_period,
+                    save_to_db=True,
+                    use_cache=True,
+                )
+            )
+        except Exception as e:
+            if objective in ALPHA_OBJECTIVES:
+                raise ValueError(f"objective '{objective}' needs {ALPHA_BENCHMARK} data, which failed: {e}") from e
+            logger.warning(f"Could not fetch {ALPHA_BENCHMARK}; alpha metrics will be None: {e}")
+
     best_score = float("-inf")
     best_params = None
     all_results = []
@@ -289,6 +333,7 @@ def tune_hyperparameters(
                     idx,
                     total_combinations,
                     False,  # Disable verbose in parallel to avoid print conflicts
+                    benchmark_close,
                 ): (idx, params)
                 for idx, params in param_combinations
             }
@@ -334,6 +379,7 @@ def tune_hyperparameters(
                 idx,
                 total_combinations,
                 verbose,
+                benchmark_close,
             )
 
             if result_entry is not None:

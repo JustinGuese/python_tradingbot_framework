@@ -31,6 +31,19 @@ class LiveTradeCopier:
         # Pause between SELL batch and BUY batch so liquidation proceeds settle
         # and brokers update buying power before we size the buys.
         self.settle_delay_seconds = float(os.getenv("LIVETRADE_SETTLE_DELAY_SECONDS", "10"))
+        # Idle target weight (bot cash, dropped legs) is parked in a T-bill ETF
+        # instead of earning 0%: ~4-5%/yr at zero beta, which is alpha vs QQQ.
+        # Done here rather than in the paper bots because this is the only layer
+        # holding real money, and it nets across bots — SHV only trades when the
+        # aggregate cash share moves by more than min_order_usd. The broker picks
+        # the default (None where no US ETF is tradeable); LIVETRADE_CASH_PROXY
+        # overrides it, "" or "none" meaning plain cash. The buffer stays in
+        # cash for fees and fills.
+        env_proxy = os.getenv("LIVETRADE_CASH_PROXY")
+        proxy = getattr(broker, "cash_proxy", None) if env_proxy is None else env_proxy
+        proxy = proxy.strip() if isinstance(proxy, str) else ""
+        self.cash_proxy: str | None = None if proxy.lower() in ("", "none") else proxy
+        self.cash_buffer = float(os.getenv("LIVETRADE_CASH_BUFFER", "0.02"))
 
         # Inject our data service into the broker if it supports it
         if hasattr(self.broker, "data_service"):
@@ -78,6 +91,8 @@ class LiveTradeCopier:
             logger.error(f"STRICT MODE: Aborting sync due to unmapped tickers: {unmapped_tickers}")
             return
 
+        self._park_idle_cash(broker_target_weights)
+
         # 3. Get total equity from broker
         total_equity = self.broker.get_total_equity()
         logger.info(f"Broker total equity: ${total_equity:.2f}")
@@ -116,6 +131,30 @@ class LiveTradeCopier:
         # 6. Execute orders: Sells first, then Buys (with a settle pause in between)
         self._execute_orders(orders)
         logger.info("Sync complete")
+
+    def _park_idle_cash(self, broker_target_weights: dict[str, dict]) -> None:
+        """Add the uninvested share of the book, less the cash buffer, to the cash proxy.
+
+        Mutates `broker_target_weights`. Adds to the proxy's weight rather than
+        replacing it, because a bot may hold SHV itself (it is in TRADEABLE).
+        """
+        if not self.cash_proxy:
+            return
+        invested = sum(m["weight"] for m in broker_target_weights.values())
+        idle = 1.0 - invested - self.cash_buffer
+        if idle <= 0:
+            return
+        if not self.broker.is_tradeable(self.cash_proxy):
+            logger.warning(f"{self.broker.name} cannot trade cash proxy {self.cash_proxy}; {idle:.1%} stays cash")
+            return
+        meta = self.broker.map_symbol(self.cash_proxy)
+        mapped = meta.get("symbol") if meta else None
+        if not meta or not mapped or mapped.startswith("^"):
+            logger.warning(f"Cash proxy {self.cash_proxy} is unmapped on {self.broker.name}; {idle:.1%} stays cash")
+            return
+        entry = broker_target_weights.setdefault(mapped, {"weight": 0.0, "type": meta.get("type", "stock")})
+        entry["weight"] += idle
+        logger.info(f"Parking {idle:.1%} idle cash in {mapped} ({self.cash_buffer:.1%} kept as cash)")
 
     def _calculate_target_weights(self) -> dict[str, float]:
         """Aggregate weighted portfolios from all source bots into yf_symbol -> weight."""

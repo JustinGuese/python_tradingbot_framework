@@ -12,7 +12,7 @@ and the `backtest_results` table expect.
 import pandas as pd
 import pytest
 
-from tradingbot.utils.backtest import backtest_bot
+from tradingbot.utils.backtest import ALPHA_KEYS, backtest_bot
 from tradingbot.utils.botclass import Bot
 
 BARS = 40
@@ -29,6 +29,9 @@ SCALAR_KEYS = {
     "nrtrades",
     "buy_hold_return",
 }
+# Plus the alpha metrics, added later. Additive: the persisted row still takes
+# only the nine above, and callers that index by name are unaffected.
+RESULT_KEYS = SCALAR_KEYS | set(ALPHA_KEYS)
 
 
 def _frame(prices, signals=None):
@@ -102,7 +105,7 @@ def test_default_returns_only_the_original_scalars():
     data = _frame([100.0] * BARS, _alternating_signals(BARS))
     result = _run(_SignalBot(["AAA"]), data)
 
-    assert set(result) == SCALAR_KEYS
+    assert set(result) == RESULT_KEYS
     assert "equity_curve" not in result
 
 
@@ -112,7 +115,7 @@ def test_default_multi_ticker_returns_only_the_original_scalars():
     data = {"AAA": _frame(prices, signals), "BBB": _frame(prices, signals)}
     result = _run(_SignalBot(["AAA", "BBB"]), data)
 
-    assert set(result) == SCALAR_KEYS
+    assert set(result) == RESULT_KEYS
 
 
 # --------------------------------------------------------------------------- #
