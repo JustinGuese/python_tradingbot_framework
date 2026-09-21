@@ -63,13 +63,20 @@ rf × the cash share.
 
 | Bot | Alpha/yr | t | Beta | Verdict |
 |---|---|---|---|---|
-| TARegimeAdaptiveBot | +14% | 1.30 | 0.31 | best candidate, unproven |
-| XAUZenbotTreeBot | +20% | 0.88 | 0.05 | uncorrelated, but flat 90% of days |
+| TARegimeAdaptiveBot | +14% | 1.30 | 0.31 | likely luck: 6y backtest alpha +0.4% (t 0.10) |
+| XAUZenbotTreeBot | +20% | 0.88 | 0.05 | dead: flat on every bar since ^XAU > 325, not refittable |
 | AdaptiveMeanReversionBot | ~0% | 0.19 | 0.99 | QQQ clone |
 | FearGreedBotQQQInverse | +5% | 0.56 | 0.91 | QQQ clone |
-| RecursiveDecayHarvestBot | −81% | −1.93 | 2.61 | levered QQQ, bleeds |
-| EURUSDTreeBot | −11% | −2.32 | 0.02 | significantly negative |
+| RecursiveDecayHarvestBot | −81% | −1.93 | 2.61 | levered QQQ, bleeds — paused |
+| EURUSDTreeBot | −11% | −2.32 | 0.02 | significantly negative — paused |
 
 The C2 blend at the time (Kronos / RegimeAdaptive / EarningsInsiderTilt) made
 +5.5% vs QQQ +17.4%, with alpha +3% at t = 0.25. That is weak on the metric that
 matters.
+
+Follow-ups from that snapshot: SqueezeMomentumBot and StockNewsSentimentBot are also
+paused (`suspend: true` in values.yaml). FearGreedBotQQQInverse is now flat by
+default (buy at ≤30, exit at ≥50). TARegimeMultiAssetBot runs as paper only. Both
+of those reliably cut beta by about half or more in backtests, but neither has
+alpha that holds up in both halves of the sample. See
+docs/backtests/taregimemultiassetbot.md and the comment in feargreedbot.py.

@@ -204,6 +204,9 @@ postgresql:
 bots:
 - name: eurusdtreebot
   schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
+  # PAUSED 2026-09-21: alpha vs QQQ -11%/yr, t -2.32 — the only statistically
+  # significant result in the fleet, and it is negative. Holds cash.
+  suspend: true
 
 - name: feargreedbot
   schedule: "3 17 * * 1-5" # Daily at 5:03 PM, Mon-Fri
@@ -246,6 +249,9 @@ bots:
 
 - name: stocknewssentimentbot
   schedule: "30 22 * * 1-5" # Daily at 10:30 PM UTC Mon-Fri, after portfolio-worth-calculator (0 22) refreshes news
+  # PAUSED 2026-09-21: -19% vs QQQ over its live window, alpha -4.9%/yr (t -0.28).
+  # Holds ~21 positions, which stay frozen (its curve becomes buy-and-hold of them).
+  suspend: true
 
 - name: adaptivemeanreversionbot
   schedule: "0 21 * * 1-5" # Daily 9 PM UTC (4 PM ET), near NYSE close for fresh daily OHLCV
@@ -264,9 +270,14 @@ bots:
 
 - name: recursivedecayharvestbot
   schedule: "45 21 * * 1-5" # Daily 9:45 PM UTC (4:45 PM ET), after NYSE close
+  # PAUSED 2026-09-21: 3x-levered TQQQ, beta 2.61, alpha -81%/yr (t -1.93), max DD -21%.
+  # Holds TQQQ, which stays frozen: liquidate the paper row if you want it flat.
+  suspend: true
 
 - name: squeezemomentumbot
   schedule: "55 21 * * 1-5" # Daily 9:55 PM UTC (4:55 PM ET), after NYSE close
+  # PAUSED 2026-09-21: alpha vs QQQ -30%/yr (t -1.42), -24% vs QQQ. Holds cash.
+  suspend: true
 
 - name: kronosbot
   schedule: "5 22 * * 1-5" # Daily 10:05 PM UTC Mon-Fri (after portfolio-worth-calculator)
@@ -296,6 +307,13 @@ bots:
   # constant ex-ante vol. The trend sleeve. Runs after the US close and before the
   # 21:20 IBKR copier. See docs/backtests/tsmomtrendbot.md.
   schedule: "5 21 * * 1-5" # Daily 9:05 PM UTC Mon-Fri
+
+- name: taregimemultiassetbot
+  # TARegimeAdaptiveBot's signal, unchanged, across 8 uncorrelated US ETFs. Daily,
+  # unlike taregimebot's weekly run, because the backtest that justifies it
+  # decides daily. Paper only until it has a live alpha record. See
+  # docs/backtests/taregimemultiassetbot.md.
+  schedule: "10 21 * * 1-5" # Daily 9:10 PM UTC Mon-Fri
 
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design

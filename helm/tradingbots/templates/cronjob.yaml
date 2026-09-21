@@ -24,6 +24,10 @@ metadata:
 spec:
   # Cron schedule for this bot (e.g., "*/5 * * * 1-5" = every 5 min, Mon-Fri)
   schedule: {{ .schedule | quote }}
+  # Paused bots keep their CronJob and DB row, so unpausing resumes the same
+  # paper track record. A paused bot's holdings stay frozen: portfolio_worth
+  # keeps valuing them, so its curve becomes buy-and-hold of whatever it held.
+  suspend: {{ .suspend | default false }}
   # Number of successful job runs to keep in history
   successfulJobsHistoryLimit: {{ $.Values.cronjob.successfulJobsHistoryLimit }}
   # Number of failed job runs to keep in history (for debugging)
