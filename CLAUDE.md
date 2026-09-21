@@ -27,10 +27,10 @@ weekday/gap rules in the AGENTS.md "PortfolioWorth Model" section. Drop weekend
 rows, and drop day-pairs more than 4 days apart (recorder outages). Then:
 
 ```python
-beta   = cov(r_bot, r_qqq) / var(r_qqq)
-resid  = r_bot - beta * r_qqq
-alpha  = resid.mean() * 252                       # annualised
-t_stat = resid.mean() / resid.std() * sqrt(n)     # n = daily obs
+beta = cov(r_bot, r_qqq) / var(r_qqq)
+resid = r_bot - beta * r_qqq
+alpha = resid.mean() * 252  # annualised
+t_stat = resid.mean() / resid.std() * sqrt(n)  # n = daily obs
 ```
 
 Report alpha, t-stat, beta, correlation and max drawdown together, each over the
