@@ -111,21 +111,21 @@ env:
 # `helm upgrade --set`, not a rebuild. All four at 0/0/1/0 reproduces the
 # pre-cost-model behaviour exactly.
 #
-# STAGE 1 (current): costs ON, band effectively OFF — MIN_TRADE_USD=1 and
-# BAND_PCT=0 reproduce the old flat $1 threshold, so any change in behaviour is
-# attributable to the cost model alone.
-# STAGE 2 (after one clean cycle): set MIN_TRADE_USD=25 and BAND_PCT=0.05 to
-# switch on the band. Expect ~50 fewer trades per run on RegimeAdaptiveBot and
-# EarningsInsiderTiltBot, which currently put 93% / 92% of their trades through
-# at under $25 notional.
+# STAGE 2 (since 2026-09-21): costs ON, band ON. A trade must exceed
+# max($25, 5% of the position) or it is skipped; full exits always trade.
+# Stage 1 ($1 / 0%) ran for a full cycle. During it RegimeAdaptiveBot and
+# EarningsInsiderTiltBot put 93% / 92% of their trades through at under $25,
+# each one paying slippage for no change in exposure. These values also match
+# the code defaults, which is what backtest_bot uses, so live and backtest now
+# agree. Rollback to stage 1: MIN_TRADE_USD=1, BAND_PCT=0.
 - name: EXECUTION_SLIPPAGE_PCT
   value: "0.0005" # 5 bps one-way, mirrors backtest.py
 - name: EXECUTION_COMMISSION_PCT
   value: "0.0"
 - name: EXECUTION_MIN_TRADE_USD
-  value: "1.0" # stage 2 -> "25.0"
+  value: "25.0"
 - name: EXECUTION_REBALANCE_BAND_PCT
-  value: "0.0" # stage 2 -> "0.05"
+  value: "0.05"
 
 # Kronos forecasting service — HF Space URL (public, no secret needed)
 - name: KRONOS_SPACE_URL
@@ -391,14 +391,19 @@ liveTrade:
     enabled: true
     schedule: "50 21 * * 1-5" # 9:50 PM UTC (C2 :10, IB :20, eToro :30, Darwinex :40)
     systemId: "155809898"
-    # Switched 2026-09-21 from AdaptiveMeanReversionBot + SynthesizedHyperConvexityBot,
-    # which was ~leveraged QQQ (corr 0.93, beta 0.82, max DD -12% vs QQQ's -7%) and had
-    # made 1 trade in 5 months — nothing to sell on C2. Over the common live window
-    # (2026-04-15..09-18, 79d) this blend: Sharpe 2.17, max DD -2.9%, corr to QQQ 0.45.
-    # Short sample and paper fills before Aug 2026 carried no costs — treat as a
-    # shortlist, not proof. Legs C2 cannot trade (.DE/.AS/.L listings, crypto) are
-    # dropped to cash by Collective2Broker.is_tradeable, not redistributed.
-    botWeights: '{"KronosTraderBot": 0.34,"RegimeAdaptiveBot": 0.33,"EarningsInsiderTiltBot": 0.33}'
+    # Switched 2026-09-22 to three low-beta sleeves, inverse-vol weighted, with the
+    # weights fit on 2019-01..2023-06 only. Backtest 2019-01..2026-09 (see
+    # docs/backtests/c2-blend-2026-09.md): alpha vs QQQ +2.2%/yr (t 0.96) in the
+    # first half and +5.0% (t 1.86) in the second; full sample +3.5% at t 2.02,
+    # beta 0.13, max DD -8.5%. It is the first candidate in the fleet to clear t >= 2.
+    # Low risk, low return: CAGR ~6.6% at ~6% vol, plus T-bill yield on the idle
+    # share via the SHV cash proxy.
+    # The previous blend (Kronos 0.34 / RegimeAdaptive 0.33 / EarningsInsiderTilt 0.33)
+    # made alpha +3% at t 0.25 live, and Kronos's forecast has no measurable signal.
+    # TARegimeMultiAssetBot starts in cash and funds a sleeve only on a buy signal,
+    # so its share sits in SHV until signals fire. Legs C2 cannot trade are dropped
+    # to cash by Collective2Broker.is_tradeable, not redistributed.
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
     # LIVE, and now genuinely reconciling. sync() is a full target-state sync, so the
     # first run with a non-empty target WILL liquidate whatever strategy 155809898 still
     # holds from the old handover and rebuild to QQQ/TQQQ. That did not happen while the

@@ -92,3 +92,17 @@ Second pass (same day):
 - **Re-tunes are walk-forward.** Grid-search on 2019–2022, then judge the winner
   against the defaults on 2023–2026. New parameters ship only if they beat the
   defaults out of sample. For the harness, see docs/backtests/retune-2026-09.md.
+
+Third pass (2026-09-22):
+- **The C2 blend is now TARegimeMultiAsset 0.39 / GoldenButterfly 0.37 / TSMOM
+  0.24,** inverse-vol weights fit on the first half only. Backtest alpha +3.5%/yr
+  at t 2.02, positive in both halves, beta 0.13. It is the first candidate to
+  clear t ≥ 2. See docs/backtests/c2-blend-2026-09.md.
+- **The live no-trade band is at stage 2** ($25 / 5%). That matches the code
+  defaults, so live execution and backtests now use the same band.
+- **An earnings-drift (PEAD) sleeve was tested and not built.** On 93 large caps
+  it does not beat holding the same universe. See docs/backtests/pead-2026-09.md.
+- **Insider data was broken until this date.** yfinance's `Transaction` column is
+  blank, so every `stock_insider_trades` row was untyped and EarningsTilt's
+  insider score was always 0. Any analysis of that bot before 2026-09-22 reflects
+  earnings surprise only.

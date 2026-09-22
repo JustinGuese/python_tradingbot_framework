@@ -19,6 +19,7 @@ puts in a dedup key, or writes to a datetime column, must be naive UTC.
 from datetime import UTC, datetime, timedelta, timezone
 
 import pandas as pd
+import pytest
 
 from tradingbot.utils.stock_fundamentals_loader import (
     _insider_key,
@@ -240,3 +241,78 @@ class TestInsiderKeyMatchesStoredRows:
             "",
             0.0,
         )
+
+
+class TestInsiderTransactionType:
+    """yfinance leaves `Transaction` blank; the direction is only in `Text`."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Sale at price 330.19 per share.", "Sale"),
+            ("Purchase at price 12.50 - 12.80 per share.", "Purchase"),
+            ("Stock Award(Grant) at price 0.00 per share.", "Stock Award(Grant)"),
+            ("Stock Gift", "Stock Gift"),
+            ("", None),
+            (None, None),
+            (float("nan"), None),
+        ],
+    )
+    def test_type_from_text(self, text, expected):
+        from tradingbot.utils.stock_fundamentals_loader import _transaction_type_from_text
+
+        assert _transaction_type_from_text(text) == expected
+
+    def test_loader_types_rows_from_text(self, monkeypatch):
+        import tradingbot.utils.stock_fundamentals_loader as loader
+
+        df = pd.DataFrame(
+            {
+                "Start Date": [pd.Timestamp("2026-09-15", tz="UTC")] * 2,
+                "Insider": ["NEWSTEAD JENNIFER", "SMITH J"],
+                "Transaction": ["", ""],
+                "Text": ["Sale at price 330.19 per share.", "Purchase at price 9.00 per share."],
+                "Shares": [1438.0, 500.0],
+                "Value": [474813.0, 4500.0],
+            }
+        )
+
+        class FakeTicker:
+            def __init__(self, symbol):
+                self.insider_transactions = df
+
+        monkeypatch.setattr(loader.yf, "Ticker", FakeTicker)
+        rows = loader._load_insider_for_symbol("AAPL", set())
+        assert [r.transaction_type for r in rows] == ["Sale", "Purchase"]
+
+    def test_legacy_untyped_row_is_typed_in_place_not_duplicated(self, db_session):
+        """The same trade, stored untyped before the fix, must not be inserted twice."""
+        from tradingbot.utils.db import StockInsiderTrade
+        from tradingbot.utils.stock_fundamentals_loader import _backfill_untyped_insider
+
+        when = datetime(2026, 9, 15)
+        legacy = StockInsiderTrade(
+            symbol="AAPL", transaction_date=when, insider_name="NEWSTEAD JENNIFER", transaction_type="", shares=1438.0
+        )
+        db_session.add(legacy)
+        db_session.flush()
+        untyped = {_insider_key("AAPL", when, "NEWSTEAD JENNIFER", "", 1438.0): legacy.id}
+
+        fetched = [
+            StockInsiderTrade(
+                symbol="AAPL",
+                transaction_date=when,
+                insider_name="NEWSTEAD JENNIFER",
+                transaction_type="Sale",
+                shares=1438.0,
+            ),
+            StockInsiderTrade(
+                symbol="AAPL", transaction_date=when, insider_name="OTHER", transaction_type="Sale", shares=10.0
+            ),
+        ]
+        remaining, typed = _backfill_untyped_insider(db_session, fetched, untyped)
+
+        assert typed == 1
+        assert [r.insider_name for r in remaining] == ["OTHER"]
+        db_session.refresh(legacy)
+        assert legacy.transaction_type == "Sale"

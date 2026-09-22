@@ -227,6 +227,23 @@ def _insider_key(symbol: str, transaction_date: datetime, insider_name, transact
     )
 
 
+def _transaction_type_from_text(text) -> str | None:
+    """Direction of an insider row, from yfinance's free-text `Text` column.
+
+    yfinance's `Transaction` column is blank on every row, so the direction only
+    appears in `Text`: "Sale at price 330.19 per share.", "Purchase at price ...",
+    "Stock Award(Grant) at price 0.00 per share.", "Stock Gift at price ...".
+    Returns the leading phrase ("Sale", "Purchase", "Stock Award(Grant)"), or
+    None for an empty text.
+    """
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return None
+    s = str(text).strip()
+    if not s:
+        return None
+    return s.split(" at price", 1)[0].rstrip(". ").strip() or None
+
+
 def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> list:
     """Fetch insider transactions for one symbol and return list of StockInsiderTrade to insert (new only)."""
     try:
@@ -251,6 +268,7 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> 
     date_col = col_lower_match(df.columns, "start date", "date", "transaction date") or df.columns[0]
     insider_col = col_lower_match(df.columns, "insider", "name")
     type_col = col_lower_match(df.columns, "transaction", "type")
+    text_col = "Text" if "Text" in df.columns else None
     shares_col = col_lower_match(df.columns, "shares")
     value_col = col_lower_match(df.columns, "value")
 
@@ -273,6 +291,12 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> 
         if type_col and type_col in row.index:
             v = row[type_col]
             transaction_type = str(v).strip() if v is not None and not pd.isna(v) else None
+        # yfinance leaves `Transaction` blank, so every row used to be stored with
+        # an empty type. The insider score matches "Purchase" / "Sale" in this
+        # field, so the insider half of EarningsInsiderTiltBot scored 0 on every
+        # run from the day it shipped until 2026-09-22.
+        if not transaction_type and text_col:
+            transaction_type = _transaction_type_from_text(row[text_col])
 
         shares = None
         if shares_col and shares_col in row.index:
@@ -305,6 +329,28 @@ def _load_insider_for_symbol(symbol: str, existing_insider_keys: set[tuple]) -> 
     return to_add
 
 
+def _backfill_untyped_insider(session, rows: list, untyped: dict[tuple, int]) -> tuple[list, int]:
+    """Type legacy untyped rows in place; return (rows still to insert, rows typed).
+
+    A fetched row whose key, with its type blanked, matches a stored untyped row
+    is the same trade. Updating that row avoids inserting a typed duplicate.
+    """
+    remaining = []
+    typed = 0
+    for row in rows:
+        if row.transaction_type:
+            legacy = _insider_key(row.symbol, row.transaction_date, row.insider_name, None, row.shares)
+            row_id = untyped.pop(legacy, None)
+            if row_id is not None:
+                session.query(StockInsiderTrade).filter(StockInsiderTrade.id == row_id).update(
+                    {StockInsiderTrade.transaction_type: row.transaction_type}
+                )
+                typed += 1
+                continue
+        remaining.append(row)
+    return remaining, typed
+
+
 def load_stock_news_earnings_insider(symbols: set[str]) -> None:
     """
     Fetch news, earnings, and insider trades from yfinance for the given symbols
@@ -333,8 +379,14 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
             .all()
         }
         existing_insider = set()
+        # Rows stored before the loader read `Text` have an empty type. When the
+        # same trade is fetched again it now arrives typed, so its key no longer
+        # matches, and inserting it would duplicate the trade. Type the stored
+        # row in place instead. Maps the untyped key to the row id.
+        untyped_insider: dict[tuple, int] = {}
         for r in (
             session.query(
+                StockInsiderTrade.id,
                 StockInsiderTrade.symbol,
                 StockInsiderTrade.transaction_date,
                 StockInsiderTrade.insider_name,
@@ -344,13 +396,15 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
             .filter(StockInsiderTrade.symbol.in_(symbols))
             .all()
         ):
-            existing_insider.add(
-                _insider_key(r.symbol, r.transaction_date, r.insider_name, r.transaction_type, r.shares)
-            )
+            key = _insider_key(r.symbol, r.transaction_date, r.insider_name, r.transaction_type, r.shares)
+            existing_insider.add(key)
+            if not r.transaction_type:
+                untyped_insider[key] = r.id
 
         news_added = 0
         earnings_added = 0
         insider_added = 0
+        insider_typed = 0
 
         for i, symbol in enumerate(sorted(symbols)):
             try:
@@ -369,6 +423,7 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                         session.add_all(new_earnings)
 
                     new_insider = _load_insider_for_symbol(symbol, existing_insider)
+                    new_insider, typed = _backfill_untyped_insider(session, new_insider, untyped_insider)
                     if new_insider:
                         session.add_all(new_insider)
                 # Counted only after the savepoint released cleanly, so the summary
@@ -376,6 +431,7 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                 news_added += len(new_news)
                 earnings_added += len(new_earnings)
                 insider_added += len(new_insider)
+                insider_typed += typed
             except Exception as e:
                 logger.warning("Error loading fundamentals for %s: %s", symbol, e, exc_info=True)
 
@@ -383,9 +439,10 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                 time.sleep(SYMBOL_DELAY_SECONDS)
 
         logger.info(
-            "Stock fundamentals load: %d news, %d earnings, %d insider trades added for %d symbols",
+            "Stock fundamentals load: %d news, %d earnings, %d insider trades added (%d legacy rows typed) for %d symbols",
             news_added,
             earnings_added,
             insider_added,
+            insider_typed,
             len(symbols),
         )
