@@ -14,9 +14,13 @@ Each Friday after the close:
    relative strength, up/down volume, Chaikin Money Flow, OBV slope, IBD-style
    accumulation days, distance above the quarter-anchored VWAP, and OBV-vs-price
    divergence.
-4. **Book.** Hold the top `top_n` at 1/top_n each. When fewer names pass the
+4. **Book.** Hold the top `top_n` (default 20) at 1/top_n each. When fewer names pass the
    filter the remainder stays in cash, so exposure falls with market breadth —
    the main thing keeping this from being a beta-1 large-cap basket.
+
+top_n=20 is the walk-forward pick: best alpha_t on 2019–2022 and ahead of
+the old default of 10 on the unseen 2023–2026 half (t 1.52 vs 1.29, lower beta
+and drawdown). Neither clears t >= 2, so this is paper only.
 
 Weekly, not daily: every input is a 20- to 252-bar window, so the ranking barely
 moves day to day, and re-ranking daily mostly churns the names at the cut-off
@@ -86,7 +90,7 @@ class InstitutionalFlowBot(Bot):
 
     def __init__(
         self,
-        top_n: int = 10,
+        top_n: int = 20,
         rebalance_weekday: int | None = 4,
         market_gate: bool = True,
         min_adv_usd: float = 50e6,

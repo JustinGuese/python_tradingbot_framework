@@ -349,7 +349,7 @@ bots:
   schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before
 
 - name: institutionalflowbot
-  # Weekly top-10 of the S&P 100 passing institutional mandate filters
+  # Weekly top-20 of the S&P 100 passing institutional mandate filters
   # (liquidity, 200-day trend, QQQ above its 200-day), ranked by volume-based
   # accumulation. Paper only; in no copier's botWeights until its walk-forward
   # alpha clears t >= 2. Friday only: targetWeights re-ranks on Friday bars and
