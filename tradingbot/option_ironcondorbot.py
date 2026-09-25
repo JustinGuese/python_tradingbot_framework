@@ -6,13 +6,19 @@ stays between the short call and short put. And when volatility is high, that
 range can be assumed to be higher than usual." Sell when implied vol is well
 above historical, never through a news event.
 
-Rules (utils/option_rules.CreditRules):
+Rules (utils/option_rules.CreditRules, walk-forward re-tuned 2026-09-25):
   * Only when ATM IV / 20-day HV >= 1.15, ADX(14) < 25 (no strong trend to run
     through one side), ^VIX < 35, and no AAPL earnings before expiry.
-  * Short put and short call at 0.16 delta (about one standard deviation out),
-    $10 wings, first expiry >= 35 DTE.
+  * Short put and short call at 0.20 delta, $35 wings, first expiry >= 60 DTE.
+    Wide wings matter: a $10 wing buys back most of the vol the short leg
+    sells, leaving almost no net vega to collect the variance premium with.
   * Size: worst-case loss (wider wing - credit) <= 25% of the book.
-  * Close at 50% of the credit, at a loss of 2x the credit, or at 21 DTE.
+  * Close at 75% of the credit, at a loss of 2x the credit, or at 7 DTE.
+
+Re-tune vs the original (0.16 delta, $10 wings, 35 DTE, 50% / 21 DTE exits),
+picked on 2012-2019 and judged on 2019-2026: out-of-sample alpha +0.5%/yr at
+t 0.11 (+2.5%/yr, beta 0.12, max DD -19%) against -11%/yr at t -2.42. That is
+"stopped losing", not "found an edge". See docs/backtests/option-bots-2026-09.md.
 
 Only one side of a condor can finish in the money, so the framework reserves
 one wing's width, not two. Paper only.
@@ -41,7 +47,15 @@ UNDERLYING = "AAPL"
 class OptionIronCondorBot(Bot):
     INITIAL_CAPITAL: ClassVar[float] = 100_000.0
     OPTION_ROLL_DTE: ClassVar[int | None] = None
-    RULES: ClassVar[CreditRules] = CreditRules(short_delta=0.16, min_iv_hv=1.15, max_adx=25.0)
+    RULES: ClassVar[CreditRules] = CreditRules(
+        short_delta=0.20,
+        width=35.0,
+        target_dte=60,
+        take_profit=0.75,
+        exit_dte=7,
+        min_iv_hv=1.15,
+        max_adx=25.0,
+    )
 
     def __init__(self, **kwargs):
         super().__init__("option_IronCondorBot", symbol=UNDERLYING, interval="1d", period="2y", **kwargs)

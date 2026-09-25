@@ -7,16 +7,21 @@ volatility is high ... compared to historical vol, as long as there's no news
 event". Option writers are the casino: small, frequent, defined-risk bets that
 win more often than they lose.
 
-Rules (utils/option_rules.CreditRules):
+Rules (utils/option_rules.CreditRules, walk-forward re-tuned 2026-09-25):
   * Direction from the trend: close > SMA50 > SMA200 sells a bull put spread,
     the mirror image a bear call spread, anything mixed trades nothing.
-  * Only when ATM implied vol / 20-day historical vol >= 1.10 (options are
-    pricing more movement than the stock delivers), ^VIX < 35, and no AAPL
+  * Only when ATM implied vol / 20-day historical vol >= 1.0 (options are
+    pricing at least the movement the stock delivers), ^VIX < 35, and no AAPL
     earnings before expiry (the news event the course warns about).
-  * Short leg at 0.30 delta, long wing $10 further out, first expiry >= 35 DTE.
+  * Short leg at 0.30 delta, long wing $35 further out, first expiry >= 35 DTE.
   * Size: worst-case loss (width - credit) <= 25% of the book. That is far
     above the course's 1%-of-net-worth rule; this is a $100k paper sleeve.
-  * Close at 50% of the credit, at a loss of 2x the credit, or at 21 DTE.
+  * Close at 75% of the credit or at 7 DTE. No stop: the wing is the stop.
+
+**This bot has no edge in the backtest, re-tuned or not.** Across 320 variants
+(two walk-forward rounds), every one picked on 2012-2019 lost alpha on
+2019-2026; the chosen one is t -1.50 there vs -1.95 for the original. It stays
+on paper only to measure real AAPL fills. See docs/backtests/option-bots-2026-09.md.
 
 The worst-case loss is held back as cash margin by the framework, so the bot
 cannot overcommit. Paper only: the live copier drops option holdings.
@@ -26,6 +31,7 @@ two-sided market. Off-hours the framework refuses to open spreads.
 """
 
 import logging
+import math
 from typing import ClassVar
 
 from tradingbot.utils import option_math as om
@@ -34,10 +40,10 @@ from tradingbot.utils.botclass import Bot
 from tradingbot.utils.option_rules import (
     CreditRules,
     credit_exit_reason,
+    credit_side,
     earnings_clear,
     premium_selling_ok,
     sma,
-    trend_side,
 )
 from tradingbot.utils.runner import run_bot
 
@@ -49,7 +55,13 @@ UNDERLYING = "AAPL"
 class OptionCreditSpreadBot(Bot):
     INITIAL_CAPITAL: ClassVar[float] = 100_000.0
     OPTION_ROLL_DTE: ClassVar[int | None] = None  # exits are the strategy's own
-    RULES: ClassVar[CreditRules] = CreditRules()
+    RULES: ClassVar[CreditRules] = CreditRules(
+        width=35.0,
+        min_iv_hv=1.0,
+        take_profit=0.75,
+        stop_loss=math.inf,
+        exit_dte=7,
+    )
 
     def __init__(self, **kwargs):
         super().__init__("option_CreditSpreadBot", symbol=UNDERLYING, interval="1d", period="2y", **kwargs)
@@ -76,7 +88,7 @@ class OptionCreditSpreadBot(Bot):
 
         data = self.getYFDataWithTA(interval="1d", period="2y", saveToDB=True)
         close = data["close"]
-        side = trend_side(float(close.iloc[-1]), sma(close, 50), sma(close, 200))
+        side = credit_side(float(close.iloc[-1]), sma(close, 50), sma(close, 200), rules)
         if side is None:
             logger.info("No clear trend; no spread")
             return 0

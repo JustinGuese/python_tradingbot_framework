@@ -337,13 +337,13 @@ bots:
 # sizing works. The live copier drops option holdings, so none can reach a broker.
 # See docs/backtests/option-bots-2026-09.md.
 - name: option_leapcallbot
-  schedule: "0 15 * * 1-5" # 70-delta ~1.5y LEAP call while AAPL > SMA200
+  schedule: "0 15 * * 1-5" # 60-delta ~1.5y LEAP call while AAPL > SMA200, trimmed at 1.5x
 
 - name: option_creditspreadbot
   schedule: "5 15 * * 1-5" # bull put / bear call spread when IV/HV is rich
 
 - name: option_ironcondorbot
-  schedule: "10 15 * * 1-5" # 16-delta iron condor, range-bound + rich IV
+  schedule: "10 15 * * 1-5" # 20-delta iron condor, $35 wings, 60 DTE, range-bound + rich IV
 
 - name: option_catalystcallbot
   schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before

@@ -222,6 +222,14 @@ Existing Strategies (don't duplicate)
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ SqueezeMomentumBot │ GLD │ EMA/MACD/RSI zone momentum on Gold ETF │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_LeapCallBot     │ AAPL options │ 60-delta ~1.5y LEAP, >SMA200, trim at 1.5x     │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_CreditSpreadBot │ AAPL options │ Bull put / bear call spread when IV/HV rich    │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_IronCondorBot   │ AAPL options │ 20-delta condor, $35 wings, 60 DTE, rich IV   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_CatalystCallBot │ AAPL options │ 75-delta call into earnings, sold day before   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
@@ -519,6 +527,76 @@ class MyBot(Bot):
   weight stays cash or goes to SHV.
 - **Backtests hold the underlying,** not the option. yfinance has no historical
   chains; `option_quotes` is the only history there will ever be.
+
+**Strike by delta, and short legs (defined risk only).** The bot still never
+names a contract:
+
+```python
+self.buy("AAPL", 20_000, option="call", delta=0.70, dte=540)  # 70-delta LEAP
+self.open_credit_spread("AAPL", "bull", short_delta=0.30, width=10, dte=35, max_risk_usd=25_000)
+self.open_iron_condor("AAPL", short_delta=0.16, width=10, dte=35, max_risk_usd=25_000)
+book = self.option_book("AAPL")  # legs, credit, pnl, pnl_pct, dte, max_loss, net greeks
+self.close_options("AAPL")  # every leg, long and short, one transaction
+```
+
+- **Short legs are negative quantities**, opened only through
+  `PortfolioManager.trade_option_legs`, which runs in one locked transaction.
+  Valuation is `qty * price` as everywhere else, so a short leg counts as a
+  liability. `calculate_portfolio_worth` includes negative holdings for exactly
+  this reason.
+- **Margin:** `options.margin_requirement(portfolio)` is the worst-case expiry
+  payoff of the option legs:
+  - a spread's width;
+  - a condor's wider wing;
+  - infinite for a naked short call.
+
+  A trade that grows any position is refused whole if cash left < margin. That
+  is how unbounded structures are rejected. `buy()` can never spend reserved
+  margin. Pure reductions always go through.
+- **Opening needs a live chain:** a structure is not opened off-hours. Legs'
+  last prices are from different moments, so the credit would be fiction.
+  Schedule option bots during US market hours.
+- **Rolling:** `OPTION_ROLL_DTE = None` disables it. An underlying with any
+  short leg is never auto-rolled, because rolling one wing alone would uncover
+  the short. Expired legs of either sign still cash-settle at intrinsic value.
+- **Other Bot attributes:**
+  - `OPTION_TARGET_DELTA` picks the strike by delta for `buy(option=...)` and
+    rolls.
+  - `INITIAL_CAPITAL` is the starting cash when the bot's row is created. The
+    option bots use $100k so whole-contract sizing is sane.
+- **`rebalancePortfolio` refuses** a book holding short legs.
+- **IV is solved from prices, not taken from yfinance.** Off-hours yfinance
+  reports `impliedVolatility = 1e-5` for the whole chain. `options.load_chain`,
+  `atm_iv` and `with_greeks` give IV and delta per contract.
+
+**`utils/option_math.py`** holds the pure formulas:
+- Black-Scholes-Merton `bs_price` and the five greeks (theta per day, vega and
+  rho per point);
+- `implied_volatility`, `strike_for_delta`;
+- historical vol, `iv_hv_ratio`, `iv_rank`, `iv_percentile`;
+- `breakeven`, `expected_move`, `probability_itm`;
+- multi-leg `payoff_at_expiry`, `max_loss`, `max_profit`, `breakevens`,
+  `probability_of_profit`;
+- `beta`, `beta_exposure`, `delta_dollars`, and liquidity screens.
+
+**The option bots** (all AAPL, paper, all scheduled at 15:00–15:15 UTC):
+- `option_LeapCallBot`, `option_CreditSpreadBot`, `option_IronCondorBot`,
+  `option_CatalystCallBot`.
+- Their rules are pure functions in `utils/option_rules.py`, shared with
+  `scripts/onetime_option_bots_backtest.py`.
+- File and Helm names are `option_<x>bot`. The CronJob template turns `_` into
+  `-`, because Kubernetes names forbid underscores.
+- Synthetic backtest (Black-Scholes on a ^VXN-based IV proxy with AAPL skew),
+  with a walk-forward re-tune on 2026-09-25 (grids chosen on 2012–2019, judged
+  on 2019–2026):
+  - **LEAP:** re-tuned to 0.60Δ with a trim at 1.5x. Out-of-sample t 2.10, but
+    that is mostly AAPL picked with hindsight.
+  - **Iron condor:** re-tuned to $35 wings, 60 DTE. It went from t −2.42 to
+    about 0 (break-even).
+  - **Credit spread:** no variant survives out of sample, so it is recommended
+    for pausing.
+  - **Catalyst:** untuned (10 trades).
+  - Details are in `docs/backtests/option-bots-2026-09.md`.
 
 ### Reading another bot's state
 

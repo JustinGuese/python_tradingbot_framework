@@ -351,6 +351,20 @@ def test_leap_rules():
     assert rules_mod.leap_contracts(100_000, 336, 0.70, 1.0) == 4
 
 
+def test_leap_trim_contracts():
+    r = rules_mod.LeapRules(max_leverage=1.5, leverage=1.0)
+    assert rules_mod.leap_trim_contracts(140_000, 100_000, 20_000, r) == 0  # 1.4x: inside the band
+    assert rules_mod.leap_trim_contracts(190_000, 100_000, 20_000, r) == 5  # 90k over 1x -> 4.5 -> 5
+    assert rules_mod.leap_trim_contracts(190_000, 100_000, 20_000, rules_mod.LeapRules()) == 0  # no trim
+
+
+def test_credit_side_bull_only():
+    bull_only = rules_mod.CreditRules(sides="bull")
+    assert rules_mod.credit_side(100, 105, 95, bull_only) == "bull"  # mixed tape: still sells puts
+    assert rules_mod.credit_side(90, 95, 100, bull_only) is None  # never fights a downtrend
+    assert rules_mod.credit_side(90, 95, 100, rules_mod.CreditRules()) == "bear"
+
+
 def test_catalyst_rules():
     r = rules_mod.CatalystRules()
     monday = pd.Timestamp("2026-10-05").date()
@@ -449,8 +463,26 @@ def test_leap_bot_buys_delta_sized_leap(sqlite_db, db_session, chain, mocker):
     ((key, qty),) = legs.items()
     c = options.parse_occ(key)
     assert c.expiry == E560 and c.right == "C"
-    assert qty == 100 * rules_mod.leap_contracts(100_000, S, 0.70, 1.0)
-    assert abs(om.delta(S, c.strike, om.year_fraction(E560, TODAY), R, SIG, "C") - 0.70) < 0.03
+    target = OptionLeapCallBot.RULES.delta
+    assert qty == 100 * rules_mod.leap_contracts(100_000, S, target, 1.0)
+    assert abs(om.delta(S, c.strike, om.year_fraction(E560, TODAY), R, SIG, "C") - target) < 0.03
+
+
+def test_leap_bot_trims_exposure_back_to_one_times_book(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionLeapCallBot, mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 1
+    ((key, qty),) = options.option_legs(_portfolio(db_session, "option_LeapCallBot")).items()
+    # Gains have tripled the position (as a rally plus rising delta would).
+    _set_portfolio(db_session, {**_portfolio(db_session, "option_LeapCallBot"), key: 3 * qty}, "option_LeapCallBot")
+
+    def leverage():
+        book = bot.option_book("AAPL")
+        return book.greeks.delta * book.spot / bot.portfolio_value()
+
+    assert leverage() > 1.5
+    assert bot.makeOneIteration() == -1
+    assert 0.8 < leverage() <= 1.0 + 1e-9  # trimmed to 1x, rounding contracts up
+    assert bot.makeOneIteration() == 0  # within the band now: nothing more to do
 
 
 def test_catalyst_bot_enters_in_window_and_exits_before_earnings(sqlite_db, db_session, chain, mocker):

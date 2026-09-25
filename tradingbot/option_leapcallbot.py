@@ -1,24 +1,30 @@
 """
-option_LeapCallBot — AAPL stock replacement with a 70-delta LEAP call.
+option_LeapCallBot — AAPL stock replacement with a deep-ish LEAP call.
 
 From the options course: "LEAP — 1-2 years in future, 70 delta", for a
 long-term bullish view, with a lower cost basis than the shares; and "buy
 options when implied volatility is low".
 
-Rules (utils/option_rules.LeapRules):
-  * Hold while AAPL closes above its 200-day SMA; exit when it closes more
-    than 3% below it (the buffer avoids whipsaw around the line).
+Rules (utils/option_rules.LeapRules, walk-forward re-tuned 2026-09-25):
+  * Hold while AAPL closes above its 200-day SMA; exit on a close below it.
   * Enter only when ATM IV / 60-day HV <= 1.2: don't buy expensive time.
-  * 0.70-delta call, first expiry >= 540 days out, sized so its delta-dollars
-    are ~1.0x the book. That is ~25% of the book in premium, the rest cash.
-    That is the "lower cost basis" part: the same stock exposure for a quarter
-    of the capital, and the most that can be lost is the premium.
-  * The framework rolls the LEAP into a fresh 540-day, 0.70-delta call when
+  * 0.60-delta call, first expiry >= 540 days out, sized so its delta-dollars
+    are ~1.0x the book. That is ~20% of the book in premium, the rest cash:
+    the "lower cost basis" part — the same stock exposure for a fifth of the
+    capital, and the most that can be lost is the premium.
+  * Trimmed back to 1.0x whenever gains push exposure past 1.5x. Without the
+    trim, exposure drifted to ~1.6x on average and 2.9x at worst.
+  * The framework rolls the LEAP into a fresh 540-day, 0.60-delta call when
     180 days are left, before theta decay accelerates.
 
-This is a beta strategy (delta ~1x AAPL, and AAPL's beta to QQQ is ~1), so
-judge it on alpha vs QQQ with that in mind. The trend filter is the only
-source of alpha it has. Paper only.
+Re-tune vs the original (0.70 delta, 3% exit buffer, no trim), picked on
+2012-2019 and judged on 2019-2026: out-of-sample alpha t 2.10 vs 1.78, max
+drawdown -24% vs -35%, and all 72 grid variants stayed positive out of sample.
+
+Still a long-AAPL strategy, and AAPL was picked knowing it compounded 23%/yr,
+so its "alpha" vs QQQ is largely AAPL's own outperformance plus the trend
+filter; the synthetic IV proxy also makes the LEAP's beta look lower than it
+is. See docs/backtests/option-bots-2026-09.md. Paper only.
 
 Schedule: 0 15 * * 1-5.
 """
@@ -29,13 +35,13 @@ from typing import ClassVar
 from tradingbot.utils import option_math as om
 from tradingbot.utils import options
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.option_rules import LeapRules, leap_contracts, leap_signal, sma
+from tradingbot.utils.option_rules import LeapRules, leap_contracts, leap_signal, leap_trim_contracts, sma
 from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
 
 UNDERLYING = "AAPL"
-_RULES = LeapRules()
+_RULES = LeapRules(delta=0.60, exit_buffer=0.0, max_leverage=1.5)
 
 
 class OptionLeapCallBot(Bot):
@@ -69,7 +75,7 @@ class OptionLeapCallBot(Bot):
                 logger.info("Close %.2f fell below SMA200 band; exiting", last)
                 self.close_options(UNDERLYING)
                 return -1
-            return 0
+            return self._trim(book)
         if signal != 1:
             return 0
 
@@ -92,6 +98,22 @@ class OptionLeapCallBot(Bot):
         # and keeps the change as cash.
         self.buy(UNDERLYING, quantity_usd=n * ask * options.CONTRACT_MULTIPLIER * 1.005, option="call")
         return 1
+
+    def _trim(self, book: options.OptionBook) -> int:
+        """Sell contracts back to rules.leverage x book once exposure exceeds max_leverage."""
+        contracts = sum(p.contracts for p in book.positions)
+        delta_dollars = book.greeks.delta * book.spot
+        if contracts <= 0 or delta_dollars <= 0:
+            return 0
+        n = leap_trim_contracts(delta_dollars, self.portfolio_value(), delta_dollars / contracts, self.RULES)
+        if n <= 0:
+            return 0
+        n = min(n, int(contracts))
+        # Value-based partial sell at the mark: sell() floors this back to n whole contracts.
+        mark = max(p.price for p in book.positions)
+        logger.info("Exposure %.0f > %.1fx book; trimming %d contracts", delta_dollars, self.RULES.max_leverage, n)
+        self.sell(UNDERLYING, quantity_usd=n * mark * options.CONTRACT_MULTIPLIER, option="call")
+        return -1
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ run; only the prices differ (live chain vs Black-Scholes on an IV proxy).
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date
 
@@ -69,6 +70,19 @@ class CreditRules:
     take_profit: float = 0.50  # close at this share of the credit
     stop_loss: float = 2.0  # close when the loss reaches this multiple of the credit
     exit_dte: int = 21  # close with this few days left: gamma risk outgrows the theta left
+    # "trend": bull put spread in an uptrend, bear call spread in a downtrend.
+    # "bull": bull put spreads only (in any tape that is not a downtrend) — the
+    # side that collects the equity drift and the put skew instead of fighting them.
+    sides: str = "trend"
+    call_delta: float | None = None  # iron condor call side; None = short_delta
+
+
+def credit_side(close: float, sma50: float, sma200: float, rules: CreditRules) -> str | None:
+    """Which vertical to sell today: "bull", "bear", or None."""
+    side = trend_side(close, sma50, sma200)
+    if rules.sides == "bull":
+        return None if side == "bear" or np.isnan(sma200) else "bull"
+    return side
 
 
 def premium_selling_ok(iv_hv: float | None, vix: float | None, adx: float | None, rules: CreditRules) -> bool:
@@ -106,12 +120,26 @@ class LeapRules:
     hv_window: int = 60
     exit_buffer: float = 0.03  # exit below SMA200 x (1 - buffer), to avoid whipsaw
     leverage: float = 1.0  # delta-dollars per dollar of book
+    # Trim back to `leverage` once delta-dollars exceed this multiple of the book.
+    # None never trims: gains then compound the exposure (to ~1.6x on average).
+    max_leverage: float | None = None
 
 
 def leap_contracts(book_value: float, spot: float, delta: float, leverage: float) -> int:
     """Whole contracts whose delta-dollars come closest to leverage x book."""
     per_contract = delta * spot * 100
     return max(0, round(book_value * leverage / per_contract)) if per_contract > 0 else 0
+
+
+def leap_trim_contracts(
+    delta_dollars: float, book_value: float, delta_dollars_per_contract: float, rules: LeapRules
+) -> int:
+    """Contracts to sell so exposure returns to rules.leverage x book (0 if within max_leverage)."""
+    if rules.max_leverage is None or book_value <= 0 or delta_dollars_per_contract <= 0:
+        return 0
+    if delta_dollars <= rules.max_leverage * book_value:
+        return 0
+    return math.ceil((delta_dollars - rules.leverage * book_value) / delta_dollars_per_contract)
 
 
 def leap_signal(close: float, sma200: float, rules: LeapRules) -> int:
