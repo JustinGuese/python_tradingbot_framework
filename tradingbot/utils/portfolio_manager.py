@@ -1,8 +1,11 @@
 import logging
+import math
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from . import option_math as om
+from . import options
 from .bot_repository import BotRepository
 from .config import EXECUTION_CONFIG, PORTFOLIO_CONFIG, ExecutionConfig
 from .data_service import DataService
@@ -78,6 +81,17 @@ class PortfolioManager:
         """Ensure the Bot instance is attached to an active session."""
         self.bot = self.bot_repository.create_or_get_bot(self.bot_name, session=session)
 
+    def _option_fill(self, contract: str, ref_price: float, *, is_buy: bool) -> float:
+        """Buys fill at the ask, sells at the bid; ref_price +/- option slippage without a market."""
+        if options.parse_occ(contract).expiry < options.utc_today():
+            return ref_price  # expired: ref_price is already the settlement value
+        quote = options.latest_quote(contract, max_age=None)
+        side = (quote.ask if is_buy else quote.bid) if quote else 0.0
+        if side > 0:
+            return side
+        slip = self.execution_config.option_slippage_pct
+        return ref_price * (1.0 + slip) if is_buy else ref_price * (1.0 - slip)
+
     def buy(
         self,
         symbol: str,
@@ -85,17 +99,43 @@ class PortfolioManager:
         cached_data: pd.DataFrame | None = None,
         refresh: bool = True,
         session: Session | None = None,
+        option: bool | str | None = None,
+        target_dte: int = 30,
+        target_delta: float | None = None,
     ) -> None:
         """
         Buy a quantity of the specified symbol.
 
         Args:
-            symbol: Trading symbol to buy
+            symbol: Trading symbol to buy — for options, the UNDERLYING
             quantity_usd: Amount in USD to spend (-1 means use all available cash)
             cached_data: Optional cached DataFrame for price lookup
             refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
+            option: None/False buys the symbol itself. True / "call" / "put"
+                buys a contract on it instead, chosen by options.select_contract
+                (first expiry >= target_dte days out, strike nearest spot).
+            target_dte: Minimum days to expiry for the selected contract.
+            target_delta: Pick the strike nearest this delta (e.g. 0.70)
+                instead of the one nearest spot.
+
+        Cash reserved as margin for short option legs (see
+        options.margin_requirement) is never spendable here. That is 0 for any
+        bot without short options.
         """
+        right = options.normalize_right(option)
+        if right is None and options.is_option_symbol(symbol):
+            # Contract strings are an internal key, not the bot-facing API: a bot
+            # that has one in hand got it from its own portfolio, and buying it
+            # back directly would skip contract selection and liquidity checks.
+            raise ValueError(f"Buy options by underlying: buy({options.parse_occ(symbol).underlying!r}, option=...)")
+        if right is not None:
+            # Resolved BEFORE any row lock: selection is several yfinance calls.
+            try:
+                spot = self.data_service.get_latest_price(symbol)
+            except Exception:
+                spot = None  # select_contract falls back to the chain's own spot
+            symbol = options.select_contract(symbol, right, target_dte, spot=spot, delta=target_delta)
 
         def _execute_buy(sess: Session):
             if sess:
@@ -106,27 +146,28 @@ class PortfolioManager:
 
             cfg = self.execution_config
             cash = self.bot.portfolio.get("USD", 0)
+            spendable = cash - options.margin_requirement(self.bot.portfolio)
 
             # `quantity_usd` is the GROSS cash budget; commission comes out of it
             # rather than on top. That is what makes the spend-all-cash case
             # incapable of overdrawing at any commission rate: the debit is the
             # budget itself, so USD lands on exactly 0.0.
-            qty_usd = cash if quantity_usd == -1 else quantity_usd
+            qty_usd = spendable if quantity_usd == -1 else quantity_usd
 
-            if qty_usd > cash:
+            if qty_usd > spendable:
                 # A fully-invested rebalance routinely lands here by a few bps,
                 # because sells now raise slightly less than their notional. Only
                 # a materially short buy is worth a warning.
-                shortfall = qty_usd - cash
+                shortfall = qty_usd - spendable
                 level = logging.INFO if shortfall <= max(1.0, 0.01 * qty_usd) else logging.WARNING
                 logger.log(
                     level,
                     "Trimming buy of %s to available cash: have $%.2f, wanted $%.2f",
                     symbol,
-                    cash,
+                    spendable,
                     qty_usd,
                 )
-                qty_usd = cash
+                qty_usd = spendable
 
             if qty_usd <= 0:
                 logger.warning(f"Insufficient cash to buy {symbol}")
@@ -142,15 +183,32 @@ class PortfolioManager:
 
             commission_cost = qty_usd * cfg.commission_pct
             available = qty_usd - commission_cost
-            execution_price = cfg.buy_execution_price(price)
-            quantity = available / execution_price
+            debit = qty_usd
+            if options.is_option_symbol(symbol):
+                execution_price = self._option_fill(symbol, price, is_buy=True)
+                quantity = options.whole_contract_qty(available / execution_price)
+                if quantity <= 0:
+                    logger.warning(
+                        "$%.2f buys less than one %s contract (%.2f per contract); skipping",
+                        qty_usd,
+                        symbol,
+                        execution_price * options.CONTRACT_MULTIPLIER,
+                    )
+                    return
+                # Whole contracts leave change: debit only what was spent. Still
+                # <= qty_usd, since quantity was floored from the post-commission budget.
+                commission_cost = quantity * execution_price * cfg.commission_pct
+                debit = quantity * execution_price + commission_cost
+            else:
+                execution_price = cfg.buy_execution_price(price)
+                quantity = available / execution_price
 
             if quantity <= 0:
                 logger.warning(f"Calculated quantity for {symbol} is <= 0")
                 return
 
             portfolio = self.bot.portfolio.copy()
-            portfolio["USD"] = cash - qty_usd  # full gross budget debited
+            portfolio["USD"] = cash - debit  # stocks: the full gross budget; options: exact spend
             portfolio[symbol] = portfolio.get(symbol, 0) + quantity
 
             self.bot.portfolio = portfolio
@@ -173,7 +231,7 @@ class PortfolioManager:
                 execution_price,
                 price,
                 commission_cost,
-                qty_usd,
+                debit,
             )
 
         if session:
@@ -189,19 +247,28 @@ class PortfolioManager:
         cached_data: pd.DataFrame | None = None,
         refresh: bool = True,
         session: Session | None = None,
-    ) -> None:
+        option: bool | str | None = None,
+    ) -> float:
         """
         Sell a quantity of the specified symbol.
 
         Args:
-            symbol: Trading symbol to sell
+            symbol: Trading symbol to sell — for options, the UNDERLYING
             quantity_usd: Amount in USD to sell (-1 means sell all holdings)
             cached_data: Optional cached DataFrame for price lookup
             refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
-        """
+            option: None/False sells the symbol itself. True sells every option
+                held on it; "call" / "put" only that side. Earliest expiry first.
 
-        def _execute_sell(sess: Session):
+        Returns:
+            Net cash credited (0.0 if nothing was sold).
+        """
+        if option is not None and option is not False:
+            right = None if option is True else options.normalize_right(option)
+            return self._sell_options(symbol, right, quantity_usd, session)
+
+        def _execute_sell(sess: Session) -> float:
             if sess:
                 # Lock row if in transaction
                 self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
@@ -212,12 +279,13 @@ class PortfolioManager:
             holding = self.bot.portfolio.get(symbol, 0)
             if holding <= 0:
                 logger.warning(f"No holdings of {symbol} to sell")
-                return
+                return 0.0
 
             price = self.data_service.get_latest_price(symbol, cached_data)
             if price <= 0:
                 logger.warning("Non-positive price %s for %s; skipping sell", price, symbol)
-                return
+                return 0.0
+            is_option = options.is_option_symbol(symbol)
 
             # On a sell, `quantity_usd` is the POSITION NOTIONAL to shed valued at
             # the reference price — not the cash to raise. rebalance_portfolio
@@ -232,13 +300,18 @@ class PortfolioManager:
             if quantity > holding:
                 logger.warning(f"Insufficient holdings of {symbol} to sell requested amount. Selling all.")
                 quantity = holding
+            if is_option and quantity < holding:
+                quantity = options.whole_contract_qty(quantity)
 
             if quantity <= 0:
-                return
+                return 0.0
 
             # Proceeds are derived AFTER the clamp, so the clamp stays a pure
             # share-count comparison that slippage cannot influence.
-            execution_price = cfg.sell_execution_price(price)
+            if is_option:
+                execution_price = self._option_fill(symbol, price, is_buy=False)
+            else:
+                execution_price = cfg.sell_execution_price(price)
             gross_proceeds = quantity * execution_price
             commission_cost = gross_proceeds * cfg.commission_pct
             net_proceeds = gross_proceeds - commission_cost
@@ -271,12 +344,266 @@ class PortfolioManager:
                 commission_cost,
                 net_proceeds,
             )
+            return net_proceeds
 
         if session:
-            _execute_sell(session)
-        else:
-            with get_db_session() as sess:
-                _execute_sell(sess)
+            return _execute_sell(session)
+        with get_db_session() as sess:
+            return _execute_sell(sess)
+
+    def _sell_options(self, underlying: str, right: str | None, quantity_usd: float, session: Session | None) -> float:
+        """Sell option holdings on `underlying`, earliest expiry first, up to quantity_usd."""
+        self._refresh_bot(session)
+        keys = options.held_option_keys(self.bot.portfolio, underlying, right)
+        if not keys:
+            logger.warning("No %s option holdings to sell", underlying)
+            return 0.0
+        proceeds = 0.0
+        remaining = quantity_usd
+        for key in keys:
+            if quantity_usd == -1:
+                proceeds += self.sell(key, session=session)
+                continue
+            if remaining <= 0:
+                break
+            value = self.bot.portfolio.get(key, 0) * self.data_service.get_latest_price(key)
+            part = min(remaining, value)
+            proceeds += self.sell(key, quantity_usd=part, session=session)
+            remaining -= part
+        return proceeds
+
+    def roll_and_settle_options(self, roll_dte: int | None, target_dte: int, target_delta: float | None = None) -> None:
+        """
+        Keep option positions alive without the bot having to think about expiry.
+
+        - Contracts already past expiry (the bot did not run in time) are
+          cash-settled at intrinsic value off the underlying's close on the
+          expiry date, long and short alike. Real equity options settle into
+          shares; cash settlement at the same value is the deliberate
+          simplification.
+        - Long contracts with <= roll_dte days left are sold and the proceeds
+          rebought in a fresh contract on the same underlying and side (at
+          target_delta if given), so "I hold an AAPL call" stays true across
+          expiries. roll_dte=None disables rolling.
+        - An underlying with any SHORT leg is never rolled: rolling one wing of
+          a spread alone would leave the short side uncovered. Strategies that
+          sell options manage their own exits.
+
+        A no-op for a bot holding no options.
+        """
+        self._refresh_bot()
+        today = options.utc_today()
+        for key in options.option_legs(self.bot.portfolio):
+            contract = options.parse_occ(key)
+            if contract.expiry < today:
+                self._settle_expired(key, contract)
+        if roll_dte is None:
+            return
+
+        self._refresh_bot()
+        shorted = {options.parse_occ(k).underlying for k, q in options.option_legs(self.bot.portfolio).items() if q < 0}
+        for key in options.held_option_keys(self.bot.portfolio):
+            contract = options.parse_occ(key)
+            if contract.underlying in shorted or (contract.expiry - today).days > roll_dte:
+                continue
+            proceeds = self.sell(key)
+            if proceeds <= 0:
+                continue
+            try:
+                self.buy(
+                    contract.underlying,
+                    proceeds,
+                    option=contract.right,
+                    target_dte=target_dte,
+                    target_delta=target_delta,
+                )
+            except Exception as e:
+                # The sell already committed; the proceeds simply stay cash.
+                logger.warning("Rolled out of %s but could not roll into a new contract: %s", key, e)
+
+    def _settle_expired(self, key: str, contract: options.OptionContract) -> None:
+        settle_price = options.intrinsic_value(
+            contract, options.underlying_close_on(contract.underlying, contract.expiry)
+        )
+        with get_db_session() as sess:
+            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            qty = self.bot.portfolio.get(key, 0)
+            if abs(qty) < 1e-6:
+                return
+            # Signed: a long ITM leg is credited, a short ITM leg debited (the
+            # cash for that was reserved as margin when it was opened).
+            proceeds = qty * settle_price
+            portfolio = self.bot.portfolio.copy()
+            portfolio["USD"] = portfolio.get("USD", 0) + proceeds
+            del portfolio[key]
+            self.bot.portfolio = portfolio
+            self.bot_repository.update_bot(self.bot, session=sess)
+            self.bot_repository.log_trade(
+                bot_name=self.bot_name,
+                symbol=key,
+                quantity=abs(qty),
+                price=settle_price,
+                is_buy=qty < 0,  # a short is closed by buying it back
+                profit=proceeds if qty > 0 else None,
+                session=sess,
+            )
+        logger.info("SETTLED expired %s: %.0f units at %.4f -> $%.2f", key, qty, settle_price, proceeds)
+
+    # ------------------------------------------------------------------
+    # Multi-leg options: spreads, condors, closing a whole book
+    # ------------------------------------------------------------------
+
+    def trade_option_legs(self, legs: list[tuple[str, float]], session: Session | None = None) -> float:
+        """
+        Change several option positions in ONE locked transaction.
+
+        Args:
+            legs: (OCC contract, signed share-equivalent change). +200 buys two
+                contracts (to open or to close a short), -200 sells two (to
+                close a long or to open a short). Whole contracts only.
+
+        Returns:
+            Net cash flow: positive for a credit, negative for a debit.
+
+        This is the only path that can make a holding negative. Each leg fills
+        at the ask when buying and the bid when selling (last price +/- option
+        slippage without a market). If the trade opens or grows any position,
+        it is refused as a whole — nothing is written — when the cash left
+        would not cover options.margin_requirement of the resulting book. That
+        also refuses anything with unbounded risk, such as a naked short call.
+        Pure reductions always go through, so a position can always be closed.
+        """
+        legs = [(k, float(q)) for k, q in legs if abs(q) > 1e-9]
+        if not legs:
+            return 0.0
+        for key, qty in legs:
+            if not options.is_option_symbol(key):
+                raise ValueError(f"trade_option_legs takes option contracts only, got {key!r}")
+            if options.whole_contract_qty(abs(qty)) != round(abs(qty)):
+                raise ValueError(f"{key}: {qty} is not a whole number of contracts")
+        # Reference prices before the row lock: pricing may refetch a chain.
+        refs = {key: self.data_service.get_latest_price(key) for key, _ in legs}
+
+        def _execute(sess: Session) -> float:
+            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            cfg = self.execution_config
+            portfolio = self.bot.portfolio.copy()
+            cash = portfolio.get("USD", 0)
+            fills = []
+            grows = False
+            for key, qty in legs:
+                is_buy = qty > 0
+                price = self._option_fill(key, refs[key], is_buy=is_buy)
+                notional = abs(qty) * price
+                flow = (-notional if is_buy else notional) - notional * cfg.commission_pct
+                old = portfolio.get(key, 0.0)
+                new = old + qty
+                grows = grows or abs(new) > abs(old) + 1e-9
+                if abs(new) < 1e-6:
+                    portfolio.pop(key, None)
+                else:
+                    portfolio[key] = new
+                cash += flow
+                fills.append((key, qty, price, flow))
+            portfolio["USD"] = cash
+
+            required = options.margin_requirement(portfolio)
+            if grows and cash + 1e-6 < required:
+                raise ValueError(
+                    f"Refused option trade {[(k, q) for k, q in legs]}: cash after ${cash:,.2f} "
+                    f"< margin required ${required:,.2f}"
+                )
+
+            self.bot.portfolio = portfolio
+            self.bot_repository.update_bot(self.bot, session=sess)
+            for key, qty, price, flow in fills:
+                self.bot_repository.log_trade(
+                    bot_name=self.bot_name,
+                    symbol=key,
+                    quantity=abs(qty),
+                    price=price,
+                    is_buy=qty > 0,
+                    profit=flow if qty < 0 else None,
+                    session=sess,
+                )
+                logger.info(
+                    "%s %.0f of %s at %.4f (cash %+.2f)", "BOUGHT" if qty > 0 else "SOLD", abs(qty), key, price, flow
+                )
+            return sum(f[3] for f in fills)
+
+        if session:
+            return _execute(session)
+        with get_db_session() as sess:
+            return _execute(sess)
+
+    def open_structure(self, pick: options.StructurePick, max_risk_usd: float) -> int:
+        """
+        Open as many units of `pick` as `max_risk_usd` of worst-case loss allows.
+
+        One unit is one contract per leg (signs from the pick). Max loss per unit
+        is taken from the prices it would fill at (ask on the long legs, bid on
+        the short), so for a credit spread it is width - credit. Refuses when
+        the chain was not live: off-hours last prices on different legs are from
+        different moments, and a "credit" built from them is fiction.
+
+        Returns:
+            Units opened (0 when refused or unaffordable).
+        """
+        if not pick.live:
+            logger.warning("Not opening %s structure off-hours (no live chain)", pick.underlying)
+            return 0
+        unit_legs = []
+        for key, unit in pick.legs:
+            c = options.parse_occ(key)
+            fill = self._option_fill(key, self.data_service.get_latest_price(key), is_buy=unit > 0)
+            unit_legs.append(om.Leg(c.right, c.strike, unit, fill))
+        per_unit = om.max_loss(unit_legs) * options.CONTRACT_MULTIPLIER
+        if math.isinf(per_unit):
+            raise ValueError(f"Refusing unbounded-risk structure {pick.legs}")
+        if per_unit <= 0:
+            logger.warning("Structure %s shows no risk at fill prices (bad quotes?); skipping", pick.legs)
+            return 0
+
+        self._refresh_bot()
+        free = self.bot.portfolio.get("USD", 0) - options.margin_requirement(self.bot.portfolio)
+        units = int(min(max_risk_usd, free) // per_unit)
+        if units < 1:
+            logger.warning(
+                "One %s unit risks $%.2f; budget $%.2f, free cash $%.2f — skipping",
+                pick.underlying,
+                per_unit,
+                max_risk_usd,
+                free,
+            )
+            return 0
+        self.trade_option_legs([(k, u * units * options.CONTRACT_MULTIPLIER) for k, u in pick.legs])
+        logger.info("Opened %d x %s (max loss $%.2f each)", units, [k for k, _ in pick.legs], per_unit)
+        return units
+
+    def close_options(self, underlying: str, session: Session | None = None) -> float:
+        """Flatten every option leg on `underlying`, long and short, in one transaction."""
+        self._refresh_bot(session)
+        legs = options.option_legs(self.bot.portfolio, underlying)
+        if not legs:
+            return 0.0
+        return self.trade_option_legs([(k, -q) for k, q in legs.items()], session=session)
+
+    def option_book(self, underlying: str) -> options.OptionBook:
+        """Positions, marks, entry value, P&L and net greeks of the options on `underlying`."""
+        self._refresh_bot()
+        legs = options.option_legs(self.bot.portfolio, underlying)
+        spot = self.data_service.get_latest_price(underlying)
+        prices = {k: self.data_service.get_latest_price(k) for k in legs}
+        entries = {k: options.entry_value(self.bot_name, k) for k in legs}
+        return options.build_book(underlying, legs, prices, spot, entries)
+
+    def total_value(self) -> float:
+        """Cash plus every holding (short option legs negative) at the latest price."""
+        self._refresh_bot()
+        portfolio = self.bot.portfolio
+        held = [s for s, q in portfolio.items() if s != "USD" and abs(q) > 1e-6]
+        prices = self.data_service.get_latest_prices_batch(held) if held else {}
+        return portfolio.get("USD", 0) + sum(portfolio[s] * prices.get(s, 0.0) for s in held)
 
     def rebalance_portfolio(self, target_portfolio: dict[str, float], only_over_50_usd: bool = False) -> None:
         """
@@ -291,6 +618,19 @@ class PortfolioManager:
         # rather than silently rescale — a target that does not sum to 1 means the
         # caller's own maths is wrong and rescaling would hide it.
         require_normalized(target_portfolio)
+        contracts = [s for s in target_portfolio if options.is_option_symbol(s)]
+        if contracts:
+            # Weights are per symbol; an option target would need contract
+            # selection and rolling inside the rebalance. Not supported — held
+            # contracts absent from the target are sold like any other exit.
+            raise ValueError(f"rebalancePortfolio cannot target option contracts {contracts}; use buy/sell(option=...)")
+        self._refresh_bot()
+        shorts = [k for k, q in options.option_legs(self.bot.portfolio).items() if q < 0]
+        if shorts:
+            # A weight-based rebalance values and exits long holdings; a short leg
+            # would be ignored in the total and "exited" via buy() of a raw
+            # contract. Spread books are managed with close_options instead.
+            raise ValueError(f"rebalancePortfolio cannot run on a book with short option legs {shorts}")
 
         # Step 2: Resolve prices BEFORE taking the row lock.
         #

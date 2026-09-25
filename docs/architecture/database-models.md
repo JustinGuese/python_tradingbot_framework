@@ -129,6 +129,33 @@ class StockInsiderTrade(Base):
 
 **Unique constraint**: `(symbol, transaction_date, insider_name, transaction_type, shares)`. Index on `(symbol, transaction_date)`.
 
+## OptionQuote Model
+
+Option-chain snapshots from yfinance. They are written on demand when a bot
+trades or values an option (see `tradingbot/utils/options.py`), never on a
+schedule.
+
+```python
+class OptionQuote(Base):
+    id: int  # Auto-increment primary key
+    underlying: str  # e.g. "AAPL" (indexed)
+    contract_symbol: str  # OCC symbol, e.g. "AAPL261030C00200000" — the portfolio key
+    expiration: datetime  # Expiry date, naive UTC midnight
+    option_type: str  # "C" or "P"
+    strike: float
+    bid: float  # Per-share premium; NULL when snapshotted outside regular hours
+    ask: float  # Per-share premium; NULL when snapshotted outside regular hours
+    last_price: float  # Per-share premium
+    volume: float
+    open_interest: float
+    implied_volatility: float
+    snapshot_at: datetime  # Shared by every row of one fetch
+    created_at: datetime
+```
+
+**Unique constraint**: `(contract_symbol, snapshot_at)`. Index on
+`(contract_symbol, snapshot_at)`.
+
 ## TelegramMessage Model
 
 Monitored Telegram channel messages with AI summaries (written by the Telegram monitor CronJob).

@@ -32,6 +32,7 @@ from tradingbot.utils.db import Base
 _SESSION_CONSUMERS = (
     "tradingbot.utils.portfolio_manager",
     "tradingbot.utils.bot_repository",
+    "tradingbot.utils.options",
 )
 
 

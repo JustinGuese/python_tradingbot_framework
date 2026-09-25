@@ -33,6 +33,7 @@ from typing import Any, ClassVar
 
 import pandas as pd
 
+from . import options
 from .bot_repository import BotRepository
 from .config import setup_logging
 from .data_service import DataService
@@ -87,6 +88,24 @@ class Bot:
     # "1y", so a 12-month momentum signal has zero usable bars after warmup and
     # the backtest reports a confident number computed from almost no data.
     BACKTEST_PERIOD: ClassVar[str | None] = None
+
+    # Paper options, off by default. True / "call" / "put" makes every buy()/sell()
+    # that does not pass option= explicitly trade a contract on the named symbol
+    # instead of the symbol itself — so a single-symbol decisionFunction bot
+    # switches to calls with this one line. Contract choice, expiry and rolling
+    # are the framework's job (utils/options.py); bots only ever name the
+    # underlying. Paper only: the live copier drops option holdings.
+    USE_OPTIONS: ClassVar[bool | str] = False
+    OPTION_TARGET_DTE: ClassVar[int] = 30  # buy the first expiry at least this far out
+    # Roll a held LONG contract with this few days left; None never rolls.
+    # Underlyings with short legs (spreads, condors) are never auto-rolled.
+    OPTION_ROLL_DTE: ClassVar[int | None] = 7
+    OPTION_TARGET_DELTA: ClassVar[float | None] = None  # None = strike nearest spot
+
+    # Starting cash, used only when the bot's row is first created. Option
+    # strategies need more than $10k for whole-contract sizing to be sane
+    # (one 70-delta AAPL LEAP is ~$6k); returns and alpha are scale-free.
+    INITIAL_CAPITAL: ClassVar[float] = 10_000.0
 
     def __init__(
         self,
@@ -152,9 +171,14 @@ class Bot:
             )
         if self.tickers and not self.tradeable_tickers:
             raise ValueError(f"{name}: every ticker is a benchmark — nothing left to trade.")
+        if self.USE_OPTIONS and (len(self.tickers) > 1 or type(self).targetWeights is not Bot.targetWeights):
+            # The multi-ticker and targetWeights paths size through weight-based
+            # rebalancePortfolio, which cannot target contracts. Refuse rather
+            # than silently trade the stock the bot asked not to hold.
+            raise ValueError(f"{name}: USE_OPTIONS supports single-symbol bots and direct buy()/sell() only.")
 
         init_db()  # Ensure database is initialized before first access
-        self.dbBot = BotRepository.create_or_get_bot(name)
+        self.dbBot = BotRepository.create_or_get_bot(name, initial_usd=self.INITIAL_CAPITAL)
         self.interval = interval
         self.period = period
 
@@ -489,33 +513,126 @@ class Bot:
         return self._data_service.get_latest_prices_batch(symbols)
 
     # Portfolio management methods - delegate to PortfolioManager
-    def buy(self, symbol: str, quantity_usd: float = -1) -> None:
+    def _option_mode(self, option: bool | str | None) -> bool | str | None:
+        return option if option is not None else getattr(self, "USE_OPTIONS", False)
+
+    def buy(
+        self,
+        symbol: str,
+        quantity_usd: float = -1,
+        option: bool | str | None = None,
+        *,
+        delta: float | None = None,
+        dte: int | None = None,
+    ) -> None:
         """
         Buy a quantity of the specified symbol.
 
         Args:
             symbol: Trading symbol to buy
             quantity_usd: Amount in USD to spend (-1 means use all available cash)
+            option: True / "call" / "put" buys a ~OPTION_TARGET_DTE-day at-the-money
+                contract on `symbol` instead of the symbol itself. None uses the
+                class's USE_OPTIONS (default False: plain stock).
+            delta: Option strike by delta (0.70 = a 70-delta call) instead of
+                ATM. Defaults to OPTION_TARGET_DELTA.
+            dte: Minimum days to expiry. Defaults to OPTION_TARGET_DTE.
         """
         # Use per-ticker cache if available
         cached = self.datas.get(symbol, self.data)
-        self._portfolio_manager.buy(symbol, quantity_usd=quantity_usd, cached_data=cached)
+        self._portfolio_manager.buy(
+            symbol,
+            quantity_usd=quantity_usd,
+            cached_data=cached,
+            option=self._option_mode(option),
+            target_dte=dte if dte is not None else getattr(self, "OPTION_TARGET_DTE", 30),
+            target_delta=delta if delta is not None else getattr(self, "OPTION_TARGET_DELTA", None),
+        )
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
 
-    def sell(self, symbol: str, quantity_usd: float = -1) -> None:
+    def sell(self, symbol: str, quantity_usd: float = -1, option: bool | str | None = None) -> None:
         """
         Sell a quantity of the specified symbol.
 
         Args:
             symbol: Trading symbol to sell
             quantity_usd: Amount in USD to sell (-1 means sell all holdings)
+            option: True sells the option contracts held on `symbol` (only
+                "call" / "put" to restrict the side). None uses USE_OPTIONS.
         """
         # Use per-ticker cache if available
         cached = self.datas.get(symbol, self.data)
-        self._portfolio_manager.sell(symbol, quantity_usd=quantity_usd, cached_data=cached)
+        self._portfolio_manager.sell(
+            symbol, quantity_usd=quantity_usd, cached_data=cached, option=self._option_mode(option)
+        )
         # Refresh dbBot reference after portfolio update
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+
+    def _position_qty(self, symbol: str) -> float:
+        """Units held in `symbol` — or, for a USE_OPTIONS bot, in contracts on it."""
+        portfolio = self.dbBot.portfolio
+        if not getattr(self, "USE_OPTIONS", False):
+            return portfolio.get(symbol, 0)
+        return sum(portfolio[k] for k in options.held_option_keys(portfolio, symbol))
+
+    # Multi-leg options. Like buy(option=...), the bot names the underlying and
+    # the shape; the framework picks the contracts (utils/options.py), prices
+    # them, sizes by worst-case loss, and reserves that loss as cash.
+    def open_credit_spread(
+        self,
+        underlying: str,
+        side: str,
+        short_delta: float = 0.30,
+        width: float = 10.0,
+        dte: int = 35,
+        max_risk_usd: float | None = None,
+        view: options.ChainView | None = None,
+    ) -> int:
+        """
+        Sell a vertical credit spread: side="put" / "bull" is a bull put spread
+        (short put at short_delta, long put `width` lower), side="call" /
+        "bear" a bear call spread. Sized so that total max loss stays within
+        max_risk_usd (default: all free cash). Returns the number opened.
+        `view` reuses a chain the bot already loaded (options.load_chain).
+        """
+        right = {"put": "P", "bull": "P", "call": "C", "bear": "C"}.get(side.lower())
+        if right is None:
+            raise ValueError(f"side={side!r}: use 'put'/'bull' or 'call'/'bear'")
+        pick = options.select_vertical(underlying, right, short_delta, width, dte, view=view)
+        return self._open_structure(pick, max_risk_usd)
+
+    def open_iron_condor(
+        self,
+        underlying: str,
+        short_delta: float = 0.16,
+        width: float = 10.0,
+        dte: int = 35,
+        max_risk_usd: float | None = None,
+        view: options.ChainView | None = None,
+    ) -> int:
+        """Sell a put spread and a call spread on one expiry. Returns the number opened."""
+        pick = options.select_iron_condor(underlying, short_delta, width, dte, view=view)
+        return self._open_structure(pick, max_risk_usd)
+
+    def _open_structure(self, pick: options.StructurePick, max_risk_usd: float | None) -> int:
+        units = self._portfolio_manager.open_structure(pick, math.inf if max_risk_usd is None else max_risk_usd)
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+        return units
+
+    def close_options(self, underlying: str) -> float:
+        """Close every option leg on `underlying` (long and short). Returns net cash."""
+        cash = self._portfolio_manager.close_options(underlying)
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+        return cash
+
+    def option_book(self, underlying: str) -> options.OptionBook:
+        """Held options on `underlying`: legs, marks, entry value, P&L, DTE and net greeks."""
+        return self._portfolio_manager.option_book(underlying)
+
+    def portfolio_value(self) -> float:
+        """Total book value: cash plus every holding at the latest price (short legs negative)."""
+        return self._portfolio_manager.total_value()
 
     def rebalancePortfolio(self, targetPortfolio: dict[str, float], onlyOver50USD: bool = False) -> None:
         """
@@ -647,6 +764,14 @@ class Bot:
         bot_name = self.bot_name
         decision = -2
         try:
+            if options.option_legs(self.dbBot.portfolio):
+                # Before the strategy runs, so it sees a book with no dead contracts.
+                self._portfolio_manager.roll_and_settle_options(
+                    roll_dte=getattr(self, "OPTION_ROLL_DTE", 7),
+                    target_dte=getattr(self, "OPTION_TARGET_DTE", 30),
+                    target_delta=getattr(self, "OPTION_TARGET_DELTA", None),
+                )
+                self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
             decision = self.makeOneIteration()
             # Refresh again after makeOneIteration in case portfolio was updated
             self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
@@ -654,11 +779,11 @@ class Bot:
 
             # Handle multi-asset bots gracefully
             if self.symbol:
-                holding = self.dbBot.portfolio.get(self.symbol, 0)
+                holding = self._position_qty(self.symbol)
                 holding_info = f"Holding: {holding}"
             else:
                 # For multi-asset bots, show portfolio summary
-                non_usd_holdings = {k: v for k, v in self.dbBot.portfolio.items() if k != "USD" and v > 0}
+                non_usd_holdings = {k: v for k, v in self.dbBot.portfolio.items() if k != "USD" and v != 0}
                 holding_info = f"Holdings: {len(non_usd_holdings)} assets"
 
             logger.info("Decision: %s", decision)
@@ -811,7 +936,7 @@ class Bot:
         self.datasettings = (self.interval, self.period)
         decision = self.getLatestDecision(data)
         cash = self.dbBot.portfolio.get("USD", 0)
-        holding = self.dbBot.portfolio.get(self.symbol, 0)
+        holding = self._position_qty(self.symbol) if self.symbol is not None else 0
         if decision == 1 and cash > 0 and self.symbol is not None:
             self.buy(self.symbol)
             return 1
@@ -1290,6 +1415,12 @@ class Bot:
         from .backtest import backtest_bot
 
         self._assert_backtestable()
+        if getattr(self, "USE_OPTIONS", False):
+            logger.warning(
+                "%s trades options live, but this backtest holds the UNDERLYING: "
+                "yfinance has no historical chains, so these numbers are not the option P&L.",
+                self.bot_name,
+            )
         results = backtest_bot(self, initial_capital=initial_capital)
         logger.info(f"\n--- Backtest Results: {self.bot_name} ---")
         logger.info(f"Yearly Return: {results['yearly_return']:.2%}")

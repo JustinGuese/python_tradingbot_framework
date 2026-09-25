@@ -329,6 +329,25 @@ bots:
   # docs/backtests/taregimemultiassetbot.md.
   schedule: "10 21 * * 1-5" # Daily 9:10 PM UTC Mon-Fri
 
+# Paper option strategies on AAPL (utils/options.py, utils/option_rules.py). The
+# underscore stays in the module path; the CronJob is named option-<x>bot. They
+# run mid-morning New York because opening a position needs a LIVE chain: off-hours
+# yfinance zeroes bid/ask and the framework refuses to open. 15:00 UTC is 11:00
+# EDT / 10:00 EST. Each starts with $100k paper (INITIAL_CAPITAL), so whole-contract
+# sizing works. The live copier drops option holdings, so none can reach a broker.
+# See docs/backtests/option-bots-2026-09.md.
+- name: option_leapcallbot
+  schedule: "0 15 * * 1-5" # 70-delta ~1.5y LEAP call while AAPL > SMA200
+
+- name: option_creditspreadbot
+  schedule: "5 15 * * 1-5" # bull put / bear call spread when IV/HV is rich
+
+- name: option_ironcondorbot
+  schedule: "10 15 * * 1-5" # 16-delta iron condor, range-bound + rich IV
+
+- name: option_catalystcallbot
+  schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before
+
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is

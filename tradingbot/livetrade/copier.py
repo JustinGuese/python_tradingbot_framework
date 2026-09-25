@@ -5,6 +5,7 @@ from typing import Literal
 
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.data_service import DataService
+from tradingbot.utils.options import is_option_symbol
 
 from .broker import LiveBroker
 
@@ -65,7 +66,11 @@ class LiveTradeCopier:
 
         dropped: dict[str, float] = {}
         for yf_symbol, weight in target_weights.items():
-            if not self.broker.is_tradeable(yf_symbol):
+            # Paper bots may hold option contracts (Bot.USE_OPTIONS). No broker
+            # adapter can place them: SymbolMapper types an OCC symbol as "stock",
+            # so without this it would go out as a stock order. Dropped, not
+            # unmapped, so one option leg cannot abort a strict-mapping sync.
+            if is_option_symbol(yf_symbol) or not self.broker.is_tradeable(yf_symbol):
                 dropped[yf_symbol] = weight
                 continue
             meta = self.broker.map_symbol(yf_symbol)

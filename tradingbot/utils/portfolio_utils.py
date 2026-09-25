@@ -45,8 +45,10 @@ def calculate_portfolio_worth(
     portfolio = bot.portfolio
     cash = portfolio.get("USD", 0)
 
-    # Get all non-USD holdings
-    holdings = {symbol: quantity for symbol, quantity in portfolio.items() if symbol != "USD" and quantity > 0}
+    # Get all non-USD holdings. Short option legs are negative and must stay in:
+    # their premium already sits in cash, so dropping the liability would
+    # overstate the book by exactly the credit received.
+    holdings = {symbol: quantity for symbol, quantity in portfolio.items() if symbol != "USD" and quantity != 0}
 
     if not holdings:
         return cash

@@ -7,6 +7,7 @@ import yfinance as yf
 from cachetools import TTLCache
 from ta import add_all_ta_features
 
+from . import options
 from .config import (
     FRESHNESS_TOLERANCE_MINUTES,
     PRICE_CACHE_MAXSIZE,
@@ -677,6 +678,15 @@ class DataService:
         if cache_key in _price_cache:
             return _price_cache[cache_key]
 
+        # Option contracts price off chain snapshots (quote mid, or intrinsic
+        # once expired), never off historic_data: an illiquid contract's last
+        # 1-minute bar can be days old, and writing it back would file a stale
+        # print as fresh.
+        if options.is_option_symbol(symbol):
+            price = options.option_price(symbol)
+            _price_cache[cache_key] = price
+            return price
+
         # Check DB first
         now = pd.Timestamp.now(tz="UTC")
         with get_db_session() as session:
@@ -762,7 +772,7 @@ class DataService:
 
             subquery = (
                 session.query(HistoricData.symbol, func.max(HistoricData.timestamp).label("max_timestamp"))
-                .filter(HistoricData.symbol.in_(symbols))
+                .filter(HistoricData.symbol.in_([s for s in symbols if not options.is_option_symbol(s)]))
                 .group_by(HistoricData.symbol)
                 .subquery()
             )

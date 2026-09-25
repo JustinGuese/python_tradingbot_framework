@@ -312,6 +312,46 @@ class StockInsiderTrade(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class OptionQuote(Base):
+    """
+    One row per option contract per chain snapshot, from yfinance option_chain().
+
+    Written only when a bot trades or values an option (see utils/options.py),
+    never on a schedule. yfinance serves no historical chains, so this table is
+    also the only history an options backtest could ever be built from.
+
+    Attributes:
+        underlying: Underlying ticker, e.g. "AAPL"
+        contract_symbol: OCC symbol, e.g. "AAPL251017C00150000" — the portfolio key
+        expiration: Expiry date (naive UTC midnight)
+        option_type: "C" or "P"
+        strike: Strike price
+        bid / ask / last_price: Per-SHARE premium (one contract = 100 shares)
+        snapshot_at: When the chain was fetched; all rows of one fetch share it
+    """
+
+    __tablename__ = "option_quotes"
+    __table_args__ = (
+        UniqueConstraint("contract_symbol", "snapshot_at", name="uq_option_quotes_contract_snapshot"),
+        Index("ix_option_quotes_contract_snapshot", "contract_symbol", "snapshot_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    underlying: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    contract_symbol: Mapped[str] = mapped_column(String, nullable=False)
+    expiration: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    option_type: Mapped[str] = mapped_column(String(1), nullable=False)
+    strike: Mapped[float] = mapped_column(Float, nullable=False)
+    bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+    implied_volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
     __table_args__ = (UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),)

@@ -39,6 +39,12 @@ DEFAULT_COMMISSION_PCT = 0.0  # fraction of trade value
 DEFAULT_MIN_TRADE_USD = 25.0
 DEFAULT_REBALANCE_BAND_PCT = 0.05
 
+# Option fills use the snapshot's bid/ask. This is the fallback when the quote
+# has no two-sided market (yfinance zeroes bid/ask outside market hours): a
+# fraction of the premium, one way. Option spreads run 1-10% of premium, so the
+# 5 bps equity slippage would flatter every option round trip.
+DEFAULT_OPTION_SLIPPAGE_PCT = 0.02
+
 # Required DataFrame columns for market data
 # All market data DataFrames must have these columns in this exact order
 REQUIRED_DATA_COLUMNS = [
@@ -193,6 +199,7 @@ class ExecutionConfig:
     commission_pct: float = DEFAULT_COMMISSION_PCT
     min_trade_usd: float = DEFAULT_MIN_TRADE_USD
     rebalance_band_pct: float = DEFAULT_REBALANCE_BAND_PCT
+    option_slippage_pct: float = DEFAULT_OPTION_SLIPPAGE_PCT
 
     @classmethod
     def from_env(cls) -> ExecutionConfig:
@@ -201,6 +208,9 @@ class ExecutionConfig:
             commission_pct=_env_float("EXECUTION_COMMISSION_PCT", DEFAULT_COMMISSION_PCT, lo=0.0, hi=0.05),
             min_trade_usd=_env_float("EXECUTION_MIN_TRADE_USD", DEFAULT_MIN_TRADE_USD, lo=0.0, hi=10_000.0),
             rebalance_band_pct=_env_float("EXECUTION_REBALANCE_BAND_PCT", DEFAULT_REBALANCE_BAND_PCT, lo=0.0, hi=1.0),
+            option_slippage_pct=_env_float(
+                "EXECUTION_OPTION_SLIPPAGE_PCT", DEFAULT_OPTION_SLIPPAGE_PCT, lo=0.0, hi=0.5
+            ),
         )
 
     def buy_execution_price(self, price: float) -> float:

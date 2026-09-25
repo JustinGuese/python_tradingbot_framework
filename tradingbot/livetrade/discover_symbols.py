@@ -10,6 +10,7 @@ from pathlib import Path
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.db import Bot as BotModel
 from tradingbot.utils.db import Trade, get_db_session
+from tradingbot.utils.options import is_option_symbol
 
 from .broker import LiveBroker
 from .registry import REGISTRY, ConfigError
@@ -53,7 +54,9 @@ class SymbolDiscoverer:
         # 3. Tickers from Bot class files
         tickers.update(self._parse_bot_files())
 
-        return tickers
+        # Option contracts never reach a broker (the copier drops them), so
+        # there is nothing to map.
+        return {t for t in tickers if not is_option_symbol(t)}
 
     def _parse_bot_files(self) -> set[str]:
         found: set[str] = set()

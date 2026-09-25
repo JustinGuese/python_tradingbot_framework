@@ -16,6 +16,7 @@ from .db import (
     get_db_session,
 )
 from .helpers import ensure_utc_timestamp
+from .options import is_option_symbol, parse_occ
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,8 @@ def get_portfolio_symbols(session) -> set[str]:
         if bot.portfolio:
             for key in bot.portfolio:
                 if key and key != "USD":
-                    symbols.add(key)
+                    # An option's news/earnings/insiders are its underlying's.
+                    symbols.add(parse_occ(key).underlying if is_option_symbol(key) else key)
     return symbols
 
 

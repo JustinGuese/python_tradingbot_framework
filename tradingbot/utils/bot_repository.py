@@ -70,13 +70,15 @@ class BotRepository:
             return _read(session)
 
     @staticmethod
-    def create_or_get_bot(name: str, session: Session | None = None) -> BotModel:
+    def create_or_get_bot(name: str, session: Session | None = None, initial_usd: float | None = None) -> BotModel:
         """
         Create or retrieve bot from database.
 
         Args:
             name: Bot name
             session: Optional existing database session
+            initial_usd: Starting cash when the row is CREATED (model default
+                $10k when None). Ignored for an existing bot.
 
         Returns:
             BotModel instance
@@ -85,7 +87,11 @@ class BotRepository:
         def _get_or_create(sess: Session):
             bot = sess.query(BotModel).filter_by(name=name).first()
             if not bot:
-                bot = BotModel(name=name)
+                bot = (
+                    BotModel(name=name)
+                    if initial_usd is None
+                    else BotModel(name=name, portfolio={"USD": float(initial_usd)})
+                )
                 sess.add(bot)
                 sess.flush()
                 sess.refresh(bot)

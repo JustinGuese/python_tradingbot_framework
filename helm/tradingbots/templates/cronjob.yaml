@@ -10,11 +10,14 @@
 */ -}}
 {{- range .Values.bots }}
 {{- /* Generate container name: tradingbot-{name} (removes "bot" suffix if present) */}}
-{{- $containerName := printf "tradingbot-%s" (.name | replace "bot" "" | lower) }}
+{{- /* Kubernetes names forbid "_" (RFC 1123); the module path keeps it, so
+     option_leapcallbot runs tradingbot.option_leapcallbot as CronJob option-leapcallbot. */}}
+{{- $k8sName := .name | replace "_" "-" }}
+{{- $containerName := printf "tradingbot-%s" ($k8sName | replace "bot" "" | lower) }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ .name }}
+  name: {{ $k8sName }}
   namespace: {{ $.Values.namespace }}
   labels:
     app.kubernetes.io/managed-by: Helm

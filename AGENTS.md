@@ -95,6 +95,8 @@ Data Available
 │ stock_insider_trades │ Insider buy/sell transactions │ EarningsInsiderTiltBot │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ telegram_messages │ Telegram channel messages + AI summaries + symbol │ TelegramSignalsBankBot │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ option_quotes │ yfinance option-chain snapshots (bid/ask/IV/OI) │ any bot using option= │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
 
 4. AI — via OpenRouter
@@ -120,6 +122,8 @@ Portfolio Operations
 
 self.buy(symbol, quantityUSD=-1) # -1 = all cash
 self.sell(symbol, quantityUSD=-1) # -1 = all holdings
+self.buy("AAPL", option=True) # ~30-DTE ATM call on AAPL (paper only, see "Options")
+self.sell("AAPL", option=True) # close every AAPL option held
 self.rebalancePortfolio({"QQQ": 0.6, "GLD": 0.3, "USD": 0.1})
 self.getLatestPrice(symbol) # float
 self.getLatestPricesBatch(symbols) # dict[str, float]
@@ -458,6 +462,48 @@ GoldenButterflyMomBot's RRG needs 252 daily bars — has **no shared timeframe o
 which a joint backtest exists**. Evaluate those from recorded live holdings
 instead (`scripts/onetime_simulate_zencarry.py`), and be patient about sample
 size rather than manufacturing a long history that measures something else.
+
+### Options (paper, opt-in)
+
+Off unless a bot asks. A bot names the **underlying** and the framework handles
+the contract (`tradingbot/utils/options.py`):
+
+```python
+self.buy("AAPL", option=True)  # call; option="put" for a put
+self.sell("AAPL", option=True)  # all AAPL options; "call"/"put" for one side
+
+
+class MyBot(Bot):
+    USE_OPTIONS = True  # plain buy()/sell() of self.symbol trade calls instead
+    OPTION_TARGET_DTE = 30  # buy the first expiry at least this many days out
+    OPTION_ROLL_DTE = 7  # roll a held contract with this few days left
+```
+
+- **Selection:** first expiry >= `OPTION_TARGET_DTE`, strike nearest spot,
+  preferring contracts with a live two-sided market.
+- **Storage:** the portfolio key is the OCC symbol (`AAPL261030C00200000`), and
+  the quantity is in **share-equivalents** (contracts x 100) at the per-share
+  premium. Every `qty * price` valuation stays correct without a multiplier.
+  Buys round down to whole contracts, so a $10k book gets few, chunky positions.
+- **Pricing and fills:** each snapshot is stored in `option_quotes`, refetched
+  when older than 15 min. Value is the bid/ask mid. Buys fill at the ask and
+  sells at the bid. Outside regular hours yfinance's bid/ask are zeroed or
+  stale, so they are stored as NULL and fills use last price ±
+  `EXECUTION_OPTION_SLIPPAGE_PCT` (default 2%).
+- **Expiry:** `Bot.run()` first rolls contracts within `OPTION_ROLL_DTE` into a
+  fresh one on the same side. A contract found already expired is cash-settled
+  at intrinsic value off the underlying's close on the expiry date. Real equity
+  options settle into shares; this is a deliberate simplification.
+- **Guards:**
+  - `buy(<OCC symbol>)` raises.
+  - `rebalancePortfolio` refuses contract targets, and a held contract missing
+    from the target is sold like any other exit.
+  - `USE_OPTIONS` on a multi-ticker or `targetWeights` bot raises in `__init__`.
+- **Live copier:** it drops option holdings before mapping, so they never reach
+  a broker. `SymbolMapper` would otherwise type an OCC symbol as `"stock"`. The
+  weight stays cash or goes to SHV.
+- **Backtests hold the underlying,** not the option. yfinance has no historical
+  chains; `option_quotes` is the only history there will ever be.
 
 ### Reading another bot's state
 
