@@ -1,13 +1,14 @@
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from os import environ
 from urllib.parse import quote_plus
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -349,6 +350,50 @@ class OptionQuote(Base):
     open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
     implied_volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
     snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class StockFundamentalsSnapshot(Base):
+    """
+    One row per symbol per day: valuation and ownership fundamentals as yfinance
+    reported them ON THAT DAY.
+
+    yfinance only serves today's values, so without this table there is no
+    point-in-time fundamental history at all — and any backtest using today's
+    P/E for 2021 would be look-ahead. Written daily by
+    tradingbot/fundamentalssnapshot.py; read through utils/fundamentals.py,
+    which raises FundamentalsNotAvailable for dates before capture began.
+
+    Every modelled field is nullable (yfinance omits keys freely, e.g. no
+    forward P/E for a loss-maker). `info` keeps the raw payload so a field not
+    modelled today can still be backfilled from history later.
+    """
+
+    __tablename__ = "stock_fundamentals"
+    __table_args__ = (UniqueConstraint("symbol", "snapshot_date", name="uq_stock_fundamentals_symbol_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    enterprise_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trailing_pe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    forward_pe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    peg_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_to_book: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_to_sales: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ev_to_ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    free_cashflow: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fcf_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    return_on_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares_outstanding: Mapped[float | None] = mapped_column(Float, nullable=True)
+    float_shares: Mapped[float | None] = mapped_column(Float, nullable=True)
+    held_pct_institutions: Mapped[float | None] = mapped_column(Float, nullable=True)
+    held_pct_insiders: Mapped[float | None] = mapped_column(Float, nullable=True)
+    short_pct_float: Mapped[float | None] = mapped_column(Float, nullable=True)
+    info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 

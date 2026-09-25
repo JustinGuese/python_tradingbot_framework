@@ -348,6 +348,21 @@ bots:
 - name: option_catalystcallbot
   schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before
 
+- name: institutionalflowbot
+  # Weekly top-10 of the S&P 100 passing institutional mandate filters
+  # (liquidity, 200-day trend, QQQ above its 200-day), ranked by volume-based
+  # accumulation. Paper only; in no copier's botWeights until its walk-forward
+  # alpha clears t >= 2. Friday only: targetWeights re-ranks on Friday bars and
+  # returns None (hold) otherwise, identically in the backtest. See
+  # docs/backtests/institutionalflowbot.md.
+  schedule: "15 21 * * 5" # Fridays 9:15 PM UTC
+
+- name: fundamentalssnapshot
+  # Not a bot: records S&P 100 valuation/ownership fundamentals into
+  # stock_fundamentals once a day. yfinance serves no fundamentals history, so
+  # this is how a point-in-time history gets built. Nothing trades on it yet.
+  schedule: "0 23 * * 1-5" # Daily 11:00 PM UTC Mon-Fri
+
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is

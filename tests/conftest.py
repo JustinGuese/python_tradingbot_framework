@@ -33,6 +33,7 @@ _SESSION_CONSUMERS = (
     "tradingbot.utils.portfolio_manager",
     "tradingbot.utils.bot_repository",
     "tradingbot.utils.options",
+    "tradingbot.utils.fundamentals",
 )
 
 
