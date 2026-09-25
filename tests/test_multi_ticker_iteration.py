@@ -420,3 +420,77 @@ def test_target_weights_live_and_backtest_agree_on_one_bar(weights_runner, db_se
         assert live_values[symbol] == pytest.approx(bt_values[symbol], abs=1e-6), (
             f"{symbol}: live {live_values[symbol]} != backtest {bt_values[symbol]}"
         )
+
+
+# ======================================================================
+#  targetWeights: None = hold, and MIN_UNIVERSE_COVERAGE
+# ======================================================================
+
+
+def test_target_weights_none_holds_the_book(weights_runner, db_session, mocker):
+    """None means "no rebalance this run": nothing trades, even a held leg the
+    returned book would otherwise have exited."""
+    bot = weights_runner(
+        tickers=["AAA", "BBB"],
+        benchmarks=[],
+        weights={},
+        prices={"AAA": 100.0, "BBB": 100.0},
+        portfolio={"USD": 5000.0, "AAA": 50.0},
+    )
+    bot.__class__ = type("_HoldBot", (Bot,), {"targetWeights": lambda self, rows: None})
+    spy = mocker.spy(bot, "rebalancePortfolio")
+
+    assert bot._run_target_weights_iteration() == 0
+
+    spy.assert_not_called()
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert final["AAA"] == pytest.approx(50.0)
+    assert final["USD"] == pytest.approx(5000.0)
+
+
+def _coverage_bot(weights_runner, coverage, missing, portfolio, benchmarks=()):
+    tickers = ["AAA", "BBB", "CCC", "DDD"]
+    bot = weights_runner(
+        tickers=tickers,
+        benchmarks=list(benchmarks),
+        weights={"AAA": 0.5},
+        prices=dict.fromkeys(tickers, 100.0),
+        portfolio=portfolio,
+        frames={t: pd.DataFrame() for t in missing},
+    )
+    bot.MIN_UNIVERSE_COVERAGE = coverage
+    return bot
+
+
+def test_partial_universe_trades_and_pins_the_missing_holding(weights_runner, db_session):
+    """
+    DDD failed to load. With coverage 3/4 >= 0.75 the run proceeds, but the
+    DDD position must survive: the bot said nothing about DDD because it could
+    not see it, not because it wants out.
+    """
+    bot = _coverage_bot(weights_runner, 0.75, missing=["DDD"], portfolio={"USD": 9000.0, "DDD": 10.0})
+
+    bot._run_target_weights_iteration()
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert final["DDD"] == pytest.approx(10.0)
+    # 0.5 of the $10k book, not of the $9k outside the pin.
+    assert final["AAA"] == pytest.approx(50.0)
+
+
+def test_partial_universe_below_threshold_skips_the_run(weights_runner, db_session):
+    bot = _coverage_bot(weights_runner, 0.75, missing=["CCC", "DDD"], portfolio={"USD": 9000.0, "DDD": 10.0})
+
+    assert bot._run_target_weights_iteration() == 0
+
+    final = _portfolio(db_session, "WeightsRunnerBot")
+    assert "AAA" not in final
+    assert final["DDD"] == pytest.approx(10.0)
+
+
+def test_partial_universe_never_tolerates_a_missing_benchmark(weights_runner, db_session):
+    """A strategy reading its benchmark as a baseline must not run without it."""
+    bot = _coverage_bot(weights_runner, 0.5, missing=["DDD"], portfolio={"USD": 10000.0}, benchmarks=["DDD"])
+
+    assert bot._run_target_weights_iteration() == 0
+    assert "AAA" not in _portfolio(db_session, "WeightsRunnerBot")

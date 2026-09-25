@@ -282,3 +282,33 @@ def test_single_ticker_target_weights_bot_backtests():
     result = _run(_FixedWeights(["AAA"], {"AAA": 0.5}), {"AAA": _frame(rising)})
     assert result["nrtrades"] >= 1
     assert result["yearly_return"] > 0.0
+
+
+class _RebalanceOnce(Bot):
+    """Rebalances to a fixed book on the first evaluated bar, then holds (None)."""
+
+    def __init__(self, tickers, weights):
+        _FixedWeights.__init__(self, tickers, weights)
+
+    def targetWeights(self, rows):
+        self.seen.append(dict(rows))
+        return dict(self._weights) if len(self.seen) == 1 else None
+
+
+def test_target_weights_none_holds_through_drift():
+    """
+    AAA doubles while BBB is flat. A bot re-returning {AAA: .5, BBB: .5} every
+    bar would trim AAA back as it drifts; None on every later bar must leave
+    the drifted book alone — exactly the live path's early return.
+    """
+    rising = list(np.linspace(100.0, 200.0, BARS))
+    flat = [100.0] * BARS
+    data = {"AAA": _frame(rising), "BBB": _frame(flat)}
+
+    held = _run(_RebalanceOnce(["AAA", "BBB"], {"AAA": 0.5, "BBB": 0.5}), data)
+    rebalanced = _run(_FixedWeights(["AAA", "BBB"], {"AAA": 0.5, "BBB": 0.5}), data)
+
+    assert held["nrtrades"] == 2  # the two initial buys, nothing after
+    assert rebalanced["nrtrades"] > 2  # sanity: without None the drift is traded
+    # Letting the winner run beats trimming it into the flat leg every bar.
+    assert held["yearly_return"] > rebalanced["yearly_return"]

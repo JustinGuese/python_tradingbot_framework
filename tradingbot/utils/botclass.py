@@ -88,6 +88,15 @@ class Bot:
     # the backtest reports a confident number computed from almost no data.
     BACKTEST_PERIOD: ClassVar[str | None] = None
 
+    # Share of self.tickers that must load for a targetWeights run to trade.
+    # 1.0 (the default) refuses any partial universe, which is right for a
+    # handful of ETFs where one missing leg changes the whole book. A
+    # ~100-stock cross-sectional bot would otherwise stall on every single
+    # yfinance hiccup or delisting, so it may lower this: the missing tickers
+    # then sit out the run and any position held in them is PINNED at its
+    # current weight — a data outage must never read as a sell signal.
+    MIN_UNIVERSE_COVERAGE: ClassVar[float] = 1.0
+
     def __init__(
         self,
         name: str,
@@ -567,7 +576,7 @@ class Bot:
         """
         raise NotImplementedError("You need to overwrite the decisionFunction!!!!")
 
-    def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
+    def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         """
         Cross-sectional alternative to decisionFunction: return the target book.
 
@@ -598,6 +607,10 @@ class Bot:
               returning something slightly off is corrected and logged rather
               than silently traded.
             * Returning {} goes fully to cash.
+            * Returning None means "no rebalance this bar": the book is left
+              exactly as it is, live and in the backtest. This is how a
+              weekly strategy runs on daily bars — {} could not express it,
+              because an omitted ticker is an exit.
 
         Example:
             def targetWeights(self, rows):
@@ -947,6 +960,7 @@ class Bot:
         raw: dict[str, float],
         allowed: set[str],
         held_weights: dict[str, float] | None = None,
+        pinned: set[str] | None = None,
     ) -> dict[str, float]:
         """
         Validate and clamp a targetWeights() return value into a tradeable book.
@@ -972,6 +986,10 @@ class Bot:
                 holdings outside the universe. None on the backtest path, where
                 the portfolio starts as pure cash and only ever trades tickers
                 in the universe, so untracked holdings cannot arise.
+            pinned: Universe tickers to treat as untracked for this run only —
+                the ones whose data failed to load under MIN_UNIVERSE_COVERAGE.
+                A holding in one keeps its current weight instead of being
+                read as an exit.
 
         Returns:
             Weights including a "USD" residual, summing to 1.0. Never empty:
@@ -1023,7 +1041,7 @@ class Bot:
         # what "untracked" means. Benchmarks are excluded from the pin, so a
         # held benchmark is absent from the target and gets liquidated.
         if held_weights and not getattr(self, "LIQUIDATE_UNTRACKED", False):
-            universe = set(getattr(self, "tickers", ()) or ())
+            universe = set(getattr(self, "tickers", ()) or ()) - (pinned or set())
             keep = {s: w for s, w in held_weights.items() if s != "USD" and s not in universe and w > 0}
             if keep:
                 kept_total = min(sum(keep.values()), 1.0)
@@ -1145,20 +1163,39 @@ class Bot:
             )
 
         rows: dict[str, pd.Series] = {}
+        missing: set[str] = set()
         for ticker in self.tickers:
             df = self.datas.get(ticker)
             if df is None or df.empty:
-                # Refuse to trade a partial universe. A missing ticker would
-                # reach targetWeights as an absent row, come back with no
-                # weight, and be read as a deliberate full exit — liquidating a
-                # position because of a data outage. Failing loud beats that.
+                missing.add(ticker)
+                continue
+            rows[ticker] = df.iloc[-1]
+
+        if missing:
+            # A missing ticker would reach targetWeights as an absent row, come
+            # back with no weight, and be read as a deliberate full exit —
+            # liquidating a position because of a data outage. So either refuse
+            # the run (the default) or, for a large universe that opted in via
+            # MIN_UNIVERSE_COVERAGE, let the gaps sit out with any holding in
+            # them pinned. Benchmarks are never optional: a strategy reading one
+            # as its baseline would silently compute against nothing.
+            coverage = len(rows) / len(self.tickers)
+            missing_benchmark = missing & set(self.benchmark_tickers)
+            if coverage < self.MIN_UNIVERSE_COVERAGE or missing_benchmark:
                 logger.error(
-                    "%s: no data for %s — skipping this run rather than trading a partial universe",
+                    "%s: no data for %s (coverage %.0f%%, need %.0f%%) — skipping this run "
+                    "rather than trading a partial universe",
                     self.bot_name,
-                    ticker,
+                    sorted(missing),
+                    coverage * 100,
+                    self.MIN_UNIVERSE_COVERAGE * 100,
                 )
                 return 0
-            rows[ticker] = df.iloc[-1]
+            logger.warning(
+                "%s: no data for %s — they sit out this run, any holding in them is pinned",
+                self.bot_name,
+                sorted(missing),
+            )
 
         portfolio = dict(self.dbBot.portfolio or {})
         symbols = sorted({*self.tickers, *(s for s in portfolio if s != "USD")})
@@ -1166,8 +1203,8 @@ class Bot:
 
         # An unpriceable ticker leaves the universe rather than being sized
         # against an assumed value of zero.
-        allowed = {t for t in self.tradeable_tickers if (prices.get(t) or 0.0) > 0}
-        dropped = [t for t in self.tradeable_tickers if t not in allowed]
+        allowed = {t for t in self.tradeable_tickers if t not in missing and (prices.get(t) or 0.0) > 0}
+        dropped = [t for t in self.tradeable_tickers if t not in allowed and t not in missing]
         if dropped:
             logger.error("%s: dropping unpriceable tickers from this run: %s", self.bot_name, dropped)
         if not allowed:
@@ -1191,7 +1228,11 @@ class Bot:
             logger.exception("%s: targetWeights raised", self.bot_name)
             raise
 
-        weights = self._coerce_target_weights(raw, allowed, held_weights=held_weights)
+        if raw is None:
+            logger.info("%s: targetWeights returned None — no rebalance this run", self.bot_name)
+            return 0
+
+        weights = self._coerce_target_weights(raw, allowed, held_weights=held_weights, pinned=missing)
 
         # Warm the module-level TTL price cache from data we already hold, so the
         # per-leg get_latest_price calls inside the rebalance are cache hits

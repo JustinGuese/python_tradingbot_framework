@@ -705,13 +705,21 @@ def backtest_bot(
                 # held_weights=None: a backtest portfolio starts as pure cash and
                 # only ever trades tickers in the universe, so an untracked
                 # holding cannot arise here. That case is live-path only.
-                weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
-                targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
-                # Band against the LARGER of target and current value, so
-                # trimming a big position uses a band scaled to that position
-                # rather than to the small target it is heading for.
-                band_ref = {t: max(targets[t], portfolio.get(t, 0.0) * prices[t]) for t in tradeable}
-                full_exit = {t for t in tradeable if targets[t] <= 0.0}
+                if raw_weights is None:
+                    # "No rebalance this bar", mirroring the live path's early
+                    # return: every target is its current value, so neither
+                    # phase below trades and the bar is still recorded.
+                    targets = {t: portfolio.get(t, 0.0) * prices[t] for t in tradeable}
+                    band_ref = dict(targets)
+                    full_exit = set()
+                else:
+                    weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
+                    targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
+                    # Band against the LARGER of target and current value, so
+                    # trimming a big position uses a band scaled to that position
+                    # rather than to the small target it is heading for.
+                    band_ref = {t: max(targets[t], portfolio.get(t, 0.0) * prices[t]) for t in tradeable}
+                    full_exit = {t for t in tradeable if targets[t] <= 0.0}
             else:
                 # Decide for every tradeable ticker before trading any of them, so
                 # exits can fund entries — mirroring the live path, where

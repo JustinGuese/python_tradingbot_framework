@@ -95,6 +95,8 @@ Data Available
 │ stock_insider_trades │ Insider buy/sell transactions │ EarningsInsiderTiltBot │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ telegram_messages │ Telegram channel messages + AI summaries + symbol │ TelegramSignalsBankBot │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ stock_fundamentals │ Daily point-in-time P/E, EV/EBITDA, FCF yield, ownership (S&P 100, from 2026-09-25) │ none yet (utils/fundamentals.py) │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
 
 4. AI — via OpenRouter
@@ -215,6 +217,8 @@ Existing Strategies (don't duplicate)
 │ StockNewsSentimentBot │ multi │ AI classifies news headlines → trade │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ SqueezeMomentumBot │ GLD │ EMA/MACD/RSI zone momentum on Gold ETF │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
 ---
@@ -346,6 +350,17 @@ The contract:
   non-finite dropped. A weight on a symbol the bot may not trade (a benchmark, or
   anything outside the universe) is **dropped and NOT redistributed**, so a buggy
   bot under-invests visibly instead of silently over-weighting its other legs.
+- **Return `None` for "no rebalance this bar".** The book is left exactly as it
+  is — live returns before `rebalancePortfolio`, the backtest sets every target
+  to its current value. `{}` cannot say this, because an omitted ticker is an
+  exit. It is how a weekly strategy runs on daily bars: gate on the bar's date
+  (`row.name` in the backtest, `row["timestamp"]` live — the two paths index
+  differently) and return `None` off-schedule. See `InstitutionalFlowBot`.
+- **`MIN_UNIVERSE_COVERAGE`** (default `1.0`): by default one ticker with no data
+  skips the whole live run, since its absent row would otherwise read as an exit.
+  A large-universe bot may lower it (InstitutionalFlowBot: `0.95`); the missing
+  tickers then sit out and any holding in them is **pinned** at its current
+  weight. A missing benchmark always skips the run.
 
 **Precedence is `targetWeights` > `decisionFunction` > `makeOneIteration`**, in
 both `backtest_type` and `makeOneIteration`'s dispatch. A bot defining both is one
