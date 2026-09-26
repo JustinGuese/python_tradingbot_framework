@@ -5,7 +5,7 @@ from typing import Literal
 
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.data_service import DataService
-from tradingbot.utils.options import is_option_symbol
+from tradingbot.utils.options import is_option_symbol, option_underlyings
 
 from .broker import LiveBroker
 
@@ -181,6 +181,12 @@ class LiveTradeCopier:
 
             prices = self.data_service.get_latest_prices_batch(symbols)
 
+            # Shares that belong to an option structure (a covered call's stock,
+            # a straddle's delta hedge) mean nothing without the options, which
+            # never reach a broker; copied alone they would be a naked stock bet,
+            # or a short sale. They count toward the bot's value (held as cash
+            # live) but get no target weight, like the options themselves.
+            structured = option_underlyings(portfolio)
             bot_total_value = float(portfolio.get("USD", 0.0))
             symbol_values = {}
             for s in symbols:
@@ -189,8 +195,11 @@ class LiveTradeCopier:
                     logger.warning(f"Could not get price for {s}, skipping in weight calc")
                     continue
                 val = float(portfolio[s]) * price
-                symbol_values[s] = val
                 bot_total_value += val
+                if s in structured or float(portfolio[s]) < 0:
+                    logger.info(f"{bot_name}: {s} is part of an option structure; not copied")
+                    continue
+                symbol_values[s] = val
 
             if bot_total_value <= 0:
                 continue

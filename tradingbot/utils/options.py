@@ -32,7 +32,7 @@ import pandas as pd
 import yfinance as yf
 
 from . import option_math as om
-from .db import OptionQuote, StockEarnings, Trade, get_db_session
+from .db import OptionQuote, StockEarnings, StockNews, Trade, get_db_session
 from .option_math import CONTRACT_MULTIPLIER
 
 logger = logging.getLogger(__name__)
@@ -300,6 +300,73 @@ def next_earnings_date(underlying: str, today: date | None = None) -> date | Non
         return None
 
 
+@lru_cache(maxsize=32)
+def dividend_yield(underlying: str) -> float:
+    """Trailing dividend yield as a decimal (AAPL ~0.004), once per process; 0 if unknown."""
+    try:
+        info = yf.Ticker(underlying).info or {}
+        value = _num(info.get("dividendYield"))
+    except Exception as e:
+        logger.warning("Dividend yield for %s unavailable (%s); using q=0", underlying, e)
+        return 0.0
+    if value is None or value < 0:
+        return 0.0
+    # yfinance switched from a fraction (0.0045) to a percent (0.45) in 2025.
+    return value / 100.0 if value > 0.2 else value
+
+
+def earnings_history(underlying: str, limit: int = 40, today: date | None = None) -> list[date]:
+    """
+    Past earnings report dates, oldest first: yfinance, else the stock_earnings
+    table. Used to measure the stock's typical earnings-day move.
+    """
+    today = today or utc_today()
+    dates: set[date] = set()
+    try:
+        df = yf.Ticker(underlying).get_earnings_dates(limit=limit)
+        if df is not None and len(df):
+            dates = {ts.date() for ts in pd.to_datetime(df.index)}
+    except Exception as e:
+        logger.warning("Earnings history for %s from yfinance failed: %s", underlying, e)
+    if not dates:
+        try:
+            with get_db_session() as session:
+                rows = session.query(StockEarnings.report_date).filter(StockEarnings.symbol == underlying).all()
+            dates = {r[0].date() for r in rows if r[0] is not None}
+        except Exception as e:
+            logger.warning("stock_earnings history for %s failed: %s", underlying, e)
+    return sorted(d for d in dates if d < today)
+
+
+def recent_news(underlying: str, days: int = 3, refresh: bool = True, limit: int = 20) -> list[str]:
+    """
+    Headlines on `underlying` from the stock_news table, newest first. With
+    refresh, the symbol's news is fetched into the table first: the daily
+    loader only covers held symbols, at 22:00 UTC.
+    """
+    if refresh:
+        try:
+            from .stock_fundamentals_loader import load_stock_news_earnings_insider
+
+            load_stock_news_earnings_insider({underlying})
+        except Exception as e:
+            logger.warning("News refresh for %s failed (using what the table has): %s", underlying, e)
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    try:
+        with get_db_session() as session:
+            rows = (
+                session.query(StockNews.title)
+                .filter(StockNews.symbol == underlying, StockNews.published_at >= since)
+                .order_by(StockNews.published_at.desc())
+                .limit(limit)
+                .all()
+            )
+    except Exception as e:
+        logger.warning("stock_news read for %s failed: %s", underlying, e)
+        return []
+    return [str(r[0]) for r in rows if r[0]]
+
+
 # ------------------------------------------------------------------
 # Chains and contract selection
 # ------------------------------------------------------------------
@@ -364,33 +431,89 @@ def priced_side(view: ChainView, right: str) -> pd.DataFrame:
     return traded
 
 
-def with_greeks(view: ChainView, right: str, r: float | None = None) -> pd.DataFrame:
+def with_greeks(view: ChainView, right: str, r: float | None = None, q: float | None = None) -> pd.DataFrame:
     """
     priced_side plus `iv` and `delta`, solved from each contract's price. We
     solve IV ourselves: off-hours yfinance reports impliedVolatility = 1e-5 for
-    the whole chain. Contracts whose price admits no IV get NaN.
+    the whole chain. Contracts whose price admits no IV get NaN. The dividend
+    yield enters as Merton's q.
     """
     r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying) if q is None else q
     side = priced_side(view, right)
     T = view.T
     ivs, deltas = [], []
     for strike, price in zip(side["strike"], side["price"], strict=True):
-        iv = om.implied_volatility(float(price), view.spot, float(strike), T, r, right)
+        iv = om.implied_volatility(float(price), view.spot, float(strike), T, r, right, q)
         ivs.append(iv if iv is not None else float("nan"))
-        deltas.append(om.delta(view.spot, float(strike), T, r, iv, right) if iv is not None else float("nan"))
+        deltas.append(om.delta(view.spot, float(strike), T, r, iv, right, q) if iv is not None else float("nan"))
     side["iv"] = ivs
     side["delta"] = deltas
     return side
 
 
-def atm_iv(view: ChainView, r: float | None = None) -> float | None:
-    """Implied vol at the money: the mean of the nearest-strike call's and put's IV."""
+def atm_iv(view: ChainView, r: float | None = None, american: bool = False) -> float | None:
+    """
+    Implied vol at the money: the mean of the nearest-strike call's and put's
+    IV. american=True re-solves the put on a binomial tree, which prices the
+    early-exercise right Black-Scholes ignores (slower; a handful of contracts).
+    """
+    r = risk_free_rate() if r is None else r
     ivs = []
     for right in ("C", "P"):
         side = with_greeks(view, right, r).dropna(subset=["iv"])
-        if len(side):
-            ivs.append(float(side.loc[(side["strike"] - view.spot).abs().idxmin(), "iv"]))
+        if not len(side):
+            continue
+        row = side.loc[(side["strike"] - view.spot).abs().idxmin()]
+        iv = float(row["iv"])
+        if american and right == "P":
+            q = dividend_yield(view.underlying)
+            tree_iv = om.implied_volatility_american(
+                float(row["price"]), view.spot, float(row["strike"]), view.T, r, "P", q
+            )
+            iv = tree_iv if tree_iv is not None else iv
+        ivs.append(iv)
     return sum(ivs) / len(ivs) if ivs else None
+
+
+def smile_outliers(view: ChainView, top: int = 2, r: float | None = None) -> list[str]:
+    """
+    Contracts whose IV sits off a quadratic smile fitted to the out-of-the-money
+    side of this expiry by more than half their own bid/ask spread (in vol
+    terms), largest first. On a liquid chain there are rarely any: the spread
+    is wider than the mispricing. Needs a live chain (bid/ask).
+    """
+    if not view.live or view.T <= 0:
+        return []
+    atm = atm_iv(view, r)
+    if not atm:
+        return []
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying)
+    otm = pd.concat(
+        [
+            with_greeks(view, "P", r).query("strike < @view.spot"),
+            with_greeks(view, "C", r).query("strike >= @view.spot"),
+        ]
+    ).dropna(subset=["iv"])
+    otm = otm[(otm["iv"] > 0) & (otm["delta"].abs() > 0.05)]
+    if len(otm) < 6:
+        return []
+    z = [om.smile_z(view.spot, float(k), view.T, atm) for k in otm["strike"]]
+    _, resid = om.fit_smile(z, otm["iv"].astype(float).to_numpy())
+    out = []
+    for (_, row), res in zip(otm.iterrows(), resid, strict=True):
+        vega = om.vega(view.spot, float(row["strike"]), view.T, r, float(row["iv"]), q) * 100
+        half_spread = (float(row["ask"]) - float(row["bid"])) / 2 if pd.notna(row.get("bid")) else math.inf
+        if vega <= 0 or abs(res) <= half_spread / vega:
+            continue
+        out.append((abs(res), f"{row['contract_symbol']} {'rich' if res > 0 else 'cheap'} by {res:+.1%} vs smile"))
+    return [text for _, text in sorted(out, reverse=True)[:top]]
+
+
+def listed_expiries(underlying: str) -> list[date]:
+    """Every expiry yfinance lists for `underlying`, sorted."""
+    return sorted(date.fromisoformat(e) for e in yf.Ticker(underlying).options)
 
 
 def _nearest_delta(side: pd.DataFrame, target_delta: float) -> pd.Series | None:
@@ -443,8 +566,11 @@ def select_contract(
 @dataclass(frozen=True)
 class StructurePick:
     """
-    A multi-leg position chosen from one chain. `legs` are (contract, signed
-    contracts per unit): a bull put spread is ((short_put, -1), (long_put, +1)).
+    A multi-leg position. `legs` are (symbol, signed lots per unit): an OCC
+    contract counts contracts, the underlying's own symbol counts lots of 100
+    shares — so a covered call is ((underlying, +1), (call, -1)) and a bull put
+    spread ((short_put, -1), (long_put, +1)). Legs may sit on different
+    expiries (calendars, diagonals); `expiry` is then the nearest one.
     """
 
     underlying: str
@@ -503,6 +629,124 @@ def select_iron_condor(
     return StructurePick(underlying, view.expiry, tuple(legs), view.live, view.spot)
 
 
+def _atm_strike(view: ChainView) -> float:
+    """The strike nearest spot that has a price on BOTH sides of the chain."""
+    calls, puts = priced_side(view, "C"), priced_side(view, "P")
+    common = sorted(set(calls["strike"].astype(float)) & set(puts["strike"].astype(float)))
+    if not common:
+        raise ValueError(f"No {view.underlying} strike priced on both sides for {view.expiry}")
+    return min(common, key=lambda k: abs(k - view.spot))
+
+
+def _contract_at(view: ChainView, right: str, strike: float) -> str:
+    side = priced_side(view, right)
+    if side.empty:
+        raise ValueError(f"No priced {view.underlying} {right} contracts on {view.expiry}")
+    row = side.loc[(side["strike"].astype(float) - strike).abs().idxmin()]
+    return str(row["contract_symbol"])
+
+
+def _pick(view: ChainView, legs: list[tuple[str, int]], *, live: bool | None = None) -> StructurePick:
+    return StructurePick(view.underlying, view.expiry, tuple(legs), view.live if live is None else live, view.spot)
+
+
+def select_short_leg(
+    view: ChainView,
+    right: str,
+    delta: float,
+    *,
+    min_strike: float | None = None,
+    max_strike: float | None = None,
+    with_stock: bool = False,
+) -> StructurePick:
+    """
+    One short option at `delta`: a cash-secured put (right="P"), or a covered
+    call (right="C", with_stock=True buys the 100 shares in the same trade;
+    without, the shares must already be held or the margin check refuses it).
+    min/max_strike bound the choice, e.g. a covered call never below cost basis.
+    """
+    side = with_greeks(view, right)
+    if min_strike is not None:
+        side = side[side["strike"].astype(float) >= min_strike]
+    if max_strike is not None:
+        side = side[side["strike"].astype(float) <= max_strike]
+    row = _nearest_delta(side, delta)
+    if row is None:
+        raise ValueError(f"No {view.underlying} {right} contract near delta {delta} within the strike bounds")
+    legs = [(str(row["contract_symbol"]), -1)]
+    return _pick(view, [(view.underlying, 1), *legs] if with_stock else legs)
+
+
+def select_iron_butterfly(view: ChainView, width: float) -> StructurePick:
+    """Short ATM straddle with long wings `width` away on each side: sells the at-the-money vol."""
+    k = _atm_strike(view)
+    return _pick(
+        view,
+        [
+            (_contract_at(view, "P", k - width), 1),
+            (_contract_at(view, "P", k), -1),
+            (_contract_at(view, "C", k), -1),
+            (_contract_at(view, "C", k + width), 1),
+        ],
+    )
+
+
+def select_straddle(view: ChainView) -> StructurePick:
+    """Long ATM call and put at the same strike: buys the at-the-money vol."""
+    k = _atm_strike(view)
+    return _pick(view, [(_contract_at(view, "C", k), 1), (_contract_at(view, "P", k), 1)])
+
+
+def select_collar(view: ChainView, put_delta: float, call_delta: float, *, with_stock: bool = True) -> StructurePick:
+    """100 shares, a long put at `put_delta` and a short call at `call_delta`, per unit."""
+    put = _nearest_delta(with_greeks(view, "P"), put_delta)
+    call = _nearest_delta(with_greeks(view, "C"), call_delta)
+    if put is None or call is None:
+        raise ValueError(f"No {view.underlying} collar strikes with solvable IV on {view.expiry}")
+    legs = [(str(put["contract_symbol"]), 1), (str(call["contract_symbol"]), -1)]
+    return _pick(view, [(view.underlying, 1), *legs] if with_stock else legs)
+
+
+def select_calendar(front: ChainView, back: ChainView, right: str = "C") -> StructurePick:
+    """
+    Short the front expiry, long the back one, same (at-the-money) strike. The
+    long leg outlives the short one, which is the shape margin_requirement
+    treats conservatively.
+    """
+    if back.expiry <= front.expiry:
+        raise ValueError(f"Calendar back expiry {back.expiry} must be after front {front.expiry}")
+    k = _atm_strike(front)
+    short = _contract_at(front, right, k)
+    long = _contract_at(back, right, parse_occ(short).strike)
+    if parse_occ(long).strike != parse_occ(short).strike:
+        raise ValueError(f"No {right} strike {k} on both {front.expiry} and {back.expiry}")
+    return _pick(front, [(short, -1), (long, 1)], live=front.live and back.live)
+
+
+def select_diagonal(
+    long_view: ChainView,
+    short_view: ChainView,
+    long_delta: float,
+    short_delta: float,
+    right: str = "C",
+    *,
+    min_short_strike: float | None = None,
+) -> StructurePick:
+    """
+    A poor man's covered call (right="C"): a deep ITM long-dated call standing
+    in for the shares, plus a short near-dated call further out of the money.
+    """
+    if long_view.expiry <= short_view.expiry:
+        raise ValueError(f"Diagonal long expiry {long_view.expiry} must be after short {short_view.expiry}")
+    long = _nearest_delta(with_greeks(long_view, right), long_delta)
+    if long is None:
+        raise ValueError(f"No {long_view.underlying} long {right} near delta {long_delta}")
+    floor = max(float(long["strike"]), min_short_strike or 0.0)
+    short = select_short_leg(short_view, right, short_delta, min_strike=floor)
+    legs = [(str(long["contract_symbol"]), 1), *short.legs]
+    return _pick(short_view, legs, live=long_view.live and short_view.live)
+
+
 # ------------------------------------------------------------------
 # Book-level views: legs, margin, entry value, greeks
 # ------------------------------------------------------------------
@@ -519,26 +763,60 @@ def option_legs(portfolio: dict, underlying: str | None = None) -> dict[str, flo
 
 
 def payoff_legs(positions: dict[str, float]) -> list[om.Leg]:
-    """Holdings as option_math legs (share-equivalent qty, no premium)."""
-    return [om.Leg(c.right, c.strike, qty) for c, qty in ((parse_occ(k), q) for k, q in positions.items())]
+    """
+    Holdings as option_math legs (share-equivalent qty, no premium). A key that
+    is not an OCC symbol is the underlying's stock: a zero-strike call.
+    """
+    legs = []
+    for key, qty in positions.items():
+        if is_option_symbol(key):
+            c = parse_occ(key)
+            legs.append(om.Leg(c.right, c.strike, qty))
+        else:
+            legs.append(om.stock_leg(qty))
+    return legs
+
+
+def option_underlyings(portfolio: dict) -> set[str]:
+    """Underlyings on which the book holds any option leg."""
+    return {parse_occ(k).underlying for k in option_legs(portfolio)}
+
+
+def structure_positions(portfolio: dict, underlying: str) -> dict[str, float]:
+    """The option legs on `underlying` plus its shares: one structure, one payoff."""
+    out = dict(option_legs(portfolio, underlying))
+    shares = float(portfolio.get(underlying, 0.0) or 0.0)
+    if abs(shares) > 1e-9:
+        out[underlying] = shares
+    return out
 
 
 def margin_requirement(portfolio: dict) -> float:
     """
-    Cash that must stay in the book to cover the option legs' worst case.
+    Cash that must stay in the book to cover the structures' worst case.
 
-    Per underlying: the largest amount the legs could cost at expiry
-    (option_math.max_loss with zero premium — premiums are already in cash).
-    A bull put spread reserves its width x shares, an iron condor its wider
-    side, a long-only book nothing, and a naked short call is infinite — which
-    is how trade_option_legs refuses one. Legs on different expiries are each
-    taken at their own expiry payoff, a conservative approximation.
+    Per underlying: the largest amount its option legs AND its shares could
+    cost at expiry (option_math.max_loss with zero premium — premiums and share
+    costs are already out of cash). Shares count as zero-strike calls, so:
+    - a bull put spread reserves its width, an iron condor its wider side;
+    - a cash-secured put reserves its strike;
+    - a covered call, a collar and a long-only book reserve nothing;
+    - a naked short call or naked short stock is infinite, which is how
+      trade_option_legs refuses them;
+    - short stock beside long calls (a delta-hedged straddle) is bounded.
+
+    Expiries are ignored: every leg is taken at its own expiry payoff as if all
+    expired together. That is conservative for long-far / short-near structures
+    (calendars, diagonals), where the long leg is worth at least its intrinsic
+    value when the short one expires; the builders only create that shape.
+
+    An underlying with no option legs and no short shares adds nothing, so
+    ordinary stock bots are unaffected.
     """
-    legs = option_legs(portfolio)
-    total = 0.0
-    for u in {parse_occ(k).underlying for k in legs}:
-        total += om.max_loss(payoff_legs({k: q for k, q in legs.items() if parse_occ(k).underlying == u}))
-    return total
+    unders = option_underlyings(portfolio) | {
+        k for k, q in portfolio.items() if k != "USD" and not is_option_symbol(k) and q < -1e-9
+    }
+    return sum(om.max_loss(payoff_legs(structure_positions(portfolio, u))) for u in unders)
 
 
 def entry_value(bot_name: str, key: str) -> float:
@@ -571,6 +849,44 @@ def entry_value(bot_name: str, key: str) -> float:
     return cost
 
 
+def opened_on(bot_name: str, key: str) -> date | None:
+    """Date the CURRENT position in `key` was opened (last time it left zero), from trades."""
+    with get_db_session() as session:
+        rows = (
+            session.query(Trade.isBuy, Trade.quantity, Trade.timestamp)
+            .filter(Trade.bot_name == bot_name, Trade.symbol == key)
+            .order_by(Trade.timestamp, Trade.id)
+            .all()
+        )
+    position, opened = 0.0, None
+    for is_buy, qty, ts in rows:
+        if abs(position) < 1e-6:
+            opened = ts.date() if ts is not None else None
+        position += float(qty) if is_buy else -float(qty)
+    return opened if abs(position) > 1e-6 else None
+
+
+def structure_flows(bot_name: str, underlying: str, since: date) -> float:
+    """
+    Net cash from every trade on `underlying` — its options and its shares —
+    since `since` (inclusive): + for sales, - for purchases. Add the current
+    mark of what is still held and you have the structure's P&L, including
+    whatever its share hedge has already realized.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(Trade.symbol, Trade.isBuy, Trade.quantity, Trade.price)
+            .filter(Trade.bot_name == bot_name, Trade.timestamp >= _naive(since))
+            .all()
+        )
+    total = 0.0
+    for symbol, is_buy, qty, price in rows:
+        u = parse_occ(symbol).underlying if is_option_symbol(symbol) else symbol
+        if u == underlying:
+            total += (-1.0 if is_buy else 1.0) * float(qty) * float(price)
+    return total
+
+
 @dataclass(frozen=True)
 class OptionPosition:
     key: str
@@ -595,10 +911,16 @@ class OptionBook:
     positions: list[OptionPosition] = field(default_factory=list)
     entry_value: float = 0.0  # + premium paid, - credit received
     greeks: om.Greeks = om.ZERO_GREEKS
+    shares: float = 0.0  # the underlying's stock held beside the options (signed)
 
     @property
     def empty(self) -> bool:
         return not self.positions
+
+    @property
+    def net_delta(self) -> float:
+        """Share-equivalent delta of options plus shares: what a delta hedge flattens."""
+        return self.greeks.delta + self.shares
 
     @property
     def value(self) -> float:
@@ -637,18 +959,21 @@ def build_book(
     entry_values: dict[str, float],
     today: date | None = None,
     r: float | None = None,
+    shares: float = 0.0,
+    q: float | None = None,
 ) -> OptionBook:
-    """Assemble an OptionBook from holdings, marks and entry values (no I/O besides r)."""
+    """Assemble an OptionBook from holdings, marks and entry values (no I/O besides r and q)."""
     today = today or utc_today()
     r = risk_free_rate() if r is None else r
+    q = dividend_yield(underlying) if q is None else q
     out: list[OptionPosition] = []
     total = om.ZERO_GREEKS
     for key, qty in positions.items():
         c = parse_occ(key)
         price = float(prices.get(key, 0.0))
         T = om.year_fraction(c.expiry, today)
-        iv = om.implied_volatility(price, spot, c.strike, T, r, c.right) if price > 0 else None
-        g = om.greeks(spot, c.strike, T, r, iv, c.right) if iv is not None else om.ZERO_GREEKS
+        iv = om.implied_volatility(price, spot, c.strike, T, r, c.right, q) if price > 0 else None
+        g = om.greeks(spot, c.strike, T, r, iv, c.right, q) if iv is not None else om.ZERO_GREEKS
         pos_greeks = g.scaled(qty)
         out.append(OptionPosition(key, c, qty, price, iv, pos_greeks))
         total = total + pos_greeks
@@ -659,4 +984,5 @@ def build_book(
         positions=out,
         entry_value=sum(entry_values.get(k, 0.0) for k in positions),
         greeks=total,
+        shares=shares,
     )

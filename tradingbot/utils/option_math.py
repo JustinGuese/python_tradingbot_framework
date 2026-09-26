@@ -322,6 +322,203 @@ def breakeven(strike: float, premium: float, right: str) -> float:
 
 
 # ------------------------------------------------------------------
+# Fair volatility: what an option "should" cost
+# ------------------------------------------------------------------
+#
+# Pricing an option with the market's own implied vol reproduces the market
+# price exactly, so "mispriced" needs an independent vol: a forecast of the
+# diffusion vol the stock will actually deliver, plus the earnings jump when a
+# report falls inside the expiry. IV minus that fair vol is the mispricing.
+
+
+def log_returns(close: pd.Series) -> pd.Series:
+    s = pd.Series(close, dtype=float)
+    return np.log(s / s.shift(1)).dropna()
+
+
+def ewma_volatility(returns: pd.Series, lam: float = 0.94, periods_per_year: int = TRADING_DAYS_PER_YEAR) -> float:
+    """RiskMetrics exponentially weighted vol of the latest day, annualised."""
+    r = pd.Series(returns, dtype=float).dropna()
+    if r.empty:
+        return float("nan")
+    var = float((r**2).ewm(alpha=1 - lam, adjust=False).mean().iloc[-1])
+    return math.sqrt(var * periods_per_year)
+
+
+def har_rv_forecast(
+    returns: pd.Series,
+    horizon_days: int,
+    exclude: Iterable | None = None,
+    min_obs: int = 250,
+    periods_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """
+    Annualised vol forecast over the next `horizon_days` trading days, from a
+    HAR-RV regression (Corsi 2009): the forward mean squared return regressed
+    on the last 1-, 5- and 22-day mean squared returns. Fit by OLS on the past
+    only (the last `horizon_days` rows have no target yet and drop out).
+
+    `exclude` holds index labels (earnings-reaction days) removed before
+    fitting, so the result is diffusion vol and the earnings jump can be added
+    separately. With less than `min_obs` of history it returns the plain
+    long-run vol. The prediction is floored at a tenth of the long-run
+    variance: a linear HAR can extrapolate below zero after a calm stretch.
+    """
+    r = pd.Series(returns, dtype=float).dropna()
+    if exclude is not None:
+        r = r[~r.index.isin(list(exclude))]
+    sq = r**2
+    long_run = float(sq.mean()) if len(sq) else float("nan")
+    h = max(int(horizon_days), 1)
+    if len(sq) < max(min_obs, 22 + h + 10):
+        return math.sqrt(long_run * periods_per_year) if long_run == long_run else float("nan")
+    x = np.column_stack(
+        [np.ones(len(sq)), sq.to_numpy(), sq.rolling(5).mean().to_numpy(), sq.rolling(22).mean().to_numpy()]
+    )
+    # Mean of the next h squared returns, aligned to today.
+    target = sq[::-1].rolling(h).mean()[::-1].shift(-1).to_numpy()
+    ok = ~np.isnan(x).any(axis=1) & ~np.isnan(target)
+    coef, *_ = np.linalg.lstsq(x[ok], target[ok], rcond=None)
+    pred = float(x[-1] @ coef)
+    return math.sqrt(max(pred, 0.1 * long_run) * periods_per_year)
+
+
+def earnings_reaction_returns(close: pd.Series, report_dates: Iterable[date], after_close: bool = True) -> pd.Series:
+    """
+    Log return of the session that reacts to each earnings report, indexed by
+    that session. `after_close` reports (AAPL's habit) react the next session;
+    pre-market ones the same day. Reports outside the price history are skipped.
+    """
+    s = pd.Series(close, dtype=float).dropna()
+    idx = pd.DatetimeIndex(s.index).tz_localize(None).normalize() if len(s) else pd.DatetimeIndex([])
+    s.index = idx
+    out = {}
+    for d in sorted(set(report_dates)):
+        ts = pd.Timestamp(d)
+        pos = idx.searchsorted(ts, side="right" if after_close else "left")
+        if 1 <= pos < len(idx):
+            out[idx[pos]] = math.log(s.iloc[pos] / s.iloc[pos - 1])
+    return pd.Series(out, dtype=float)
+
+
+def earnings_jump(moves: Iterable[float]) -> float:
+    """Root-mean-square earnings-day move: the jump sigma to add to diffusion vol."""
+    values = [float(m) for m in moves if m is not None and not math.isnan(m)]
+    return math.sqrt(sum(m * m for m in values) / len(values)) if values else float("nan")
+
+
+def implied_earnings_move(iv_event: float, T_event: float, iv_base: float, T_base: float | None = None) -> float:
+    """
+    The one-day earnings move an option chain is pricing.
+
+    With T_base=None, `iv_base` is the vol of an expiry that does NOT span the
+    report: the jump is the event expiry's total variance minus what it would
+    carry at that base vol. With T_base, both expiries span the report (the
+    usual case: a front and a back month), and the diffusion vol is backed out
+    of the term structure first — the same jump sits in both, so
+    sigma_d^2 = (iv_b^2 T_b - iv_e^2 T_e) / (T_b - T_e).
+    """
+    if T_base is not None:
+        if T_base <= T_event:
+            raise ValueError("T_base must be after T_event")
+        diffusion_var = max((iv_base * iv_base * T_base - iv_event * iv_event * T_event) / (T_base - T_event), 0.0)
+        return math.sqrt(max(iv_event * iv_event * T_event - diffusion_var * T_event, 0.0))
+    return math.sqrt(max(iv_event * iv_event * T_event - iv_base * iv_base * T_event, 0.0))
+
+
+def fair_volatility(sigma_diffusion: float, T: float, jump: float = 0.0) -> float:
+    """Annualised vol whose variance over T equals diffusion variance plus one jump."""
+    if T <= 0:
+        return sigma_diffusion
+    return math.sqrt(sigma_diffusion * sigma_diffusion + (jump * jump if jump == jump else 0.0) / T)
+
+
+def binomial_price(
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    sigma: float,
+    right: str,
+    q: float = 0.0,
+    steps: int = 200,
+    american: bool = True,
+) -> float:
+    """
+    Cox-Ross-Rubinstein tree. With american=True every node may exercise early,
+    which is what a US equity put is worth; Black-Scholes misses that premium
+    for deep ITM puts. Converges to bs_price when american=False.
+    """
+    right = _right(right)
+    if T <= 0 or sigma <= 0:
+        return bs_price(S, K, T, r, sigma, right, q)
+    dt = T / steps
+    u = math.exp(sigma * math.sqrt(dt))
+    d = 1.0 / u
+    p = (math.exp((r - q) * dt) - d) / (u - d)
+    disc = math.exp(-r * dt)
+    spots = S * u ** np.arange(steps, -steps - 1, -2, dtype=float)
+    payoff = np.maximum(spots - K, 0.0) if right == "C" else np.maximum(K - spots, 0.0)
+    values = payoff
+    for i in range(steps - 1, -1, -1):
+        values = disc * (p * values[:-1] + (1.0 - p) * values[1:])
+        if american:
+            spots = S * u ** np.arange(i, -i - 1, -2, dtype=float)
+            exercise = np.maximum(spots - K, 0.0) if right == "C" else np.maximum(K - spots, 0.0)
+            values = np.maximum(values, exercise)
+    return float(values[0])
+
+
+def implied_volatility_american(
+    price: float,
+    S: float,
+    K: float,
+    T: float,
+    r: float,
+    right: str,
+    q: float = 0.0,
+    steps: int = 100,
+    lo: float = 1e-3,
+    hi: float = 3.0,
+    tol: float = 1e-5,
+) -> float | None:
+    """Implied vol under the American binomial tree, by bisection. None outside the bounds."""
+    if price <= 0 or T <= 0:
+        return None
+    f_lo = binomial_price(S, K, T, r, lo, right, q, steps) - price
+    f_hi = binomial_price(S, K, T, r, hi, right, q, steps) - price
+    if f_lo > tol or f_hi < 0:
+        return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if binomial_price(S, K, T, r, mid, right, q, steps) > price:
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo < tol:
+            break
+    return 0.5 * (lo + hi)
+
+
+def smile_z(S: float, K: float, T: float, atm_iv: float) -> float:
+    """Moneyness in standard deviations: ln(K/S) / (atm_iv * sqrt(T))."""
+    return math.log(K / S) / (atm_iv * math.sqrt(T))
+
+
+def fit_smile(z: Sequence[float], iv: Sequence[float]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Quadratic smile iv = a + b*z + c*z^2 by least squares. Returns (coefficients
+    highest power first, residuals iv - fit). A contract with a large residual
+    is rich (+) or cheap (-) against its neighbours on the same expiry.
+    """
+    z_arr, iv_arr = np.asarray(z, dtype=float), np.asarray(iv, dtype=float)
+    if len(z_arr) < 4:
+        raise ValueError("fit_smile needs at least 4 points")
+    coef = np.polyfit(z_arr, iv_arr, 2)
+    return coef, iv_arr - np.polyval(coef, z_arr)
+
+
+# ------------------------------------------------------------------
 # Multi-leg payoff: spreads, condors, anything with fixed strikes
 # ------------------------------------------------------------------
 
@@ -339,6 +536,14 @@ class Leg:
     strike: float
     qty: float
     premium: float = 0.0
+
+
+def stock_leg(shares: float, cost: float = 0.0) -> Leg:
+    """
+    Shares of the underlying as a leg: a share is a call struck at 0, so the
+    payoff math covers covered calls, collars and hedged straddles unchanged.
+    """
+    return Leg("C", 0.0, shares, cost)
 
 
 def payoff_at_expiry(legs: Sequence[Leg], S: float) -> float:

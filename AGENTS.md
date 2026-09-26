@@ -230,6 +230,16 @@ Existing Strategies (don't duplicate)
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ option_CatalystCallBot │ AAPL options │ 75-delta call into earnings, sold day before   │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_MispricingBot   │ AAPL options │ IV vs HAR fair vol, gap explained; fly/straddle│
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_WheelBot        │ AAPL + opts  │ Cash-secured puts -> covered calls, physical   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_PMCCBot         │ AAPL options │ 70-delta LEAP + monthly 30-delta short calls   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_EarningsCalendarBot │ AAPL options │ ATM call calendar into earnings (live-only) │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_CollarBot       │ AAPL + opts  │ Shares + 25-delta put / 25-delta call collar   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
@@ -514,17 +524,23 @@ class MyBot(Bot):
   stale, so they are stored as NULL and fills use last price ±
   `EXECUTION_OPTION_SLIPPAGE_PCT` (default 2%).
 - **Expiry:** `Bot.run()` first rolls contracts within `OPTION_ROLL_DTE` into a
-  fresh one on the same side. A contract found already expired is cash-settled
-  at intrinsic value off the underlying's close on the expiry date. Real equity
-  options settle into shares; this is a deliberate simplification.
+  fresh one on the same side. A contract found already expired settles off the
+  underlying's close on the expiry date:
+  - by default, in cash at intrinsic value;
+  - with `OPTION_SETTLEMENT = "physical"` (the wheel), into shares at the
+    strike, as a broker would. A short put is assigned stock and a short call
+    delivers it. Any part that would leave the book short stock is
+    cash-settled instead.
 - **Guards:**
   - `buy(<OCC symbol>)` raises.
   - `rebalancePortfolio` refuses contract targets, and a held contract missing
     from the target is sold like any other exit.
   - `USE_OPTIONS` on a multi-ticker or `targetWeights` bot raises in `__init__`.
 - **Live copier:** it drops option holdings before mapping, so they never reach
-  a broker. `SymbolMapper` would otherwise type an OCC symbol as `"stock"`. The
-  weight stays cash or goes to SHV.
+  a broker. `SymbolMapper` would otherwise type an OCC symbol as `"stock"`. It
+  also drops any negative quantity and the shares of an underlying the same bot
+  holds options on: a covered call's stock or a straddle's hedge, copied alone,
+  would be a naked stock bet. The weight stays cash or goes to SHV.
 - **Backtests hold the underlying,** not the option. yfinance has no historical
   chains; `option_quotes` is the only history there will ever be.
 
@@ -545,14 +561,25 @@ self.close_options("AAPL")  # every leg, long and short, one transaction
   liability. `calculate_portfolio_worth` includes negative holdings for exactly
   this reason.
 - **Margin:** `options.margin_requirement(portfolio)` is the worst-case expiry
-  payoff of the option legs:
+  payoff of the option legs plus the underlying's shares. A share counts as a
+  zero-strike call (`option_math.stock_leg`), which gives:
   - a spread's width;
   - a condor's wider wing;
-  - infinite for a naked short call.
+  - a cash-secured put's strike;
+  - 0 for a covered call or a collar;
+  - a bounded amount for short stock beside long calls (a hedged straddle);
+  - infinite for a naked short call or naked short stock.
 
   A trade that grows any position is refused whole if cash left < margin. That
   is how unbounded structures are rejected. `buy()` can never spend reserved
-  margin. Pure reductions always go through.
+  margin, and `sell()` refuses shares that cover a short call. Pure reductions
+  always go through. Expiries are ignored: every leg is taken at its own expiry
+  payoff, which is conservative for long-far / short-near calendars and
+  diagonals.
+- **Shares inside a structure:** `trade_option_legs` also trades the
+  underlying's own symbol, but only beside options on it. That covers
+  buy-writes, collars and `delta_hedge`, and it is the only way to go short
+  stock. In a `StructurePick` the underlying's leg counts lots of 100 shares.
 - **Opening needs a live chain:** a structure is not opened off-hours. Legs'
   last prices are from different moments, so the credit would be fiction.
   Schedule option bots during US market hours.
@@ -568,6 +595,30 @@ self.close_options("AAPL")  # every leg, long and short, one transaction
 - **IV is solved from prices, not taken from yfinance.** Off-hours yfinance
   reports `impliedVolatility = 1e-5` for the whole chain. `options.load_chain`,
   `atm_iv` and `with_greeks` give IV and delta per contract.
+  - The dividend yield enters as Merton's `q` (`options.dividend_yield`).
+  - `atm_iv(view, american=True)` re-solves the put on a binomial tree.
+
+**Round 2 building blocks:**
+
+```python
+view = options.load_chain("AAPL", 35)
+self.open_structure(options.select_iron_butterfly(view, width=25), max_risk_usd=20_000)
+self.open_structure(options.select_straddle(view), 10_000)
+self.delta_hedge("AAPL", band_usd=2_000)  # shares to ~0 net delta (gamma scalping)
+self.close_options("AAPL", include_stock=True)  # options and the hedge shares
+options.select_short_leg(view, "P", 0.30)  # cash-secured put; "C" + min_strike = covered call
+options.select_collar(view, 0.25, 0.25, with_stock=False)
+options.select_calendar(front_view, back_view)  # short front, long back, same strike
+options.select_diagonal(leap_view, view, 0.70, 0.30, min_short_strike=k)  # poor man's covered call
+```
+
+Other helpers:
+- `options.earnings_history` and `next_earnings_date`.
+- `options.recent_news(u, days)`: refreshes `stock_news` for the symbol first.
+- `options.smile_outliers(view)`: contracts off the fitted smile by more than
+  their half-spread.
+- `options.opened_on` and `options.structure_flows`: a structure's P&L,
+  including what its hedge shares realized.
 
 **`utils/option_math.py`** holds the pure formulas:
 - Black-Scholes-Merton `bs_price` and the five greeks (theta per day, vega and
@@ -576,12 +627,25 @@ self.close_options("AAPL")  # every leg, long and short, one transaction
 - historical vol, `iv_hv_ratio`, `iv_rank`, `iv_percentile`;
 - `breakeven`, `expected_move`, `probability_itm`;
 - multi-leg `payoff_at_expiry`, `max_loss`, `max_profit`, `breakevens`,
-  `probability_of_profit`;
-- `beta`, `beta_exposure`, `delta_dollars`, and liquidity screens.
+  `probability_of_profit`, `stock_leg`;
+- `beta`, `beta_exposure`, `delta_dollars`, and liquidity screens;
+- fair vol:
+  - `har_rv_forecast`: HAR-RV over the days to expiry, with earnings days
+    excluded;
+  - `ewma_volatility`;
+  - `earnings_reaction_returns` and `earnings_jump`;
+  - `implied_earnings_move`: from one expiry spanning the report plus a base
+    vol, or from two expiries;
+  - `fair_volatility`;
+- `binomial_price` and `implied_volatility_american`: a CRR tree for American
+  options;
+- `fit_smile` and `smile_z`.
 
-**The option bots** (all AAPL, paper, all scheduled at 15:00–15:15 UTC):
+**The option bots** (all AAPL, paper, all scheduled at 15:00–15:40 UTC):
 - `option_LeapCallBot`, `option_CreditSpreadBot`, `option_IronCondorBot`,
   `option_CatalystCallBot`.
+- Round 2: `option_MispricingBot`, `option_WheelBot`, `option_PMCCBot`,
+  `option_EarningsCalendarBot`, `option_CollarBot`.
 - Their rules are pure functions in `utils/option_rules.py`, shared with
   `scripts/onetime_option_bots_backtest.py`.
 - File and Helm names are `option_<x>bot`. The CronJob template turns `_` into
@@ -597,6 +661,21 @@ self.close_options("AAPL")  # every leg, long and short, one transaction
     for pausing.
   - **Catalyst:** untuned (10 trades).
   - Details are in `docs/backtests/option-bots-2026-09.md`.
+- Round 2, walk-forward on 2026-09-26 (`docs/backtests/option-bots-round2-2026-09.md`):
+  - **Mispricing:** trades IV minus HAR fair vol, after explaining the gap
+    (earnings, market-wide vs AAPL-specific, pending news, VIX).
+    - The gap does predict the variance premium.
+    - Short at-the-money structures pay for it in single-stock jumps.
+    - Re-tuned to 10-point gaps and 1.5σ wings: out-of-sample t 0.82.
+      Unproven.
+  - **PMCC:** re-tuned to a 0.70Δ LEAP; out-of-sample t 2.37 vs the LEAP bot's
+    2.10, with a lower drawdown. Still long AAPL.
+  - **Wheel and collar:** defaults kept. Both are AAPL at a lower beta, not
+    alpha.
+  - **Earnings calendar:** live-only, because nothing can price historical
+    earnings IV.
+  - **Not built, with reasons given in the doc:** 0DTE SPX, box spreads,
+    dispersion, tail hedges, naked strangles, long straddles into earnings.
 
 ### Reading another bot's state
 

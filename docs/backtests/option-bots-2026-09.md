@@ -118,6 +118,9 @@ condor carry the premium-selling idea.
 **option_CatalystCallBot is unproven.** Its thesis is earnings IV, which this
 backtest cannot price.
 
+Round 2 (mispricing, wheel, PMCC, collar, earnings calendar):
+[option-bots-round2-2026-09.md](option-bots-round2-2026-09.md).
+
 ## Next evidence
 
 The live paper record, plus the real bid/ask, IV and skew that `option_quotes`

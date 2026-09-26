@@ -14,10 +14,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tradingbot.livetrade.copier import LiveTradeCopier
 from tradingbot.option_catalystcallbot import OptionCatalystCallBot
+from tradingbot.option_collarbot import OptionCollarBot
 from tradingbot.option_creditspreadbot import OptionCreditSpreadBot
+from tradingbot.option_earningscalendarbot import OptionEarningsCalendarBot
 from tradingbot.option_ironcondorbot import OptionIronCondorBot
 from tradingbot.option_leapcallbot import OptionLeapCallBot
+from tradingbot.option_mispricingbot import OptionMispricingBot
+from tradingbot.option_pmccbot import OptionPMCCBot
+from tradingbot.option_wheelbot import OptionWheelBot
 from tradingbot.utils import option_math as om
 from tradingbot.utils import option_rules as rules_mod
 from tradingbot.utils import options
@@ -97,6 +103,7 @@ def chain(monkeypatch):
     BSTicker.earnings = None
     monkeypatch.setattr(options.yf, "Ticker", BSTicker)
     monkeypatch.setattr(options, "risk_free_rate", lambda: R)
+    monkeypatch.setattr(options, "dividend_yield", lambda _u: 0.0)
     return BSTicker
 
 
@@ -497,3 +504,344 @@ def test_catalyst_bot_enters_in_window_and_exits_before_earnings(sqlite_db, db_s
     mocker.patch.object(rules_mod, "business_days", return_value=1)  # the day before earnings
     assert bot.makeOneIteration() == -1
     assert set(_portfolio(db_session, "option_CatalystCallBot")) == {"USD"}
+
+
+# ------------------------------------------------------------------
+# Round 2: shares inside structures, physical settlement, hedging
+# ------------------------------------------------------------------
+
+
+def test_margin_counts_shares_beside_options():
+    call = occ(E40, "C", 320)
+    assert options.margin_requirement({"USD": 0, "AAPL": 100, call: -100}) == 0  # covered call
+    assert options.margin_requirement({"USD": 0, "AAPL": 50, call: -100}) == math.inf  # half covered
+    assert options.margin_requirement({"USD": 0, occ(E40, "P", 280): -100}) == pytest.approx(28_000)
+    assert options.margin_requirement({"USD": 0, "AAPL": -10}) == math.inf  # naked short stock
+    assert options.margin_requirement({"USD": 0, "QQQ": 10}) == 0  # plain stock bots are untouched
+    hedged = {occ(E40, "C", 300): 100, occ(E40, "P", 300): 100, "AAPL": -30}
+    assert options.margin_requirement(hedged) == pytest.approx(30 * 300)
+
+
+def test_buy_write_opens_shares_and_call_together(pm, db_session):
+    _set_portfolio(db_session, {"USD": 100_000.0})
+    options.load_chain("AAPL", 35)
+    call = occ(E40, "C", 320)
+    pm.trade_option_legs([("AAPL", 100), (call, -100)])
+    book = _portfolio(db_session)
+    assert book["AAPL"] == 100 and book[call] == -100
+    assert options.margin_requirement(book) == 0
+    trades = {t.symbol: t for t in db_session.query(Trade).all()}
+    assert trades["AAPL"].isBuy and trades["AAPL"].price == pytest.approx(S)
+
+
+def test_stock_legs_need_options_beside_them(pm, db_session):
+    with pytest.raises(ValueError, match="beside options"):
+        pm.trade_option_legs([("AAPL", -10)])
+    assert _portfolio(db_session) == {"USD": 10000.0}
+
+
+def test_sell_refuses_to_uncover_a_short_call(pm, db_session):
+    call = occ(E40, "C", 320)
+    options.load_chain("AAPL", 35)
+    _set_portfolio(db_session, {"USD": 1000.0, "AAPL": 150.0, call: -100})
+    assert pm.sell("AAPL", quantity_usd=100 * S) == 0.0  # would leave 50 shares under 100 calls
+    assert _portfolio(db_session)["AAPL"] == 150
+    assert pm.sell("AAPL", quantity_usd=50 * S) > 0  # the spare 50 are free to go
+    assert _portfolio(db_session)["AAPL"] == pytest.approx(100)
+
+
+def test_physical_settlement_assigns_and_delivers(pm, db_session, chain):
+    past = TODAY - timedelta(days=1)
+    chain.close = 280.0
+    put, call = occ(past, "P", 290), occ(past, "C", 270)
+    _set_portfolio(db_session, {"USD": 60_000.0, put: -200})
+    pm.roll_and_settle_options(roll_dte=None, target_dte=30, settlement="physical")
+    assert _portfolio(db_session) == {"USD": pytest.approx(60_000 - 200 * 290), "AAPL": 200}
+    stock_trade = db_session.query(Trade).filter_by(symbol="AAPL").one()
+    assert stock_trade.isBuy and stock_trade.price == 290  # assigned at the strike
+
+    _set_portfolio(db_session, {"USD": 0.0, "AAPL": 100, call: -100})  # covered call finishes ITM
+    pm.roll_and_settle_options(roll_dte=None, target_dte=30, settlement="physical")
+    assert _portfolio(db_session) == {"USD": pytest.approx(100 * 270)}  # called away
+
+
+def test_physical_settlement_never_creates_short_stock(pm, db_session, chain):
+    past = TODAY - timedelta(days=1)
+    chain.close = 280.0
+    put = occ(past, "P", 300)
+    _set_portfolio(db_session, {"USD": 1000.0, "AAPL": 50, put: 100})  # long put, only 50 shares to deliver
+    pm.roll_and_settle_options(roll_dte=None, target_dte=30, settlement="physical")
+    # 50 shares put to the market at 300, the other 50 units cash-settled at 20.
+    assert _portfolio(db_session) == {"USD": pytest.approx(1000 + 50 * 300 + 50 * 20)}
+
+
+def test_delta_hedge_flattens_a_straddle(pm, db_session):
+    _set_portfolio(db_session, {"USD": 50_000.0})
+    view = options.load_chain("AAPL", 35)
+    pm.open_structure(options.select_straddle(view), max_risk_usd=5_000)
+    before = pm.option_book("AAPL")
+    assert abs(before.net_delta) > 1
+    shares = pm.delta_hedge("AAPL", band_usd=100)
+    after = pm.option_book("AAPL")
+    assert shares == -round(before.net_delta)
+    assert abs(after.net_delta) <= 0.5
+    pm.close_options("AAPL", include_stock=True)
+    assert set(_portfolio(db_session)) == {"USD"}
+
+
+def test_new_builders(sqlite_db, chain):
+    view = options.load_chain("AAPL", 35)
+    fly = options.select_iron_butterfly(view, 20)
+    assert fly.legs == (
+        (occ(E40, "P", 280), 1),
+        (occ(E40, "P", 300), -1),
+        (occ(E40, "C", 300), -1),
+        (occ(E40, "C", 320), 1),
+    )
+    assert options.select_straddle(view).legs == ((occ(E40, "C", 300), 1), (occ(E40, "P", 300), 1))
+    collar = options.select_collar(view, 0.25, 0.25)
+    assert collar.legs[0] == ("AAPL", 1)
+    assert collar.legs[1] == (occ(E40, "P", _nearest_delta_strike(E40, "P", 0.25)), 1)
+    assert collar.legs[2] == (occ(E40, "C", _nearest_delta_strike(E40, "C", 0.25)), -1)
+    capped = options.select_short_leg(view, "C", 0.30, min_strike=330)
+    assert options.parse_occ(capped.legs[0][0]).strike >= 330
+
+    back = options.load_chain("AAPL", 70)
+    cal = options.select_calendar(view, back)
+    assert cal.legs == ((occ(E40, "C", 300), -1), (occ(E75, "C", 300), 1))
+    leap = options.load_chain("AAPL", 500)
+    diag = options.select_diagonal(leap, view, 0.80, 0.30, min_short_strike=310)
+    (long_key, _), (short_key, _) = diag.legs
+    assert options.parse_occ(long_key).expiry == E560 and options.parse_occ(short_key).expiry == E40
+    assert options.parse_occ(short_key).strike >= 310
+    with pytest.raises(ValueError):
+        options.select_calendar(back, view)
+
+
+def test_copier_keeps_structure_stock_away_from_the_broker():
+    copier = LiveTradeCopier(broker=MagicMock(), bot_weights={"option_X": 1.0}, dry_run=True)
+    bot = MagicMock(spec=BotModel)
+    call = occ(E40, "C", 320)
+    bot.portfolio = {"USD": 1000.0, "AAPL": 100.0, call: -100.0, "QQQ": 2.0}
+    copier.bot_repo = MagicMock()
+    copier.bot_repo.create_or_get_bot.return_value = bot
+    copier.data_service = MagicMock()
+    copier.data_service.get_latest_prices_batch.return_value = {"AAPL": 300.0, call: 5.0, "QQQ": 500.0}
+    weights = copier._calculate_target_weights()
+    total = 1000 + 30_000 - 500 + 1000
+    assert weights == {"QQQ": pytest.approx(1000 / total)}
+
+
+# ------------------------------------------------------------------
+# Round 2 rules (pure)
+# ------------------------------------------------------------------
+
+
+def test_mispricing_rules():
+    r = rules_mod.MispricingRules()
+    assert rules_mod.mispricing_side(0.35, 0.25, r) == "rich"
+    assert rules_mod.mispricing_side(0.20, 0.25, r) == "cheap"
+    assert rules_mod.mispricing_side(0.28, 0.25, r) is None
+    assert rules_mod.mispricing_side(None, 0.25, r) is None
+    assert rules_mod.butterfly_width(300, 0.25, 0.25, r) == pytest.approx(37.5)
+    # Rich butterfly: credit 500.
+    assert rules_mod.mispricing_exit_reason("rich", 0.05, 130, -500, 30, 3, r).startswith("take profit")
+    assert rules_mod.mispricing_exit_reason("rich", 0.05, -600, -500, 30, 3, r).startswith("stop")
+    assert rules_mod.mispricing_exit_reason("rich", 0.0, 0, -500, 30, 3, r).startswith("gap closed")
+    assert rules_mod.mispricing_exit_reason("rich", 0.05, 0, -500, 8, 3, r).endswith("10")
+    assert rules_mod.mispricing_exit_reason("rich", 0.05, 0, -500, 30, 3, r) is None
+    # Cheap straddle: debit 1000.
+    assert rules_mod.mispricing_exit_reason("cheap", -0.05, 400, 1000, 30, 3, r).startswith("take profit")
+    assert rules_mod.mispricing_exit_reason("cheap", -0.05, 0, 1000, 30, 15, r).startswith("held")
+    assert rules_mod.mispricing_exit_reason("cheap", 0.0, 0, 1000, 30, 3, r).startswith("gap closed")
+    assert rules_mod.mispricing_exit_reason("cheap", -0.05, 0, 1000, 30, 3, r) is None
+
+
+def test_explain_gap_walks_the_reasons():
+    r = rules_mod.MispricingRules()
+    assert not rules_mod.explain_gap(0.27, 0.25, r, earnings_inside=False).tradeable
+    e = rules_mod.explain_gap(0.40, 0.25, r, earnings_inside=True, implied_move=0.05, hist_move=0.04)
+    assert not e.tradeable and "earnings" in e.reason and "5.0%" in e.summary()
+    e = rules_mod.explain_gap(0.40, 0.25, r, earnings_inside=False, relative_iv=1.4, news_event="DOJ ruling")
+    assert not e.tradeable and "DOJ ruling" in e.reason  # AAPL-specific and explained by news
+    e = rules_mod.explain_gap(0.40, 0.25, r, earnings_inside=False, relative_iv=1.0, news_event="DOJ ruling")
+    assert e.tradeable and e.side == "rich"  # market-wide: the news is not why
+    assert not rules_mod.explain_gap(0.60, 0.25, r, earnings_inside=False, vix=45).tradeable
+    e = rules_mod.explain_gap(0.15, 0.25, r, earnings_inside=False, relative_iv=0.7, news_event="tariff")
+    assert e.tradeable and e.side == "cheap"  # news never blocks buying cheap vol
+
+
+def test_classify_news_llm_then_keywords():
+    heads = ["Apple faces DOJ antitrust ruling next week", "iPhone reviews are in"]
+    until = TODAY + timedelta(days=30)
+    assert rules_mod.classify_news(
+        heads, "AAPL", until, lambda *_: '{"pending_event": true, "event": "DOJ ruling"}'
+    ) == ("DOJ ruling")
+    assert rules_mod.classify_news(heads, "AAPL", until, lambda *_: 'x {"pending_event": false, "event": ""}') is None
+    assert rules_mod.classify_news(heads, "AAPL", until, lambda *_: "sorry, I cannot") == heads[0]  # keyword fallback
+
+    def broken(*_):
+        raise ValueError("no API key")
+
+    assert rules_mod.classify_news(["Apple ships new watch"], "AAPL", until, broken) is None
+    assert rules_mod.classify_news([], "AAPL", until, broken) is None
+
+
+def test_wheel_pmcc_collar_calendar_rules():
+    w = rules_mod.WheelRules()
+    assert rules_mod.wheel_put_ok(None, 100, 90, False, w)  # defaults gate nothing
+    assert not rules_mod.wheel_put_ok(1.0, 100, 90, True, rules_mod.WheelRules(min_iv_hv=1.1))
+    assert not rules_mod.wheel_put_ok(1.2, 80, 90, True, rules_mod.WheelRules(trend_filter=True))
+    assert rules_mod.wheel_call_floor(287.5, w) == 287.5
+    assert rules_mod.wheel_call_floor(287.5, rules_mod.WheelRules(call_floor=None)) is None
+    assert rules_mod.short_premium_exit_reason(200, 100, 30, 0.5, None).startswith("take profit")
+    assert rules_mod.short_premium_exit_reason(200, 50, 3, 0.5, None) is None  # held to expiry
+
+    p = rules_mod.PMCCRules()
+    assert rules_mod.pmcc_min_short_strike(240, 70, 300) == pytest.approx(250)  # 10 of extrinsic paid
+    assert rules_mod.pmcc_short_exit_reason(200, 0, 30, 0.65, p).startswith("short call delta")
+    assert rules_mod.pmcc_short_exit_reason(200, 120, 30, 0.2, p).startswith("take profit")
+    assert "DTE" in rules_mod.pmcc_short_exit_reason(200, 0, 5, 0.2, p)
+    assert rules_mod.pmcc_leap_rules(p).delta == 0.80
+
+    c = rules_mod.CollarRules
+    assert rules_mod.collar_wanted(100, 110, None, c())
+    assert rules_mod.collar_wanted(100, 110, None, c(mode="below_sma200"))
+    assert not rules_mod.collar_wanted(120, 110, None, c(mode="below_sma200"))
+    assert rules_mod.collar_wanted(100, 110, 0.9, c(mode="iv_cheap"))
+    assert not rules_mod.collar_wanted(100, 110, 1.3, c(mode="iv_cheap"))
+
+    k = rules_mod.CalendarRules()
+    monday = pd.Timestamp("2026-10-05").date()
+    assert rules_mod.calendar_entry_window(monday, monday + timedelta(days=7), k)  # 5 trading days
+    assert not rules_mod.calendar_entry_window(monday, monday + timedelta(days=21), k)
+    assert rules_mod.calendar_signal_ok(0.40, 0.30, 0.05, 0.04, k)
+    assert not rules_mod.calendar_signal_ok(0.32, 0.30, 0.05, 0.04, k)  # front not inflated
+    assert not rules_mod.calendar_signal_ok(0.40, 0.30, 0.03, 0.04, k)  # crush not rich
+    report = monday + timedelta(days=2)
+    assert rules_mod.calendar_exit_reason(monday + timedelta(days=3), monday, report, 0.0, 10, k).startswith("earn")
+    assert rules_mod.calendar_exit_reason(report, monday, report, 0.0, 10, k) is None  # reports after the close
+    assert rules_mod.calendar_exit_reason(monday, monday, None, -0.6, 10, k).startswith("stop")
+
+
+# ------------------------------------------------------------------
+# Round 2 bots, end to end on the fake chain
+# ------------------------------------------------------------------
+
+
+def _dated(df: pd.DataFrame) -> pd.DataFrame:
+    """_series with a business-day timestamp column ending today (what getYFData returns)."""
+    out = df.copy()
+    out["timestamp"] = pd.bdate_range(end=pd.Timestamp(TODAY), periods=len(df) + 5)[-len(df) :]
+    return out
+
+
+def _make_vol_bot(cls, mocker, data):
+    bot = _make_bot(cls, mocker, data)
+    mocker.patch.object(bot, "getYFData", return_value=_dated(data))
+    mocker.patch.object(options, "recent_news", return_value=[])
+    return bot
+
+
+def test_mispricing_bot_sells_rich_vol_with_a_butterfly(sqlite_db, db_session, chain, mocker):
+    bot = _make_vol_bot(OptionMispricingBot, mocker, _series(RICH_IV))  # IV 25% vs HV ~13%
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_MispricingBot"))
+    assert len(legs) == 4 and sum(legs.values()) == 0  # two shorts, two wings, same size
+    strikes = sorted({options.parse_occ(k).strike for k, q in legs.items() if q < 0})
+    assert strikes == [300.0]  # short the at-the-money straddle
+    assert bot.option_book("AAPL").max_loss <= 0.20 * 100_000
+    assert bot.makeOneIteration() == 0  # holding
+
+
+def test_mispricing_bot_buys_cheap_vol_and_hedges_it(sqlite_db, db_session, chain, mocker):
+    bot = _make_vol_bot(OptionMispricingBot, mocker, _series(WILD))  # IV 25% vs HV ~48%
+    assert bot.makeOneIteration() == 1
+    book = bot.option_book("AAPL")
+    assert {p.contract.right for p in book.positions} == {"C", "P"} and all(p.qty > 0 for p in book.positions)
+    assert book.shares != 0 and abs(book.net_delta) <= 0.5  # delta-hedged at the open
+    assert bot.makeOneIteration() == 0  # holds, hedge unchanged
+
+
+def test_mispricing_bot_leaves_fairly_priced_options_alone(sqlite_db, db_session, chain, mocker):
+    bot = _make_vol_bot(OptionMispricingBot, mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 0
+    assert _portfolio(db_session, "option_MispricingBot") == {"USD": 100_000.0}
+
+
+def test_mispricing_bot_respects_a_pending_event(sqlite_db, db_session, chain, mocker):
+    bot = _make_vol_bot(OptionMispricingBot, mocker, _series(RICH_IV))
+    options.recent_news.return_value = ["Court to rule on Apple App Store antitrust case Friday"]
+    mocker.patch.object(bot, "_relative_iv", return_value=1.5)  # AAPL-specific richness
+    mocker.patch.object(bot, "run_ai_simple", side_effect=ValueError("no key"))  # -> keyword fallback
+    assert bot.makeOneIteration() == 0
+    assert _portfolio(db_session, "option_MispricingBot") == {"USD": 100_000.0}
+
+
+def test_wheel_bot_sells_puts_then_covered_calls(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionWheelBot, mocker, _series(RICH_IV))
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_WheelBot"))
+    ((put, qty),) = legs.items()
+    strike = options.parse_occ(put).strike
+    assert options.parse_occ(put).right == "P" and qty < 0
+    assert -qty * strike <= 100_000  # cash-secured
+
+    # Assigned: 300 shares at 290, recorded as the broker would.
+    _set_portfolio(db_session, {"USD": 13_000.0, "AAPL": 300.0}, "option_WheelBot")
+    BotRepository.log_trade("option_WheelBot", "AAPL", 300, 290.0, True)
+    bot.dbBot = BotRepository.create_or_get_bot("option_WheelBot")  # run() refreshes it after settlement
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_WheelBot"))
+    ((call, qty),) = legs.items()
+    assert options.parse_occ(call).right == "C" and qty == -300
+    assert options.parse_occ(call).strike >= 290  # never below the cost basis
+
+
+def test_pmcc_bot_buys_leap_then_sells_calls_against_it(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionPMCCBot, mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 1
+    ((leap, n),) = options.option_legs(_portfolio(db_session, "option_PMCCBot")).items()
+    assert options.parse_occ(leap).expiry == E560 and n > 0
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_PMCCBot"))
+    shorts = {k: q for k, q in legs.items() if q < 0}
+    ((short, q),) = shorts.items()
+    assert q == -n and options.parse_occ(short).expiry == E40
+    lc = options.parse_occ(leap)
+    assert options.parse_occ(short).strike >= lc.strike
+    assert bot.makeOneIteration() == 0  # hold both
+    mocker.patch("tradingbot.option_pmccbot.pmcc_short_exit_reason", return_value="take profit")
+    assert bot.makeOneIteration() == -1
+    assert list(options.option_legs(_portfolio(db_session, "option_PMCCBot"))) == [leap]
+
+
+def test_collar_bot_buys_shares_and_collars_them(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionCollarBot, mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 1
+    book = _portfolio(db_session, "option_CollarBot")
+    shares = book["AAPL"]
+    assert shares == pytest.approx(0.97 * 100_000 / S, rel=0.01)
+    legs = options.option_legs(book)
+    n = int(shares // 100)
+    assert sorted(legs.values()) == [-100 * n, 100 * n]
+    assert options.margin_requirement(book) == 0
+    assert bot.makeOneIteration() == 0
+
+
+def test_earnings_calendar_bot(sqlite_db, db_session, chain, mocker):
+    chain.earnings = E40 - timedelta(days=5)
+    mocker.patch.object(rules_mod, "business_days", return_value=5)
+    bot = _make_vol_bot(OptionEarningsCalendarBot, mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 0  # flat vol: the front holds no event premium, no trade
+    mocker.patch.object(
+        OptionEarningsCalendarBot, "RULES", rules_mod.CalendarRules(min_term_ratio=0.9, min_implied_vs_hist=0.0)
+    )
+    mocker.patch.object(options, "earnings_history", return_value=[TODAY - timedelta(days=d) for d in (100, 190)])
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_EarningsCalendarBot"))
+    front, back = occ(E40, "C", 300), occ(E75, "C", 300)
+    assert set(legs) == {front, back} and legs[front] == -legs[back] < 0  # short front, long back
+    assert bot.option_book("AAPL").entry_value <= 0.05 * 100_000
+    mocker.patch.object(options.OptionBook, "pnl_pct", new_callable=mocker.PropertyMock, return_value=0.3)
+    assert bot.makeOneIteration() == -1

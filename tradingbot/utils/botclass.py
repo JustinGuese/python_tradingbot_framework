@@ -101,6 +101,10 @@ class Bot:
     # Underlyings with short legs (spreads, condors) are never auto-rolled.
     OPTION_ROLL_DTE: ClassVar[int | None] = 7
     OPTION_TARGET_DELTA: ClassVar[float | None] = None  # None = strike nearest spot
+    # How an expired ITM contract settles: "cash" at intrinsic value, or
+    # "physical" into shares at the strike (a short put is assigned stock, a
+    # short call delivers it) — the wheel needs the latter.
+    OPTION_SETTLEMENT: ClassVar[str] = "cash"
 
     # Starting cash, used only when the bot's row is first created. Option
     # strategies need more than $10k for whole-contract sizing to be sane
@@ -609,7 +613,7 @@ class Bot:
         if right is None:
             raise ValueError(f"side={side!r}: use 'put'/'bull' or 'call'/'bear'")
         pick = options.select_vertical(underlying, right, short_delta, width, dte, view=view)
-        return self._open_structure(pick, max_risk_usd)
+        return self.open_structure(pick, max_risk_usd)
 
     def open_iron_condor(
         self,
@@ -622,18 +626,38 @@ class Bot:
     ) -> int:
         """Sell a put spread and a call spread on one expiry. Returns the number opened."""
         pick = options.select_iron_condor(underlying, short_delta, width, dte, view=view)
-        return self._open_structure(pick, max_risk_usd)
+        return self.open_structure(pick, max_risk_usd)
 
-    def _open_structure(self, pick: options.StructurePick, max_risk_usd: float | None) -> int:
+    def open_structure(self, pick: options.StructurePick, max_risk_usd: float | None = None) -> int:
+        """
+        Open as many units of any options.select_* pick (butterfly, straddle,
+        collar, calendar, diagonal, covered call...) as `max_risk_usd` of
+        worst-case loss allows (default: all free cash). Returns units opened.
+        """
         units = self._portfolio_manager.open_structure(pick, math.inf if max_risk_usd is None else max_risk_usd)
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return units
 
-    def close_options(self, underlying: str) -> float:
-        """Close every option leg on `underlying` (long and short). Returns net cash."""
-        cash = self._portfolio_manager.close_options(underlying)
+    def trade_option_legs(self, legs: list[tuple[str, float]]) -> float:
+        """Change several legs (contracts in share-equivalents, or the underlying's shares) atomically."""
+        cash = self._portfolio_manager.trade_option_legs(legs)
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return cash
+
+    def close_options(self, underlying: str, include_stock: bool = False) -> float:
+        """
+        Close every option leg on `underlying` (long and short); include_stock
+        also flattens the shares held beside them. Returns net cash.
+        """
+        cash = self._portfolio_manager.close_options(underlying, include_stock=include_stock)
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+        return cash
+
+    def delta_hedge(self, underlying: str, band_usd: float) -> float:
+        """Trade shares to bring the options-plus-shares delta back to ~0 beyond `band_usd`."""
+        shares = self._portfolio_manager.delta_hedge(underlying, band_usd)
+        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+        return shares
 
     def option_book(self, underlying: str) -> options.OptionBook:
         """Held options on `underlying`: legs, marks, entry value, P&L, DTE and net greeks."""
@@ -783,6 +807,7 @@ class Bot:
                     roll_dte=getattr(self, "OPTION_ROLL_DTE", 7),
                     target_dte=getattr(self, "OPTION_TARGET_DTE", 30),
                     target_delta=getattr(self, "OPTION_TARGET_DELTA", None),
+                    settlement=getattr(self, "OPTION_SETTLEMENT", "cash"),
                 )
                 self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
             decision = self.makeOneIteration()

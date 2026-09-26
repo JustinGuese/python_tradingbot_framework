@@ -334,8 +334,9 @@ bots:
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours
 # yfinance zeroes bid/ask and the framework refuses to open. 15:00 UTC is 11:00
 # EDT / 10:00 EST. Each starts with $100k paper (INITIAL_CAPITAL), so whole-contract
-# sizing works. The live copier drops option holdings, so none can reach a broker.
-# See docs/backtests/option-bots-2026-09.md.
+# sizing works. The live copier drops option holdings and the shares that belong
+# to an option structure, so none of it can reach a broker.
+# See docs/backtests/option-bots-2026-09.md and option-bots-round2-2026-09.md.
 - name: option_leapcallbot
   schedule: "0 15 * * 1-5" # 60-delta ~1.5y LEAP call while AAPL > SMA200, trimmed at 1.5x
 
@@ -347,6 +348,21 @@ bots:
 
 - name: option_catalystcallbot
   schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before
+
+- name: option_mispricingbot
+  schedule: "20 15 * * 1-5" # IV vs HAR fair vol, gap explained (earnings/VXN/news); butterfly or hedged straddle
+
+- name: option_wheelbot
+  schedule: "25 15 * * 1-5" # cash-secured 30-delta puts, assigned shares get covered calls
+
+- name: option_pmccbot
+  schedule: "30 15 * * 1-5" # 80-delta LEAP + monthly 30-delta short calls (poor man's covered call)
+
+- name: option_earningscalendarbot
+  schedule: "35 15 * * 1-5" # ATM call calendar into earnings when front IV is rich; live-only
+
+- name: option_collarbot
+  schedule: "40 15 * * 1-5" # AAPL shares + 25-delta put / 25-delta call collar
 
 - name: institutionalflowbot
   # Weekly top-20 of the S&P 100 passing institutional mandate filters

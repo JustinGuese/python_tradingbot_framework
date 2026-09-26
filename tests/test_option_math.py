@@ -185,3 +185,90 @@ def test_liquidity_helpers():
     assert om.spread_pct(1.0, 1.1) == pytest.approx(0.1 / 1.05)
     assert om.spread_pct(0.0, 1.1) == math.inf
     assert om.delta_dollars(0.7, 300, 400) == pytest.approx(84_000)
+
+
+# ------------------------------------------------------------------
+# Fair volatility, earnings, American pricing, the smile
+# ------------------------------------------------------------------
+
+
+def _gbm_returns(sigma: float, n: int = 2000, seed: int = 0) -> pd.Series:
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2015-01-01", periods=n)
+    return pd.Series(rng.normal(0.0, sigma / math.sqrt(252), n), index=idx)
+
+
+def test_har_forecast_recovers_constant_vol():
+    r = _gbm_returns(0.25)
+    assert om.har_rv_forecast(r, 25) == pytest.approx(0.25, abs=0.03)
+    assert om.ewma_volatility(r) == pytest.approx(0.25, abs=0.08)
+
+
+def test_har_forecast_excludes_jump_days():
+    r = _gbm_returns(0.25)
+    jumps = r.index[-1::-63]  # a quarterly 8% "earnings" move, the latest one yesterday
+    r.loc[jumps] = 0.08
+    # HAR learns that one-off jumps do not persist, so they leak in only via
+    # the mean level; removed, the forecast is the diffusion vol again.
+    clean = om.har_rv_forecast(r, 25, exclude=jumps)
+    assert clean == pytest.approx(0.25, abs=0.03)
+    assert om.har_rv_forecast(r, 25) > clean + 0.005
+
+
+def test_har_forecast_falls_back_to_long_run_vol_on_short_history():
+    r = _gbm_returns(0.25, n=100)
+    assert om.har_rv_forecast(r, 25) == pytest.approx(r.std() * math.sqrt(252), rel=0.05)
+
+
+def test_earnings_reaction_returns_and_jump():
+    idx = pd.bdate_range("2026-01-05", periods=10)
+    close = pd.Series(100.0, index=idx)
+    close.iloc[3:] = 105.0  # the session after a report on day 2 (after the close)
+    moves = om.earnings_reaction_returns(close, [idx[2].date()])
+    assert list(moves.index) == [idx[3]]
+    assert moves.iloc[0] == pytest.approx(math.log(1.05))
+    assert om.earnings_reaction_returns(close, [idx[3].date()], after_close=False).iloc[0] == pytest.approx(
+        math.log(1.05)
+    )
+    assert om.earnings_jump([0.03, -0.04]) == pytest.approx(math.sqrt((0.0009 + 0.0016) / 2))
+
+
+def test_implied_earnings_move_round_trip():
+    diffusion, jump = 0.25, 0.05
+    tf, tb = 10 / 365, 40 / 365
+    iv_front = om.fair_volatility(diffusion, tf, jump)
+    iv_back = om.fair_volatility(diffusion, tb, jump)
+    assert iv_front > iv_back > diffusion  # the event premium, diluted by time
+    assert om.implied_earnings_move(iv_front, tf, iv_back, tb) == pytest.approx(jump, rel=1e-6)
+    assert om.implied_earnings_move(iv_front, tf, diffusion) == pytest.approx(jump, rel=1e-6)
+    assert om.implied_earnings_move(0.2, tf, 0.3) == 0.0  # no event priced
+
+
+def test_binomial_tree():
+    euro = om.binomial_price(S, K, T, R, SIG, "P", steps=400, american=False)
+    assert euro == pytest.approx(om.bs_price(S, K, T, R, SIG, "P"), abs=0.01)
+    assert om.binomial_price(S, K, T, R, SIG, "C", steps=400) == pytest.approx(
+        om.bs_price(S, K, T, R, SIG, "C"), abs=0.01
+    )  # no dividend: never exercise a call early
+    deep = {"S": 30.0, "K": 40.0, "T": 1.0, "r": 0.10, "sigma": 0.2}
+    assert om.binomial_price(**deep, right="P") > om.bs_price(**deep, right="P") + 0.1  # early-exercise premium
+    price = om.binomial_price(S, K, T, R, 0.3, "P", steps=100)
+    assert om.implied_volatility_american(price, S, K, T, R, "P") == pytest.approx(0.3, abs=1e-3)
+
+
+def test_fit_smile_flags_the_outlier():
+    z = np.linspace(-2, 2, 9)
+    iv = 0.25 - 0.02 * z + 0.01 * z**2
+    iv[6] += 0.03
+    _, resid = om.fit_smile(z, iv)
+    assert int(np.argmax(resid)) == 6
+
+
+def test_stock_legs_in_max_loss():
+    assert om.max_loss([om.stock_leg(100), om.Leg("C", 320, -100)]) == 0  # covered call
+    assert om.max_loss([om.Leg("P", 280, -100)]) == pytest.approx(28_000)  # cash-secured put
+    assert om.max_loss([om.stock_leg(-100)]) == math.inf  # naked short stock
+    hedged = [om.Leg("C", 300, 100), om.Leg("P", 300, 100), om.stock_leg(-30)]
+    assert om.max_loss(hedged) == pytest.approx(30 * 300)  # a hedged straddle is bounded
+    collar = [om.stock_leg(100, 300.0), om.Leg("P", 280, 100, 4.0), om.Leg("C", 320, -100, 4.0)]
+    assert om.max_loss(collar) == pytest.approx(100 * 20)

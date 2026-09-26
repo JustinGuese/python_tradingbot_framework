@@ -92,6 +92,13 @@ class PortfolioManager:
         slip = self.execution_config.option_slippage_pct
         return ref_price * (1.0 + slip) if is_buy else ref_price * (1.0 - slip)
 
+    def _leg_fill(self, key: str, ref_price: float, *, is_buy: bool) -> float:
+        """Execution price of one structure leg: option quote side, or the stock cost model."""
+        if options.is_option_symbol(key):
+            return self._option_fill(key, ref_price, is_buy=is_buy)
+        cfg = self.execution_config
+        return cfg.buy_execution_price(ref_price) if is_buy else cfg.sell_execution_price(ref_price)
+
     def buy(
         self,
         symbol: str,
@@ -324,6 +331,22 @@ class PortfolioManager:
             if portfolio[symbol] <= 0.000001:
                 del portfolio[symbol]
 
+            # Shares under a short call (a covered call, a collar) are part of a
+            # structure: selling them would leave the call naked. The margin of
+            # the resulting book says whether they are still needed.
+            if not is_option and options.option_legs(portfolio, symbol):
+                required = options.margin_requirement(portfolio)
+                if portfolio["USD"] + 1e-6 < required:
+                    logger.warning(
+                        "Refused selling %s %s: it covers option legs (margin $%.2f > cash $%.2f); "
+                        "close the structure instead",
+                        quantity,
+                        symbol,
+                        required,
+                        portfolio["USD"],
+                    )
+                    return 0.0
+
             self.bot.portfolio = portfolio
             self.bot_repository.update_bot(self.bot, session=sess)
             self.bot_repository.log_trade(
@@ -372,15 +395,22 @@ class PortfolioManager:
             remaining -= part
         return proceeds
 
-    def roll_and_settle_options(self, roll_dte: int | None, target_dte: int, target_delta: float | None = None) -> None:
+    def roll_and_settle_options(
+        self,
+        roll_dte: int | None,
+        target_dte: int,
+        target_delta: float | None = None,
+        settlement: str = "cash",
+    ) -> None:
         """
         Keep option positions alive without the bot having to think about expiry.
 
-        - Contracts already past expiry (the bot did not run in time) are
-          cash-settled at intrinsic value off the underlying's close on the
-          expiry date, long and short alike. Real equity options settle into
-          shares; cash settlement at the same value is the deliberate
-          simplification.
+        - Contracts already past expiry are settled off the underlying's close on
+          the expiry date, long and short alike. settlement="cash" pays the
+          intrinsic value. settlement="physical" does what a broker does: an ITM
+          contract becomes shares at the strike (a short put is assigned 100
+          shares per contract, a short call delivers them), except any part that
+          would leave the book short stock, which is cash-settled instead.
         - Long contracts with <= roll_dte days left are sold and the proceeds
           rebought in a fresh contract on the same underlying and side (at
           target_delta if given), so "I hold an AAPL call" stays true across
@@ -396,7 +426,7 @@ class PortfolioManager:
         for key in options.option_legs(self.bot.portfolio):
             contract = options.parse_occ(key)
             if contract.expiry < today:
-                self._settle_expired(key, contract)
+                self._settle_expired(key, contract, physical=settlement == "physical")
         if roll_dte is None:
             return
 
@@ -421,10 +451,12 @@ class PortfolioManager:
                 # The sell already committed; the proceeds simply stay cash.
                 logger.warning("Rolled out of %s but could not roll into a new contract: %s", key, e)
 
-    def _settle_expired(self, key: str, contract: options.OptionContract) -> None:
-        settle_price = options.intrinsic_value(
-            contract, options.underlying_close_on(contract.underlying, contract.expiry)
-        )
+    def _settle_expired(self, key: str, contract: options.OptionContract, physical: bool = False) -> None:
+        close = options.underlying_close_on(contract.underlying, contract.expiry)
+        settle_price = options.intrinsic_value(contract, close)
+        if physical and settle_price > 0:
+            self._exercise_expired(key, contract)
+            return
         with get_db_session() as sess:
             self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
             qty = self.bot.portfolio.get(key, 0)
@@ -449,6 +481,70 @@ class PortfolioManager:
             )
         logger.info("SETTLED expired %s: %.0f units at %.4f -> $%.2f", key, qty, settle_price, proceeds)
 
+    def _exercise_expired(self, key: str, contract: options.OptionContract) -> None:
+        """
+        Physical settlement of an expired ITM leg: shares change hands at the
+        strike, and the contract leaves the book at price 0 (how a broker
+        records exercise and assignment). Calls move shares with the sign of
+        the position, puts against it. Any part that would make the share count
+        negative is cash-settled at intrinsic value instead.
+        """
+        close = options.underlying_close_on(contract.underlying, contract.expiry)
+        intrinsic = options.intrinsic_value(contract, close)
+        u = contract.underlying
+        with get_db_session() as sess:
+            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            qty = self.bot.portfolio.get(key, 0)
+            if abs(qty) < 1e-6:
+                return
+            portfolio = self.bot.portfolio.copy()
+            shares = float(portfolio.get(u, 0.0))
+            delta_shares = qty if contract.right == "C" else -qty
+            physical_shares = (
+                -shares if shares + delta_shares < -1e-6 else delta_shares
+            )  # deliver what is held, no more
+            cash_part = (delta_shares - physical_shares) / delta_shares * qty if delta_shares else 0.0
+            cash = -physical_shares * contract.strike + cash_part * intrinsic
+            portfolio["USD"] = portfolio.get("USD", 0) + cash
+            new_shares = shares + physical_shares
+            if abs(new_shares) < 1e-6:
+                portfolio.pop(u, None)
+            else:
+                portfolio[u] = new_shares
+            del portfolio[key]
+            self.bot.portfolio = portfolio
+            self.bot_repository.update_bot(self.bot, session=sess)
+            self.bot_repository.log_trade(
+                bot_name=self.bot_name,
+                symbol=key,
+                quantity=abs(qty),
+                price=0.0 if not cash_part else intrinsic * cash_part / qty,
+                is_buy=qty < 0,
+                profit=None,
+                session=sess,
+            )
+            if abs(physical_shares) > 1e-6:
+                self.bot_repository.log_trade(
+                    bot_name=self.bot_name,
+                    symbol=u,
+                    quantity=abs(physical_shares),
+                    price=contract.strike,
+                    is_buy=physical_shares > 0,
+                    profit=-physical_shares * contract.strike if physical_shares < 0 else None,
+                    session=sess,
+                )
+        logger.info(
+            "EXERCISED expired %s (%s %.0f): %+.0f %s shares at %.2f, cash %+.2f%s",
+            key,
+            "long" if qty > 0 else "short",
+            abs(qty),
+            physical_shares,
+            u,
+            contract.strike,
+            cash,
+            f" ({cash_part:.0f} units cash-settled: no shares to deliver)" if cash_part else "",
+        )
+
     # ------------------------------------------------------------------
     # Multi-leg options: spreads, condors, closing a whole book
     # ------------------------------------------------------------------
@@ -458,16 +554,19 @@ class PortfolioManager:
         Change several option positions in ONE locked transaction.
 
         Args:
-            legs: (OCC contract, signed share-equivalent change). +200 buys two
-                contracts (to open or to close a short), -200 sells two (to
-                close a long or to open a short). Whole contracts only.
+            legs: (symbol, signed share-equivalent change). For an OCC contract
+                +200 buys two contracts (to open or to close a short), -200
+                sells two (to close a long or to open a short); whole contracts
+                only. The underlying's own symbol trades shares — allowed only
+                when the trade or the book holds options on it (buy-writes,
+                collars, delta hedges), and the only way to go short stock.
 
         Returns:
             Net cash flow: positive for a credit, negative for a debit.
 
-        This is the only path that can make a holding negative. Each leg fills
-        at the ask when buying and the bid when selling (last price +/- option
-        slippage without a market). If the trade opens or grows any position,
+        This is the only path that can make a holding negative. Each option leg
+        fills at the ask when buying and the bid when selling (last price +/-
+        option slippage without a market); stock legs use the stock cost model. If the trade opens or grows any position,
         it is refused as a whole — nothing is written — when the cash left
         would not cover options.margin_requirement of the resulting book. That
         also refuses anything with unbounded risk, such as a naked short call.
@@ -476,10 +575,12 @@ class PortfolioManager:
         legs = [(k, float(q)) for k, q in legs if abs(q) > 1e-9]
         if not legs:
             return 0.0
+        traded_underlyings = {options.parse_occ(k).underlying for k, _ in legs if options.is_option_symbol(k)}
+        stock_keys = [k for k, _ in legs if not options.is_option_symbol(k)]
         for key, qty in legs:
-            if not options.is_option_symbol(key):
-                raise ValueError(f"trade_option_legs takes option contracts only, got {key!r}")
-            if options.whole_contract_qty(abs(qty)) != round(abs(qty)):
+            if key == "USD":
+                raise ValueError("trade_option_legs cannot trade USD")
+            if options.is_option_symbol(key) and options.whole_contract_qty(abs(qty)) != round(abs(qty)):
                 raise ValueError(f"{key}: {qty} is not a whole number of contracts")
         # Reference prices before the row lock: pricing may refetch a chain.
         refs = {key: self.data_service.get_latest_price(key) for key, _ in legs}
@@ -488,12 +589,16 @@ class PortfolioManager:
             self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
             cfg = self.execution_config
             portfolio = self.bot.portfolio.copy()
+            allowed = traded_underlyings | options.option_underlyings(portfolio)
+            naked = [k for k in stock_keys if k not in allowed]
+            if naked:
+                raise ValueError(f"trade_option_legs trades stock only beside options on it, got {naked}")
             cash = portfolio.get("USD", 0)
             fills = []
             grows = False
             for key, qty in legs:
                 is_buy = qty > 0
-                price = self._option_fill(key, refs[key], is_buy=is_buy)
+                price = self._leg_fill(key, refs[key], is_buy=is_buy)
                 notional = abs(qty) * price
                 flow = (-notional if is_buy else notional) - notional * cfg.commission_pct
                 old = portfolio.get(key, 0.0)
@@ -540,9 +645,10 @@ class PortfolioManager:
         """
         Open as many units of `pick` as `max_risk_usd` of worst-case loss allows.
 
-        One unit is one contract per leg (signs from the pick). Max loss per unit
-        is taken from the prices it would fill at (ask on the long legs, bid on
-        the short), so for a credit spread it is width - credit. Refuses when
+        One unit is one contract per option leg, 100 shares per stock leg (signs
+        from the pick). Max loss per unit is taken from the prices it would fill
+        at (ask on the long legs, bid on the short), so for a credit spread it
+        is width - credit, for a collar stock - put strike + net debit. Refuses when
         the chain was not live: off-hours last prices on different legs are from
         different moments, and a "credit" built from them is fiction.
 
@@ -554,9 +660,12 @@ class PortfolioManager:
             return 0
         unit_legs = []
         for key, unit in pick.legs:
-            c = options.parse_occ(key)
-            fill = self._option_fill(key, self.data_service.get_latest_price(key), is_buy=unit > 0)
-            unit_legs.append(om.Leg(c.right, c.strike, unit, fill))
+            fill = self._leg_fill(key, self.data_service.get_latest_price(key), is_buy=unit > 0)
+            if options.is_option_symbol(key):
+                c = options.parse_occ(key)
+                unit_legs.append(om.Leg(c.right, c.strike, unit, fill))
+            else:
+                unit_legs.append(om.stock_leg(unit, fill))
         per_unit = om.max_loss(unit_legs) * options.CONTRACT_MULTIPLIER
         if math.isinf(per_unit):
             raise ValueError(f"Refusing unbounded-risk structure {pick.legs}")
@@ -580,13 +689,67 @@ class PortfolioManager:
         logger.info("Opened %d x %s (max loss $%.2f each)", units, [k for k, _ in pick.legs], per_unit)
         return units
 
-    def close_options(self, underlying: str, session: Session | None = None) -> float:
-        """Flatten every option leg on `underlying`, long and short, in one transaction."""
+    def close_options(self, underlying: str, session: Session | None = None, include_stock: bool = False) -> float:
+        """
+        Flatten every option leg on `underlying`, long and short, in one
+        transaction. include_stock also flattens the shares held beside them
+        (the hedge of a straddle, the stock of a collar).
+        """
         self._refresh_bot(session)
         legs = options.option_legs(self.bot.portfolio, underlying)
+        shares = float(self.bot.portfolio.get(underlying, 0.0) or 0.0) if include_stock else 0.0
         if not legs:
-            return 0.0
+            return self._flatten_stock(underlying, shares, session) if abs(shares) > 1e-9 else 0.0
+        if abs(shares) > 1e-9:
+            legs = {**legs, underlying: shares}
         return self.trade_option_legs([(k, -q) for k, q in legs.items()], session=session)
+
+    def _flatten_stock(self, symbol: str, qty: float, session: Session | None) -> float:
+        """Shares left over once the options are gone: sell a long, buy back a short."""
+        if qty > 0:
+            return self.sell(symbol, session=session)
+        # A short with no options left cannot exist through trade_option_legs'
+        # margin check; this is the repair path if one ever does.
+        ref = self.data_service.get_latest_price(symbol)
+        price = self.execution_config.buy_execution_price(ref)
+
+        def _execute(sess: Session) -> float:
+            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            portfolio = self.bot.portfolio.copy()
+            cost = -qty * price * (1 + self.execution_config.commission_pct)
+            portfolio["USD"] = portfolio.get("USD", 0) - cost
+            portfolio.pop(symbol, None)
+            self.bot.portfolio = portfolio
+            self.bot_repository.update_bot(self.bot, session=sess)
+            self.bot_repository.log_trade(
+                bot_name=self.bot_name, symbol=symbol, quantity=-qty, price=price, is_buy=True, session=sess
+            )
+            return -cost
+
+        if session:
+            return _execute(session)
+        with get_db_session() as sess:
+            return _execute(sess)
+
+    def delta_hedge(self, underlying: str, band_usd: float) -> float:
+        """
+        Trade whole shares so the net delta of the options plus shares on
+        `underlying` returns to about zero, once its dollar value exceeds
+        `band_usd`. Returns the shares traded (signed). Gamma scalping is this,
+        run every day on a long straddle: it sells rallies and buys dips.
+        """
+        book = self.option_book(underlying)
+        if book.empty:
+            return 0.0
+        net = book.net_delta
+        if abs(net) * book.spot < band_usd:
+            return 0.0
+        shares = -float(round(net))
+        if shares == 0:
+            return 0.0
+        self.trade_option_legs([(underlying, shares)])
+        logger.info("Delta hedge %s: net delta %.1f shares -> traded %+.0f", underlying, net, shares)
+        return shares
 
     def option_book(self, underlying: str) -> options.OptionBook:
         """Positions, marks, entry value, P&L and net greeks of the options on `underlying`."""
@@ -595,7 +758,8 @@ class PortfolioManager:
         spot = self.data_service.get_latest_price(underlying)
         prices = {k: self.data_service.get_latest_price(k) for k in legs}
         entries = {k: options.entry_value(self.bot_name, k) for k in legs}
-        return options.build_book(underlying, legs, prices, spot, entries)
+        shares = float(self.bot.portfolio.get(underlying, 0.0) or 0.0)
+        return options.build_book(underlying, legs, prices, spot, entries, shares=shares)
 
     def total_value(self) -> float:
         """Cash plus every holding (short option legs negative) at the latest price."""
@@ -625,7 +789,7 @@ class PortfolioManager:
             # contracts absent from the target are sold like any other exit.
             raise ValueError(f"rebalancePortfolio cannot target option contracts {contracts}; use buy/sell(option=...)")
         self._refresh_bot()
-        shorts = [k for k, q in options.option_legs(self.bot.portfolio).items() if q < 0]
+        shorts = [k for k, q in self.bot.portfolio.items() if k != "USD" and q < -1e-9]
         if shorts:
             # A weight-based rebalance values and exits long holdings; a short leg
             # would be ignored in the total and "exited" via buy() of a raw
