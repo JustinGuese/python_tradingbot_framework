@@ -379,6 +379,14 @@ bots:
   # this is how a point-in-time history gets built. Nothing trades on it yet.
   schedule: "0 23 * * 1-5" # Daily 11:00 PM UTC Mon-Fri
 
+- name: optionchainsnapshot
+  # Not a bot: stores one live option-chain snapshot a day into option_quotes
+  # for SPY, QQQ and the 50 largest S&P 100 names (~9 expiries, strikes near
+  # the money; ~25-30k rows/day, ~1.5-2 GB/yr). yfinance serves no historical
+  # chains, so this is how an observed options history gets built. Must run
+  # while the market is open: 19:45 UTC is 15:45 EDT / 14:45 EST.
+  schedule: "45 19 * * 1-5"
+
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is

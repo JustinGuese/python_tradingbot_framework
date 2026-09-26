@@ -96,7 +96,7 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ telegram_messages │ Telegram channel messages + AI summaries + symbol │ TelegramSignalsBankBot │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
-│ option_quotes │ yfinance option-chain snapshots (bid/ask/IV/OI) │ any bot using option= │
+│ option_quotes │ yfinance option-chain snapshots (bid/ask/IV/OI/spot); daily capture of SPY, QQQ + top-50 S&P 100 from 2026-09-28 │ any bot using option=; future option backtests │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ stock_fundamentals │ Daily point-in-time P/E, EV/EBITDA, FCF yield, ownership (S&P 100, from 2026-09-25) │ none yet (utils/fundamentals.py) │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
@@ -543,6 +543,23 @@ class MyBot(Bot):
   would be a naked stock bet. The weight stays cash or goes to SHV.
 - **Backtests hold the underlying,** not the option. yfinance has no historical
   chains; `option_quotes` is the only history there will ever be.
+- **Daily capture builds that history.** The `optionchainsnapshot` CronJob
+  (19:45 UTC on weekdays, `utils/option_capture.py`) stores one live snapshot
+  a day for `universes.OPTION_CAPTURE_UNIVERSE`: SPY, QQQ and the 50 largest
+  S&P 100 names, frozen on 2026-09-26.
+  - Per name: the ~7–9 listed expiries nearest to 7, 14, 30, 45, 60, 90, 180,
+    365 and 540 days, with strikes within `moneyness_band(T)` of spot (±16% at
+    a week, ±25% at a month, ±60% at a year).
+  - About 35k rows a day, or ~2–2.5 GB a year. The node disk had 18 GB free
+    at launch.
+  - A closed market writes nothing and exits 0. Every row carries
+    `underlying_price`.
+  - To add names, append to the tuple. Never re-rank it: a name that drops
+    out would leave a gap in its history.
+- **New columns sync automatically.** `db._sync_missing_columns` runs in
+  `init_db` and adds any model column missing from an existing table, rendering
+  the DDL from the model. New columns must be nullable or carry a
+  `server_default`. `_migrate_schema` is only for what that cannot express.
 
 **Strike by delta, and short legs (defined risk only).** The bot still never
 names a contract:

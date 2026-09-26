@@ -48,6 +48,10 @@ DEFAULT_RISK_FREE_RATE = 0.04
 QUOTE_MAX_AGE = timedelta(minutes=15)
 
 
+class MarketClosedError(RuntimeError):
+    """A chain was fetched outside regular hours where a live one was required."""
+
+
 @dataclass(frozen=True)
 class OptionContract:
     underlying: str
@@ -142,13 +146,23 @@ def _num(value) -> float | None:
     return None if math.isnan(f) else f
 
 
-def fetch_option_chain(underlying: str, expiry: date, ticker: yf.Ticker | None = None) -> pd.DataFrame:
+def fetch_option_chain(
+    underlying: str,
+    expiry: date,
+    ticker: yf.Ticker | None = None,
+    moneyness: float | None = None,
+    require_live: bool = False,
+) -> pd.DataFrame:
     """
     Fetch one expiry's chain from yfinance, store it as a snapshot, return it.
 
     Columns: contract_symbol, option_type, strike, bid, ask, last_price, volume,
-    open_interest, implied_volatility; `attrs["spot"]` carries the underlying's
-    price when yfinance supplied one.
+    open_interest, implied_volatility, underlying_price; `attrs["spot"]` carries
+    the underlying's price when yfinance supplied one. With `moneyness`, only
+    strikes within spot x (1 +/- moneyness) are kept (and stored): the far
+    wings are most of a chain's rows and almost none of its information.
+    With `require_live`, an off-hours chain raises MarketClosedError and
+    nothing is stored.
     """
     ticker = ticker or yf.Ticker(underlying)
     chain = ticker.option_chain(expiry.isoformat())
@@ -159,6 +173,12 @@ def fetch_option_chain(underlying: str, expiry: date, ticker: yf.Ticker | None =
     if not frames:
         raise ValueError(f"Empty option chain for {underlying} {expiry}")
     raw = pd.concat(frames, ignore_index=True)
+    spot = _num((chain.underlying or {}).get("regularMarketPrice"))
+    if moneyness is not None and spot:
+        strikes = raw["strike"].astype(float)
+        raw = raw[(strikes >= spot * (1 - moneyness)) & (strikes <= spot * (1 + moneyness))]
+        if raw.empty:
+            raise ValueError(f"No {underlying} {expiry} strikes within {moneyness:.0%} of {spot}")
 
     # Outside regular hours yfinance zeroes bid/ask on almost the whole chain but
     # leaves a few stale remnants (seen: SPY pre-market, 7 of 235 calls quoted,
@@ -166,6 +186,8 @@ def fetch_option_chain(underlying: str, expiry: date, ticker: yf.Ticker | None =
     # far from the money and fill at a dead price, so bid/ask are only recorded
     # from a live session; otherwise NULL, and pricing falls back to last trade.
     live = (chain.underlying or {}).get("marketState", "REGULAR") == "REGULAR"
+    if require_live and not live:
+        raise MarketClosedError(f"{underlying} marketState {(chain.underlying or {}).get('marketState')}")
     snapshot_at = datetime.now(UTC).replace(tzinfo=None)
     rows = [
         {
@@ -180,6 +202,7 @@ def fetch_option_chain(underlying: str, expiry: date, ticker: yf.Ticker | None =
             "volume": _num(r.get("volume")),
             "open_interest": _num(r.get("openInterest")),
             "implied_volatility": _num(r.get("impliedVolatility")),
+            "underlying_price": spot,
             "snapshot_at": snapshot_at,
         }
         for _, r in raw.iterrows()
@@ -190,7 +213,6 @@ def fetch_option_chain(underlying: str, expiry: date, ticker: yf.Ticker | None =
         session.add_all([OptionQuote(**row) for row in rows])
 
     out = pd.DataFrame(rows).drop(columns=["underlying", "expiration", "snapshot_at"])
-    spot = _num((chain.underlying or {}).get("regularMarketPrice"))
     out.attrs["spot"] = spot
     out.attrs["live"] = live
     return out

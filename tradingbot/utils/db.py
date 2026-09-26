@@ -19,8 +19,10 @@ from sqlalchemy import (
     create_engine,
     text,
 )
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.schema import CreateColumn
 
 logger = logging.getLogger(__name__)
 
@@ -317,9 +319,10 @@ class OptionQuote(Base):
     """
     One row per option contract per chain snapshot, from yfinance option_chain().
 
-    Written only when a bot trades or values an option (see utils/options.py),
-    never on a schedule. yfinance serves no historical chains, so this table is
-    also the only history an options backtest could ever be built from.
+    Written when a bot trades or values an option (see utils/options.py), and
+    once a day for the option-capture universe by the optionchainsnapshot
+    CronJob (utils/option_capture.py). yfinance serves no historical chains, so
+    this table is the only history an options backtest could ever be built from.
 
     Attributes:
         underlying: Underlying ticker, e.g. "AAPL"
@@ -328,14 +331,16 @@ class OptionQuote(Base):
         option_type: "C" or "P"
         strike: Strike price
         bid / ask / last_price: Per-SHARE premium (one contract = 100 shares)
+        underlying_price: The underlying's price in the same fetch (NULL on rows
+            stored before 2026-09-26): what moneyness and IV are measured from
         snapshot_at: When the chain was fetched; all rows of one fetch share it
     """
 
     __tablename__ = "option_quotes"
-    __table_args__ = (
-        UniqueConstraint("contract_symbol", "snapshot_at", name="uq_option_quotes_contract_snapshot"),
-        Index("ix_option_quotes_contract_snapshot", "contract_symbol", "snapshot_at"),
-    )
+    # The unique constraint is already an index on (contract_symbol,
+    # snapshot_at); a second identical index only doubled the write cost and
+    # disk of the largest-growing table (dropped in _migrate_schema).
+    __table_args__ = (UniqueConstraint("contract_symbol", "snapshot_at", name="uq_option_quotes_contract_snapshot"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     underlying: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -349,6 +354,7 @@ class OptionQuote(Base):
     volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
     implied_volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
+    underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
@@ -555,6 +561,8 @@ def _migrate_schema() -> None:
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio FLOAT"))
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS win_rate FLOAT"))
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS volatility FLOAT"))
+        # Duplicate of uq_option_quotes_contract_snapshot's own index (see OptionQuote).
+        conn.execute(text("DROP INDEX IF EXISTS ix_option_quotes_contract_snapshot"))
 
         # historic_data.interval: add the column, infer it for pre-existing rows,
         # and widen the primary key. Guarded on the PK still being the 2-column
@@ -601,6 +609,35 @@ def _migrate_schema() -> None:
         conn.commit()
 
 
+def _sync_missing_columns(bind) -> list[str]:
+    """
+    Add every model column missing from an existing table, rendered by the
+    dialect's DDL compiler from the model itself. create_all() only creates
+    missing TABLES; with this, a new nullable column (or one with a
+    server_default) syncs on boot without a hand-written ALTER TABLE. Returns
+    the "table.column" names added; failures are logged, not raised.
+    """
+    inspector = sa_inspect(bind)
+    existing = set(inspector.get_table_names())
+    added = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing:
+            continue  # a new table: create_all made it complete
+        present = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
+                continue
+            ddl = CreateColumn(column).compile(dialect=bind.dialect)
+            try:
+                with bind.begin() as conn:
+                    conn.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN {ddl}')
+                added.append(f"{table.name}.{column.name}")
+                logger.info("schema sync: added %s.%s", table.name, column.name)
+            except Exception as exc:
+                logger.error("schema sync: adding %s.%s failed: %s", table.name, column.name, exc)
+    return added
+
+
 _schema_initialized = False
 
 
@@ -623,6 +660,7 @@ def init_db(force: bool = False) -> None:
         return
     Base.metadata.create_all(engine)
     _migrate_schema()
+    _sync_missing_columns(engine)
     # Set only on success, so a failed first attempt (e.g. Postgres not up yet)
     # does not mark the schema done and let the next call skip it silently.
     _schema_initialized = True
