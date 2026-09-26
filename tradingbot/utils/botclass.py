@@ -623,9 +623,10 @@ class Bot:
         dte: int = 35,
         max_risk_usd: float | None = None,
         view: options.ChainView | None = None,
+        call_delta: float | None = None,
     ) -> int:
-        """Sell a put spread and a call spread on one expiry. Returns the number opened."""
-        pick = options.select_iron_condor(underlying, short_delta, width, dte, view=view)
+        """Sell a put spread and a call spread on one expiry (calls at call_delta if given). Returns the number opened."""
+        pick = options.select_iron_condor(underlying, short_delta, width, dte, view=view, call_delta=call_delta)
         return self.open_structure(pick, max_risk_usd)
 
     def open_structure(self, pick: options.StructurePick, max_risk_usd: float | None = None) -> int:

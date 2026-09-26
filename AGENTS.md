@@ -240,6 +240,8 @@ Existing Strategies (don't duplicate)
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ option_CollarBot       │ AAPL + opts  │ Shares + 25-delta put / 25-delta call collar   │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_IndexVolBot     │ SPY options  │ 10-delta condor, 10% wings, when IV >= HAR + 3 │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
@@ -658,13 +660,15 @@ Other helpers:
   options;
 - `fit_smile` and `smile_z`.
 
-**The option bots** (all AAPL, paper, all scheduled at 15:00–15:40 UTC):
+**The option bots** (paper, all scheduled at 15:00–15:45 UTC):
 - `option_LeapCallBot`, `option_CreditSpreadBot`, `option_IronCondorBot`,
   `option_CatalystCallBot`.
 - Round 2: `option_MispricingBot`, `option_WheelBot`, `option_PMCCBot`,
   `option_EarningsCalendarBot`, `option_CollarBot`.
+- All of those trade AAPL. `option_IndexVolBot` trades SPY.
 - Their rules are pure functions in `utils/option_rules.py`, shared with
-  `scripts/onetime_option_bots_backtest.py`.
+  `scripts/onetime_option_bots_backtest.py` (and
+  `scripts/onetime_index_vol_backtest.py` for the index bot).
 - File and Helm names are `option_<x>bot`. The CronJob template turns `_` into
   `-`, because Kubernetes names forbid underscores.
 - Synthetic backtest (Black-Scholes on a ^VXN-based IV proxy with AAPL skew),
@@ -674,8 +678,8 @@ Other helpers:
     that is mostly AAPL picked with hindsight.
   - **Iron condor:** re-tuned to $35 wings, 60 DTE. It went from t −2.42 to
     about 0 (break-even).
-  - **Credit spread:** no variant survives out of sample, so it is recommended
-    for pausing.
+  - **Credit spread:** no variant survives out of sample. Paused
+    (`suspend: true`) on 2026-09-26.
   - **Catalyst:** untuned (10 trades).
   - Details are in `docs/backtests/option-bots-2026-09.md`.
 - Round 2, walk-forward on 2026-09-26 (`docs/backtests/option-bots-round2-2026-09.md`):
@@ -693,6 +697,18 @@ Other helpers:
     earnings IV.
   - **Not built, with reasons given in the doc:** 0DTE SPX, box spreads,
     dispersion, tail hedges, naked strangles, long straddles into earnings.
+- Index vol, walk-forward on 2026-09-26 (`docs/backtests/index-vol-2026-09.md`):
+  - **`option_IndexVolBot`** sells SPY iron condors, but only while ATM IV is
+    at least 3 points above a HAR forecast of SPY's vol.
+  - Its backtest implied vol is observed rather than proxied: ^VIX × 0.85,
+    with put and call skew calibrated on the live chain. It covers 2000–2026.
+  - Result: +2%/yr alpha, t 4.28, beta 0.01, max DD −6.4%, positive in both
+    halves.
+  - It holds at double costs, on QQQ and with half the skew.
+  - It is the first option bot with uncorrelated alpha, though the alpha is
+    small.
+  - The single best parameter set from the first half failed out of sample;
+    the consensus of the first half's top 10 ships instead.
 
 ### Reading another bot's state
 

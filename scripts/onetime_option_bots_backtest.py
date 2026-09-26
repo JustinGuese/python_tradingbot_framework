@@ -211,9 +211,16 @@ def fair_vol_series(m: pd.DataFrame, earnings: list[date], expiries: list[date],
 @dataclass(frozen=True)
 class Model:
     skew: float = 0.15
+    call_skew: float = 0.0  # index calls sit below ATM vol; 0 = flat above the money (AAPL)
 
     def vol(self, atm: float, S: float, K: float, T: float) -> float:
-        if K >= S or T <= 0 or self.skew <= 0:
+        if T <= 0:
+            return atm
+        if K >= S:
+            if self.call_skew <= 0:
+                return atm
+            return atm * max(1.0 - self.call_skew * math.log(K / S) / (atm * math.sqrt(T)), 0.5)
+        if self.skew <= 0:
             return atm
         z = math.log(K / S) / (atm * math.sqrt(T))
         return atm * min(1.0 - self.skew * z, 2.5)

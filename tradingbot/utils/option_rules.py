@@ -611,3 +611,46 @@ def calendar_exit_reason(
     if dte is not None and dte <= 2:
         return f"front expiry in {dte} days"
     return None
+
+
+# ------------------------------------------------------------------
+# Index volatility: iron condors on SPY when implied beats forecast vol
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IndexVolRules:
+    """
+    Defaults are the textbook index condor (16-delta shorts, 45 DTE, out at
+    half the credit or 21 DTE), chosen a priori; tuned values ship only if
+    they beat these out of sample.
+    """
+
+    target_dte: int = 45
+    put_delta: float = 0.16
+    call_delta: float = 0.16
+    width_pct: float = 0.05  # each wing, as a share of spot
+    # ATM IV - HAR fair vol that must be on offer before selling; None sells
+    # whatever the gap. The index variance premium is usually positive, so 0
+    # skips only the days implied vol is below the forecast.
+    min_gap: float | None = 0.0
+    max_vix: float = 40.0  # no new short vol into a panic
+    max_risk_pct: float = 0.20  # worst-case loss per condor, share of the book
+    take_profit: float = 0.50
+    stop_loss: float = 2.0
+    exit_dte: int = 21
+
+
+def index_vol_entry_ok(iv: float | None, fair: float | None, vix: float | None, rules: IndexVolRules) -> bool:
+    if iv is None or fair is None or math.isnan(iv) or math.isnan(fair):
+        return False
+    if vix is not None and vix >= rules.max_vix:
+        return False
+    return rules.min_gap is None or iv - fair >= rules.min_gap
+
+
+def index_vol_exit_reason(credit: float, pnl: float, dte: int | None, rules: IndexVolRules) -> str | None:
+    reason = short_premium_exit_reason(credit, pnl, dte, rules.take_profit, rules.exit_dte)
+    if reason is None and credit > 0 and -pnl >= rules.stop_loss * credit:
+        reason = f"stop loss: {pnl:.2f} <= -{rules.stop_loss:g}x credit {credit:.2f}"
+    return reason

@@ -644,10 +644,11 @@ def select_iron_condor(
     spot: float | None = None,
     today: date | None = None,
     view: ChainView | None = None,
+    call_delta: float | None = None,
 ) -> StructurePick:
-    """A bull put spread and a bear call spread on the same expiry."""
+    """A bull put spread and a bear call spread on the same expiry (call side at call_delta if given)."""
     view = view or load_chain(underlying, target_dte, spot=spot, today=today)
-    legs = _vertical(view, "P", short_delta, width) + _vertical(view, "C", short_delta, width)
+    legs = _vertical(view, "P", short_delta, width) + _vertical(view, "C", call_delta or short_delta, width)
     return StructurePick(underlying, view.expiry, tuple(legs), view.live, view.spot)
 
 

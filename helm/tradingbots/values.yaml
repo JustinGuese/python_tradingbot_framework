@@ -329,19 +329,23 @@ bots:
   # docs/backtests/taregimemultiassetbot.md.
   schedule: "10 21 * * 1-5" # Daily 9:10 PM UTC Mon-Fri
 
-# Paper option strategies on AAPL (utils/options.py, utils/option_rules.py). The
+# Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours
 # yfinance zeroes bid/ask and the framework refuses to open. 15:00 UTC is 11:00
 # EDT / 10:00 EST. Each starts with $100k paper (INITIAL_CAPITAL), so whole-contract
 # sizing works. The live copier drops option holdings and the shares that belong
 # to an option structure, so none of it can reach a broker.
-# See docs/backtests/option-bots-2026-09.md and option-bots-round2-2026-09.md.
+# See docs/backtests/option-bots-2026-09.md, option-bots-round2-2026-09.md and index-vol-2026-09.md.
 - name: option_leapcallbot
   schedule: "0 15 * * 1-5" # 60-delta ~1.5y LEAP call while AAPL > SMA200, trimmed at 1.5x
 
 - name: option_creditspreadbot
   schedule: "5 15 * * 1-5" # bull put / bear call spread when IV/HV is rich
+  # Paused 2026-09-26 (flat, all cash): of 320 walk-forward variants none
+  # survived out of sample; the best lost at t -1.50. option_indexvolbot sells
+  # premium on SPY instead. See docs/backtests/option-bots-2026-09.md.
+  suspend: true
 
 - name: option_ironcondorbot
   schedule: "10 15 * * 1-5" # 20-delta iron condor, $35 wings, 60 DTE, range-bound + rich IV
@@ -356,13 +360,16 @@ bots:
   schedule: "25 15 * * 1-5" # cash-secured 30-delta puts, assigned shares get covered calls
 
 - name: option_pmccbot
-  schedule: "30 15 * * 1-5" # 80-delta LEAP + monthly 30-delta short calls (poor man's covered call)
+  schedule: "30 15 * * 1-5" # 70-delta LEAP + monthly 30-delta short calls (poor man's covered call)
 
 - name: option_earningscalendarbot
   schedule: "35 15 * * 1-5" # ATM call calendar into earnings when front IV is rich; live-only
 
 - name: option_collarbot
   schedule: "40 15 * * 1-5" # AAPL shares + 25-delta put / 25-delta call collar
+
+- name: option_indexvolbot
+  schedule: "45 15 * * 1-5" # SPY 10-delta iron condor, 10% wings, 35 DTE, only when ATM IV >= HAR fair + 3 pts
 
 - name: institutionalflowbot
   # Weekly top-20 of the S&P 100 passing institutional mandate filters
@@ -382,7 +389,7 @@ bots:
 - name: optionchainsnapshot
   # Not a bot: stores one live option-chain snapshot a day into option_quotes
   # for SPY, QQQ and the 50 largest S&P 100 names (~9 expiries, strikes near
-  # the money; ~25-30k rows/day, ~1.5-2 GB/yr). yfinance serves no historical
+  # the money; ~35k rows/day, ~2-2.5 GB/yr). yfinance serves no historical
   # chains, so this is how an observed options history gets built. Must run
   # while the market is open: 19:45 UTC is 15:45 EDT / 14:45 EST.
   schedule: "45 19 * * 1-5"

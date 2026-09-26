@@ -19,6 +19,7 @@ from tradingbot.option_catalystcallbot import OptionCatalystCallBot
 from tradingbot.option_collarbot import OptionCollarBot
 from tradingbot.option_creditspreadbot import OptionCreditSpreadBot
 from tradingbot.option_earningscalendarbot import OptionEarningsCalendarBot
+from tradingbot.option_indexvolbot import OptionIndexVolBot
 from tradingbot.option_ironcondorbot import OptionIronCondorBot
 from tradingbot.option_leapcallbot import OptionLeapCallBot
 from tradingbot.option_mispricingbot import OptionMispricingBot
@@ -162,6 +163,13 @@ def test_select_vertical_put_spread(sqlite_db, chain):
     short_k = _nearest_delta_strike(E40, "P", 0.30)
     assert pick.expiry == E40 and pick.live
     assert pick.legs == ((occ(E40, "P", short_k), -1), (occ(E40, "P", short_k - 10), 1))
+
+
+def test_select_iron_condor_with_its_own_call_delta(sqlite_db, chain):
+    pick = options.select_iron_condor("AAPL", short_delta=0.16, width=10, target_dte=35, call_delta=0.10)
+    kc = _nearest_delta_strike(E40, "C", 0.10)
+    assert pick.legs[2:] == ((occ(E40, "C", kc), -1), (occ(E40, "C", kc + 10), 1))
+    assert kc > _nearest_delta_strike(E40, "C", 0.16)
 
 
 def test_select_iron_condor(sqlite_db, chain):
@@ -845,3 +853,59 @@ def test_earnings_calendar_bot(sqlite_db, db_session, chain, mocker):
     assert bot.option_book("AAPL").entry_value <= 0.05 * 100_000
     mocker.patch.object(options.OptionBook, "pnl_pct", new_callable=mocker.PropertyMock, return_value=0.3)
     assert bot.makeOneIteration() == -1
+
+
+# ------------------------------------------------------------------
+# Index vol: SPY condors when implied beats forecast vol
+# ------------------------------------------------------------------
+
+
+def test_index_vol_rules():
+    r = rules_mod.IndexVolRules(min_gap=0.03)
+    assert rules_mod.index_vol_entry_ok(0.20, 0.16, 18.0, r)
+    assert not rules_mod.index_vol_entry_ok(0.18, 0.16, 18.0, r)  # 2 pts: not enough premium
+    assert not rules_mod.index_vol_entry_ok(0.50, 0.30, 45.0, r)  # panic tape
+    assert not rules_mod.index_vol_entry_ok(None, 0.16, 18.0, r)
+    assert rules_mod.index_vol_entry_ok(0.10, 0.16, 18.0, rules_mod.IndexVolRules(min_gap=None))
+    assert rules_mod.index_vol_exit_reason(100, 50, 30, r).startswith("take profit")
+    assert rules_mod.index_vol_exit_reason(100, -200, 30, r).startswith("stop")
+    assert rules_mod.index_vol_exit_reason(100, 0, 21, r) == "21 DTE <= 21"
+    assert rules_mod.index_vol_exit_reason(100, 10, 30, r) is None
+
+
+def _make_index_bot(mocker, data):
+    # The fake chain lists AAPL contracts; the rules do not care which index it is.
+    mocker.patch("tradingbot.option_indexvolbot.UNDERLYING", "AAPL")
+    return _make_vol_bot(OptionIndexVolBot, mocker, data)
+
+
+def test_index_vol_bot_sells_a_wide_condor_when_iv_beats_the_forecast(sqlite_db, db_session, chain, mocker):
+    bot = _make_index_bot(mocker, _series(RICH_IV))  # IV 25% vs HAR ~13%
+    assert bot.makeOneIteration() == 1
+    rules = OptionIndexVolBot.RULES
+    legs = options.option_legs(_portfolio(db_session, "option_IndexVolBot"))
+    assert len(legs) == 4 and sum(legs.values()) == 0
+    shorts = {options.parse_occ(k).right: options.parse_occ(k).strike for k, q in legs.items() if q < 0}
+    assert shorts == {r: _nearest_delta_strike(E40, r, d) for r, d in (("P", rules.put_delta), ("C", rules.call_delta))}
+    # Wings reach toward width_pct of spot, stopping at the last strike with a quote.
+    wings = sorted(options.parse_occ(k).strike for k, q in legs.items() if q > 0)
+    assert shorts["P"] - rules.width_pct * S <= wings[0] < shorts["P"]
+    assert shorts["C"] < wings[1] <= shorts["C"] + rules.width_pct * S
+    assert bot.option_book("AAPL").max_loss <= rules.max_risk_pct * 100_000
+    assert bot.makeOneIteration() == 0  # holding
+    mocker.patch.object(options.OptionBook, "pnl", new_callable=mocker.PropertyMock, return_value=1e6)
+    assert bot.makeOneIteration() == -1
+    assert set(_portfolio(db_session, "option_IndexVolBot")) == {"USD"}
+
+
+def test_index_vol_bot_waits_when_iv_is_below_the_forecast(sqlite_db, db_session, chain, mocker):
+    bot = _make_index_bot(mocker, _series(WILD))  # IV 25% vs HAR ~48%
+    assert bot.makeOneIteration() == 0
+    assert _portfolio(db_session, "option_IndexVolBot") == {"USD": 100_000.0}
+
+
+def test_index_vol_bot_does_not_open_off_hours(sqlite_db, db_session, chain, mocker):
+    chain.market_state = "CLOSED"
+    bot = _make_index_bot(mocker, _series(RICH_IV))
+    assert bot.makeOneIteration() == 0
+    assert _portfolio(db_session, "option_IndexVolBot") == {"USD": 100_000.0}
