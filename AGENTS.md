@@ -115,7 +115,10 @@ Data Available
 │ corporate_event_refresh │ When each symbol's earnings/dividends were last refreshed; readers trust the tables only within 3 days │ utils/corporate_events.py │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ bot_alpha_report │ Weekly alpha / t / beta / corr / max DD vs Benchmark_QQQ per live bot, with a verdict │ review (alphareport CronJob, utils/alpha_report.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ prediction_market_snapshots │ Daily Kalshi / Polymarket prices of curated macro contracts (Fed path + decisions, CPI, payrolls, U3, GDP, recession, shutdown), Kalshi from 2021-07 │ PredictionMarketOverlayBot, not scheduled (utils/prediction_market_features.py) │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
+
 
 4. AI — via OpenRouter
 
@@ -133,6 +136,20 @@ Data Available
 6. Tradeable Universe — tradingbot.utils.config.TRADEABLE
 
 - Pre-defined list of liquid ETFs/stocks suitable for the portfolio rebalancing bots
+
+7. Prediction markets — utils/prediction_market_features.py
+
+- `feature_frame(bar_dates)` → point-in-time daily features: `recession_prob`, `fed_next_bps`,
+  `fed_path_bps` (expected change of the fed funds upper bound by ~6 months out),
+  `fed_cut_next_prob`, `shutdown_prob`, `cpi_next_mean/std`, plus Polymarket cross-checks.
+- Bar D only sees prices covering day D-1 or earlier (a day's price is observed after its close).
+- Series are hand-curated in utils/prediction_market_series.py; never auto-discover markets.
+  Kalshi's "recession in 2026" means two negative GDP quarters in 2025 *or* 2026.
+- API quirks (verified 2026-09-28): Kalshi markets settled before `/historical/cutoff` live
+  only under `/historical/...`, whose candles use bare keys (`price.close`) instead of the live
+  tier's `close_dollars` / `volume_fp`; legacy tickers (`FED-22DEC-T4.75`) carry their strike
+  only in the suffix. Polymarket `prices-history` with `interval=max&fidelity=1440` returns the
+  whole daily history in one call (passing both `startTs` and `endTs` caps the window at 15 days).
 
 ---
 
@@ -272,6 +289,8 @@ Existing Strategies (don't duplicate)
 │ option_DispersionBot   │ SPY + top 10 │ Short SPY fly vs member straddles, rich corr   │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ PredictionMarketOverlayBot │ SPY/QQQ/IEF/GLD │ NOT SCHEDULED: equity sleeve cut by Kalshi recession odds / hawkish Fed-path repricing; lost to an SMA200 ablation out of sample │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
 ---

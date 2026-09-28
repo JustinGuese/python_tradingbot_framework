@@ -272,6 +272,45 @@ class MacroEvent(Base):
 
 **Unique constraint**: `(kind, event_date)`.
 
+## PredictionMarketSnapshot Model
+
+One daily price per prediction-market contract, for the hand-curated Kalshi
+and Polymarket macro series in `tradingbot/utils/prediction_market_series.py`
+(Fed path and decisions, CPI, payrolls, U3, GDP, recession, shutdown). Filled
+daily by `tradingbot/predictionmarketsnapshot.py`; `--backfill` pulls each
+market's full history (Kalshi from 2021-07, Polymarket from 2023-09).
+`tradingbot/utils/prediction_market_features.py` turns the rows into
+point-in-time features.
+
+```python
+class PredictionMarketSnapshot(Base):
+    id: int  # Auto-increment primary key
+    date: date  # US/Eastern day the price covers
+    observed_at: datetime  # when it was observed (Kalshi: midnight ET after `date`)
+    venue: str  # "kalshi" / "polymarket"
+    series: str  # curated key, e.g. "fed_rate", "recession"
+    event_ticker: str  # Kalshi event, or Polymarket event slug
+    market_ticker: str  # Kalshi market ticker, or Polymarket market slug
+    label: str  # outcome name of an event contract
+    contract_type: str  # close_above / close_below / range / touch / event
+    strike: float  # threshold (close_above/close_below) or range floor
+    strike_cap: float  # range cap
+    expiry: datetime  # contract close, naive UTC
+    prob: float  # yes price 0..1 (last trade, else bid/ask mid)
+    bid: float
+    ask: float
+    volume: float  # contracts traded that day
+    open_interest: float
+    result: str  # "yes" / "no" once settled
+    captured_at: datetime
+```
+
+**Unique constraint**: `(venue, market_ticker, date)`. **Index**: `(series, date)`.
+
+**Look-ahead:** a price for day D is observed after D's 16:00 ET close, so a
+daily bar D may only use rows with `date <= D - 1`. `as_of_bars` applies that
+shift.
+
 ## VolSurfaceSnapshot Model
 
 One row per underlying per day: the day's `OptionQuote` capture condensed

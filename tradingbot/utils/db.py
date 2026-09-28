@@ -500,6 +500,48 @@ class MacroEvent(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class PredictionMarketSnapshot(Base):
+    """
+    One daily price of one prediction-market contract (Kalshi or Polymarket).
+
+    `date` is the US/Eastern day the price covers; `observed_at` is when it was
+    observed (a Kalshi daily candle's end, midnight ET after `date`). A backtest
+    may only use a row on a bar that closes after `observed_at`: a candle that
+    covers day D ends after D's 16:00 close, so D's bar must not see it. See
+    utils/prediction_market_features.py.
+
+    Filled daily by tradingbot/predictionmarketsnapshot.py for the curated
+    series in utils/prediction_market_series.py; `--backfill` pulls history.
+    """
+
+    __tablename__ = "prediction_market_snapshots"
+    __table_args__ = (
+        UniqueConstraint("venue", "market_ticker", "date", name="uq_prediction_market_snapshots_market_date"),
+        Index("ix_prediction_market_snapshots_series_date", "series", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # naive UTC
+    venue: Mapped[str] = mapped_column(String, nullable=False)  # kalshi / polymarket
+    series: Mapped[str] = mapped_column(String, nullable=False)  # curated key, e.g. fed_rate
+    event_ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    market_ticker: Mapped[str] = mapped_column(String, nullable=False)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)  # outcome name of an event contract
+    # close_above / close_below / range / touch / event
+    contract_type: Mapped[str] = mapped_column(String, nullable=False)
+    strike: Mapped[float | None] = mapped_column(Float, nullable=True)
+    strike_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expiry: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # naive UTC close time
+    prob: Mapped[float | None] = mapped_column(Float, nullable=True)  # yes price, 0..1
+    bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+    result: Mapped[str | None] = mapped_column(String, nullable=True)  # yes / no once settled
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class VolSurfaceSnapshot(Base):
     """
     One row per underlying per day: the option_quotes chain condensed into the

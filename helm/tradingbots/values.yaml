@@ -445,6 +445,15 @@ bots:
   # FRED_API_KEY) into macro_events, past and scheduled. Exits 1 without the key.
   schedule: "0 6 * * 1"
 
+- name: predictionmarketsnapshot
+  # Not a bot: daily prices of the curated Kalshi / Polymarket macro contracts
+  # (Fed path and decisions, CPI, payrolls, U3, GDP, recession, shutdown) into
+  # prediction_market_snapshots; utils/prediction_market_features.py turns them
+  # into point-in-time features. Public read APIs, no key. 05:30 UTC is after
+  # midnight Eastern year-round, so yesterday's Kalshi candle is complete.
+  # Exits 1 on an all-null series (a renamed API field) or an empty run.
+  schedule: "30 5 * * *"
+
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is
@@ -455,6 +464,11 @@ bots:
 #   * shortvolcarrybot    +0.02% -> +0.80% CAGR post-2018 (Sharpe 0.14). The
 #     rules are now sound and February 2018 costs −9.1%, but the premium is gone
 #     from the −0.5x instrument: unhedged, the short leg's return is negative.
+#   * predictionmarketoverlaybot  SPY/QQQ/IEF/GLD with the equity sleeve cut by
+#     Kalshi recession odds / hawkish Fed-path repricing. Walk-forward 2024-26:
+#     alpha +3.9%/yr at t 1.03 (beta 0.38) — below the t >= 2 bar AND below the
+#     plain QQQ<SMA200 ablation (+6.7%, t 1.41), so the prediction-market signal
+#     adds nothing a moving average doesn't. docs/backtests/prediction-markets-2026-09.md.
 # The measured negative results are the useful part — read
 # docs/backtests/multiassetcarrybot.md and docs/backtests/shortvolcarrybot.md
 # before rebuilding either idea. Adding a `- name:` block here is all it takes to
