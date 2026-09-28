@@ -100,6 +100,9 @@ Args: root.
                 secretKeyRef:
                   name: {{ $.Values.secretName }}
                   key: {{ .valueFrom.secretKeyRef.key }}
+                  {{- if .valueFrom.secretKeyRef.optional }}
+                  optional: true
+                  {{- end }}
             {{- end }}
             {{- end }}
             {{- end }}

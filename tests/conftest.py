@@ -34,6 +34,11 @@ _SESSION_CONSUMERS = (
     "tradingbot.utils.bot_repository",
     "tradingbot.utils.options",
     "tradingbot.utils.fundamentals",
+    "tradingbot.utils.macro_calendar",
+    "tradingbot.utils.vol_surface",
+    "tradingbot.utils.option_risk",
+    "tradingbot.utils.mispricing_scan",
+    "tradingbot.utils.option_replay",
 )
 
 

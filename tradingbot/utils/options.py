@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -337,6 +338,74 @@ def dividend_yield(underlying: str) -> float:
     return value / 100.0 if value > 0.2 else value
 
 
+def business_days_between(start: date, end: date) -> int:
+    """Weekdays from start (inclusive) to end (exclusive): 0 = same day, 1 = next session."""
+    return int(np.busday_count(start, end))
+
+
+@lru_cache(maxsize=64)
+def _dividend_info(underlying: str) -> tuple[date | None, float]:
+    """(next ex-dividend date from yfinance's calendar, last dividend paid per share)."""
+    ticker = yf.Ticker(underlying)
+    ex_date = None
+    try:
+        raw = (ticker.calendar or {}).get("Ex-Dividend Date")
+        if raw is not None:
+            ex_date = pd.Timestamp(raw).date()
+    except Exception as e:
+        logger.warning("No ex-dividend date for %s: %s", underlying, e)
+    amount = 0.0
+    try:
+        divs = ticker.dividends
+        if divs is not None and len(divs):
+            amount = float(divs.iloc[-1])
+    except Exception as e:
+        logger.warning("No dividend history for %s: %s", underlying, e)
+    return ex_date, amount
+
+
+def next_dividend(underlying: str, today: date | None = None) -> tuple[date, float] | None:
+    """
+    (ex-dividend date, amount per share) of the next dividend on or after today,
+    or None when there is none or it is unknown. The amount is the last one paid:
+    companies rarely change it between announcements.
+    """
+    today = today or utc_today()
+    ex_date, amount = _dividend_info(underlying)
+    if ex_date is None or ex_date < today or amount <= 0:
+        return None
+    return ex_date, amount
+
+
+def earnings_events(underlying: str, limit: int = 40) -> list[tuple[date, bool | None]]:
+    """
+    (report date, after_close) for past and scheduled reports, oldest first,
+    from yfinance's earnings-date timestamps (New York time): a report stamped
+    at 12:00 or later is after the close, earlier is before the open, and a
+    bare midnight stamp is unknown (None). Empty when yfinance has nothing.
+    """
+    try:
+        df = yf.Ticker(underlying).get_earnings_dates(limit=limit)
+    except Exception as e:
+        logger.warning("Earnings dates for %s from yfinance failed: %s", underlying, e)
+        return []
+    if df is None or not len(df):
+        return []
+    out: dict[date, bool | None] = {}
+    for ts in pd.to_datetime(df.index):
+        local = ts.tz_convert("America/New_York") if ts.tzinfo is not None else ts
+        known = local.hour != 0 or local.minute != 0
+        out[local.date()] = (local.hour >= 12) if known else None
+    return sorted(out.items())
+
+
+def next_earnings_event(underlying: str, today: date | None = None) -> tuple[date, bool | None] | None:
+    """The next scheduled report on or after today with its timing, or None."""
+    today = today or utc_today()
+    upcoming = [e for e in earnings_events(underlying, limit=8) if e[0] >= today]
+    return upcoming[0] if upcoming else None
+
+
 def earnings_history(underlying: str, limit: int = 40, today: date | None = None) -> list[date]:
     """
     Past earnings report dates, oldest first: yfinance, else the stock_earnings
@@ -531,6 +600,94 @@ def smile_outliers(view: ChainView, top: int = 2, r: float | None = None) -> lis
             continue
         out.append((abs(res), f"{row['contract_symbol']} {'rich' if res > 0 else 'cheap'} by {res:+.1%} vs smile"))
     return [text for _, text in sorted(out, reverse=True)[:top]]
+
+
+@dataclass(frozen=True)
+class SurfaceFit:
+    """An SVI fit of one expiry's out-of-the-money smile and the contracts off it."""
+
+    params: object | None  # svi.SVIParams, None when the fit failed or had butterfly arbitrage
+    outliers: list  # svi.SVIOutlier, largest first
+    excluded: set[float]  # strikes dropped by the parity filter
+
+
+def parity_violations(view: ChainView, r: float | None = None, q: float | None = None, tol: float = 0.0) -> set[float]:
+    """
+    Strikes whose call/put quotes break the American put-call bounds at bid/ask:
+
+        S − D − K  <=  C − P  <=  S − K·e^(−rT)
+
+    with D the dividends to expiry, approximated by S·(1 − e^(−qT)). A pair
+    you could sell above the upper bound (C_bid − P_ask) or buy below the lower
+    (C_ask − P_bid) is not an arbitrage on an American single name — it is a
+    stale quote, a borrow cost or a dividend the yield misses — so those strikes
+    are excluded from any vol comparison, never traded. Needs a live chain.
+    """
+    if not view.live or view.T <= 0:
+        return set()
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying) if q is None else q
+    S, T = view.spot, view.T
+    frame = view.frame
+    calls = frame[frame["option_type"] == "C"].set_index("strike")
+    puts = frame[frame["option_type"] == "P"].set_index("strike")
+    div = S * (1 - math.exp(-q * T))
+    bad = set()
+    for k in calls.index.intersection(puts.index):
+        cb, ca = _num(calls.at[k, "bid"]), _num(calls.at[k, "ask"])
+        pb, pa = _num(puts.at[k, "bid"]), _num(puts.at[k, "ask"])
+        if not all(x and x > 0 for x in (cb, ca, pb, pa)):
+            continue
+        upper = S - float(k) * math.exp(-r * T)
+        lower = S - div - float(k)
+        if cb - pa > upper + tol or ca - pb < lower - tol:
+            bad.add(float(k))
+    return bad
+
+
+def svi_surface_fit(view: ChainView, r: float | None = None, q: float | None = None) -> SurfaceFit:
+    """
+    SVI fit of this expiry's out-of-the-money IVs (parity-flagged strikes left
+    out) and the contracts off it by more than half their spread in vol terms.
+
+    A fit that fails the butterfly (density >= 0) check is rejected: params
+    None and no outliers, because an arbitrageable fit makes every strike look
+    mispriced. smile_outliers (the quadratic fit) remains the fallback reader.
+    """
+    from . import svi
+
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying) if q is None else q
+    excluded = parity_violations(view, r, q)
+    if view.T <= 0:
+        return SurfaceFit(None, [], excluded)
+    otm = pd.concat(
+        [
+            with_greeks(view, "P", r, q).query("strike < @view.spot"),
+            with_greeks(view, "C", r, q).query("strike >= @view.spot"),
+        ]
+    ).dropna(subset=["iv"])
+    otm = otm[(otm["iv"] > 0) & (otm["delta"].abs() > 0.03) & ~otm["strike"].isin(excluded)]
+    if len(otm) < 6:
+        return SurfaceFit(None, [], excluded)
+    forward = view.spot * math.exp((r - q) * view.T)
+    strikes = otm["strike"].astype(float).to_numpy()
+    ivs = otm["iv"].astype(float).to_numpy()
+    k = np.log(strikes / forward)
+    params = svi.fit_svi(k, ivs**2 * view.T)
+    if params is None or not svi.butterfly_arbitrage_free(params):
+        logger.info("%s %s: SVI fit rejected (failed or butterfly arbitrage)", view.underlying, view.expiry)
+        return SurfaceFit(None, [], excluded)
+    half = []
+    for _, row in otm.iterrows():
+        bid, ask = _num(row.get("bid")), _num(row.get("ask"))
+        if not (bid and ask and bid > 0 and ask > 0):
+            half.append(float("nan"))  # unquoted (off-hours): no spread to judge against, skipped
+            continue
+        vega = om.vega(view.spot, float(row["strike"]), view.T, r, float(row["iv"]), q)
+        half.append(svi.half_spread_in_vol(bid, ask, vega))
+    outliers = svi.svi_outliers(strikes, list(otm["option_type"]), ivs, half, forward, view.T, params)
+    return SurfaceFit(params, outliers, excluded)
 
 
 def listed_expiries(underlying: str) -> list[date]:
@@ -1009,3 +1166,74 @@ def build_book(
         greeks=total,
         shares=shares,
     )
+
+
+def stress_legs(book: OptionBook) -> list[om.StressLeg]:
+    """The book's options and shares as option_math.StressLeg for scenario repricing."""
+    legs = [
+        om.StressLeg(p.contract.right, p.contract.strike, p.qty, om.year_fraction(p.contract.expiry, book.today), p.iv)
+        for p in book.positions
+    ]
+    if abs(book.shares) > 1e-9:
+        legs.append(om.StressLeg("S", 0.0, book.shares))
+    return legs
+
+
+def stress_book(
+    book: OptionBook,
+    spot_shocks: Sequence[float] = om.DEFAULT_SPOT_SHOCKS,
+    vol_shocks: Sequence[float] = om.DEFAULT_VOL_SHOCKS,
+    r: float | None = None,
+    q: float | None = None,
+) -> pd.DataFrame:
+    """Scenario P&L grid of one underlying's book (see option_math.stress_pnl)."""
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(book.underlying) if q is None else q
+    return om.stress_pnl(stress_legs(book), book.spot, r, q, spot_shocks, vol_shocks)
+
+
+@dataclass(frozen=True)
+class PickMetrics:
+    """Per unit of a single-expiry option pick, at the chain's mids."""
+
+    price: float  # dollars; + a debit paid, - a credit received
+    vega: float  # dollars per vol point
+    gamma: float  # share-equivalents per $1 move
+    max_loss: float  # dollars, worst case at expiry including the premium
+
+
+def pick_metrics(view: ChainView, pick: StructurePick, r: float | None = None, q: float | None = None) -> PickMetrics:
+    """Price, vega, gamma and worst-case loss of one unit of `pick` (option legs on `view` only)."""
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying) if q is None else q
+    sides = {right: with_greeks(view, right, r, q).set_index("contract_symbol") for right in ("C", "P")}
+    price = vega = gamma = 0.0
+    legs = []
+    for key, lots in pick.legs:
+        c = parse_occ(key)
+        row = sides[c.right].loc[key]
+        px, iv = float(row["price"]), float(row["iv"])
+        qty = lots * CONTRACT_MULTIPLIER
+        price += qty * px
+        if iv == iv and iv > 0:
+            vega += qty * om.vega(view.spot, c.strike, view.T, r, iv, q)
+            gamma += qty * om.gamma(view.spot, c.strike, view.T, r, iv, q)
+        legs.append(om.Leg(c.right, c.strike, lots, px))
+    return PickMetrics(price, vega, gamma, om.max_loss(legs) * CONTRACT_MULTIPLIER)
+
+
+def pick_stress_legs(
+    view: ChainView, pick: StructurePick, units: int, r: float | None = None, q: float | None = None
+) -> list[om.StressLeg]:
+    """`units` of a single-expiry pick as StressLegs (qty in share-equivalents) for scenario checks."""
+    r = risk_free_rate() if r is None else r
+    q = dividend_yield(view.underlying) if q is None else q
+    sides = {right: with_greeks(view, right, r, q).set_index("contract_symbol") for right in ("C", "P")}
+    out = []
+    for key, lots in pick.legs:
+        c = parse_occ(key)
+        iv = float(sides[c.right].loc[key, "iv"])
+        out.append(
+            om.StressLeg(c.right, c.strike, lots * units * CONTRACT_MULTIPLIER, view.T, iv if iv == iv else None)
+        )
+    return out

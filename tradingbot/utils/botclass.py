@@ -654,15 +654,41 @@ class Bot:
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return cash
 
-    def delta_hedge(self, underlying: str, band_usd: float) -> float:
-        """Trade shares to bring the options-plus-shares delta back to ~0 beyond `band_usd`."""
-        shares = self._portfolio_manager.delta_hedge(underlying, band_usd)
+    def delta_hedge(self, underlying: str, band_usd: float, ww: tuple[float, float] | None = None) -> float:
+        """Trade shares to bring the options-plus-shares delta back to ~0 beyond `band_usd`.
+
+        ww=(cost_frac, risk_aversion) switches to a Whalley-Wilmott band, rehedged to its edge.
+        """
+        shares = self._portfolio_manager.delta_hedge(underlying, band_usd, ww=ww)
         self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return shares
 
     def option_book(self, underlying: str) -> options.OptionBook:
         """Held options on `underlying`: legs, marks, entry value, P&L, DTE and net greeks."""
         return self._portfolio_manager.option_book(underlying)
+
+    def dividend_threatened_calls(self, book: options.OptionBook) -> list[str]:
+        """
+        Short ITM calls in `book` likely to be assigned early before the next
+        ex-dividend date (time value below the dividend, within
+        option_rules.EX_DIVIDEND_CLOSE_BDAYS sessions). Each is logged.
+        """
+        from tradingbot.utils.option_rules import ex_dividend_close_reason
+
+        div = options.next_dividend(book.underlying, book.today)
+        if div is None:
+            return []
+        bdays = options.business_days_between(book.today, div[0])
+        out = []
+        for p in book.positions:
+            if p.qty >= 0 or p.contract.right != "C":
+                continue
+            intrinsic = options.intrinsic_value(p.contract, book.spot)
+            reason = ex_dividend_close_reason(p.price - intrinsic, intrinsic, div[1], bdays)
+            if reason:
+                logger.info("%s: %s", p.key, reason)
+                out.append(p.key)
+        return out
 
     def portfolio_value(self) -> float:
         """Total book value: cash plus every holding at the latest price (short legs negative)."""

@@ -403,6 +403,144 @@ class StockFundamentalsSnapshot(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class MacroEvent(Base):
+    """
+    One scheduled macro release: an FOMC decision, a CPI print or a jobs report.
+
+    Filled weekly from FRED's release calendar (utils/macro_calendar.py, including
+    future scheduled dates), read by option bots that avoid opening short vol right
+    before one.
+    """
+
+    __tablename__ = "macro_events"
+    __table_args__ = (UniqueConstraint("kind", "event_date", name="uq_macro_events_kind_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # FOMC / CPI / NFP
+    event_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class VolSurfaceSnapshot(Base):
+    """
+    One row per underlying per day: the option_quotes chain condensed into the
+    numbers a vol strategy ranks on.
+
+    IVs are solved from mid prices (never yfinance's own), constant-maturity by
+    interpolating total variance between listed expiries. Written after the daily
+    chain capture (utils/vol_surface.py); without it an IV rank would need the
+    35k raw quote rows of every past day.
+    """
+
+    __tablename__ = "vol_surface"
+    __table_args__ = (UniqueConstraint("underlying", "snapshot_date", name="uq_vol_surface_underlying_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    underlying: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    spot: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atm_iv_7: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atm_iv_30: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atm_iv_60: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atm_iv_90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atm_iv_180: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iv_25p_30: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iv_25c_30: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rr25_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # 25d put IV - 25d call IV
+    fly25_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # wings avg - ATM
+    term_slope: Mapped[float | None] = mapped_column(Float, nullable=True)  # atm_iv_90 / atm_iv_30
+    fair_vol_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # HAR forecast, 30d
+    vrp_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # atm_iv_30 - fair_vol_30
+    pc_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pc_oi: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gex_usd: Mapped[float | None] = mapped_column(Float, nullable=True)  # dealer $ gamma per 1% move
+    max_pain: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unusual_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_contracts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class ImpliedCorrelation(Base):
+    """
+    Daily implied correlation of an index against its largest captured members:
+    (σ_I² − Σwᵢ²σᵢ²) / Σ_{i≠j} wᵢwⱼσᵢσⱼ from 30-day ATM IVs, market-cap weights
+    normalised over the names that had a surface that day. An approximation of
+    Cboe's COR indices over 50 names, not the full index.
+    """
+
+    __tablename__ = "implied_correlation"
+    __table_args__ = (UniqueConstraint("index_symbol", "snapshot_date", name="uq_implied_correlation_index_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    index_symbol: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    index_iv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    n_names: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weight_coverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class OptionRiskSnapshot(Base):
+    """
+    Daily risk of each option bot's book per underlying: dollar greeks, stress
+    P&L under spot/vol shocks, max loss and reserved margin (utils/option_risk.py).
+    """
+
+    __tablename__ = "option_risk"
+    __table_args__ = (
+        UniqueConstraint("bot_name", "underlying", "snapshot_date", name="uq_option_risk_bot_underlying_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    underlying: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    spot: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delta_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gamma_usd: Mapped[float | None] = mapped_column(Float, nullable=True)  # $ delta change per 1% move
+    vega: Mapped[float | None] = mapped_column(Float, nullable=True)  # $ per vol point
+    theta: Mapped[float | None] = mapped_column(Float, nullable=True)  # $ per day
+    stress_down20: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_down10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_up10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_vol_up10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_crash: Mapped[float | None] = mapped_column(Float, nullable=True)  # -20% spot, +30 vol pts
+    max_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class MispricingScanRow(Base):
+    """
+    One candidate from the daily vol-mispricing scan (utils/mispricing_scan.py).
+
+    kind: "vrp" (ATM IV vs forecast, z-scored against its own history), "svi"
+    (a strike off an arbitrage-free SVI fit by more than half its spread),
+    "event" (implied vs historical earnings move) or "parity" (a quote pair
+    outside the American put-call band: bad data, never traded).
+    """
+
+    __tablename__ = "option_mispricing_scan"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scan_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    underlying: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    expiry: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    strike: Mapped[float | None] = mapped_column(Float, nullable=True)
+    right: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    iv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fair: Mapped[float | None] = mapped_column(Float, nullable=True)
+    z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    half_spread_vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
     __table_args__ = (UniqueConstraint("bot_name", "symbol", "interval", "metric", name="uq_backtest_results_key"),)

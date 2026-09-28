@@ -89,7 +89,7 @@ class OptionPMCCBot(Bot):
             return -1
 
         if shorts:
-            return self._manage_shorts(shorts)
+            return self._manage_shorts(shorts, set(self.dividend_threatened_calls(book)))
         if self._trim(longs, book):
             return -1
         return self._sell_calls(longs, book)
@@ -121,7 +121,7 @@ class OptionPMCCBot(Bot):
         )
         return 1
 
-    def _manage_shorts(self, shorts: list[options.OptionPosition]) -> int:
+    def _manage_shorts(self, shorts: list[options.OptionPosition], threatened: set[str] = frozenset()) -> int:
         legs = []
         for p in shorts:
             entry = options.entry_value(self.bot_name, p.key)
@@ -131,6 +131,8 @@ class OptionPMCCBot(Bot):
                 credit, pnl, (p.contract.expiry - options.utc_today()).days, delta, self.RULES
             )
             logger.info("Short %s: credit %.2f, P&L %.2f, delta %s", p.key, credit, pnl, delta)
+            if not reason and p.key in threatened:
+                reason = "early assignment risk before the ex-dividend date"
             if reason:
                 logger.info("Buying back %s: %s", p.key, reason)
                 legs.append((p.key, -p.qty))

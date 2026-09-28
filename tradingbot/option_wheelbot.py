@@ -70,6 +70,8 @@ class OptionWheelBot(Bot):
                 book.dte,
                 book.greeks.delta,
             )
+            if not reason and self.dividend_threatened_calls(book):
+                reason = "short call at risk of early assignment before the ex-dividend date"
             if reason:
                 logger.info("Buying back: %s", reason)
                 self.close_options(UNDERLYING)

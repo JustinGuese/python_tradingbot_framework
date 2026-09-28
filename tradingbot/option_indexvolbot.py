@@ -27,14 +27,20 @@ ATM IV >= HAR fair + 3 points. Alpha +2.0%/yr at t 4.28, beta 0.01, max DD
 gate, failed out of sample; the gate is what matters. Small but uncorrelated.
 See docs/backtests/index-vol-2026-09.md. Paper only.
 
+Round 3 (2026-09-28) tested VIX/VIX3M and VVIX entry gates, an FOMC blackout,
+a term-structure unwind, Yang-Zhang and GARCH forecasts, a z-scored signal and
+a monthly tail hedge on top of these rules: none beat them out of sample, so
+all stay off (docs/backtests/option-round3-2026-09.md). The bot still logs
+the vol curve and the next FOMC/CPI date on every run.
+
 Schedule: 45 15 * * 1-5 (the chain must be live to open).
 """
 
 import logging
 from typing import ClassVar
 
+from tradingbot.utils import macro_calendar, options
 from tradingbot.utils import option_math as om
-from tradingbot.utils import options
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.option_rules import (
     IndexVolRules,
@@ -42,8 +48,10 @@ from tradingbot.utils.option_rules import (
     daily_close,
     index_vol_entry_ok,
     index_vol_exit_reason,
+    index_vol_unwind_reason,
 )
 from tradingbot.utils.runner import run_bot
+from tradingbot.utils.vol_indices import VIX, VIX3M, VVIX, latest_vol_indices, term_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +68,28 @@ class OptionIndexVolBot(Bot):
     def __init__(self, **kwargs):
         super().__init__("option_IndexVolBot", symbol=UNDERLYING, interval="1d", period="5y", **kwargs)
 
+    @staticmethod
+    def _next_event(today):
+        """(kind, date) of the next FOMC/CPI release and sessions until it; (None, None) if unknown."""
+        try:
+            stale = macro_calendar.stale_warning(today)
+            if stale:
+                logger.warning(stale)
+            event = macro_calendar.next_event(today)
+            return event, macro_calendar.business_days_to_next_event(today) if event else None
+        except Exception as exc:
+            logger.warning("Macro calendar unavailable: %s", exc)
+            return None, None
+
     def makeOneIteration(self) -> int:
         rules = self.RULES
         book = self.option_book(UNDERLYING)
         if not book.empty:
             reason = index_vol_exit_reason(book.credit, book.pnl, book.dte, rules)
+            if reason is None and rules.unwind_term_ratio is not None:
+                reason = index_vol_unwind_reason(
+                    term_ratio(self.getLatestPrice(VIX), self.getLatestPrice(VIX3M)), rules
+                )
             logger.info(
                 "Holding condor: credit %.2f, P&L %.2f, %s DTE, delta %.1f, theta %.2f/day, vega %.2f",
                 book.credit,
@@ -87,17 +112,24 @@ class OptionIndexVolBot(Bot):
         close = daily_close(self.getYFData(interval="1d", period="5y", saveToDB=True))
         fair = om.har_rv_forecast(om.log_returns(close), max(business_days(view.today, view.expiry), 1))
         iv = options.atm_iv(view)
-        vix = self.getLatestPrice("^VIX")
+        curve = latest_vol_indices(self.getLatestPrice, (VIX, VIX3M, VVIX))
+        vix, term = curve[VIX], term_ratio(curve[VIX], curve[VIX3M])
+        event, bdays_to_event = self._next_event(view.today)
         logger.info(
-            "%s %s: ATM IV %s vs HAR fair %.1f%% (gap %s), VIX %.1f",
+            "%s %s: ATM IV %s vs HAR fair %.1f%% (gap %s), VIX %s, VIX/VIX3M %s, VVIX %s, next event %s",
             UNDERLYING,
             view.expiry,
             f"{iv:.1%}" if iv else "n/a",
             fair * 100,
             f"{iv - fair:+.1%}" if iv else "n/a",
-            vix,
+            f"{vix:.1f}" if vix else "n/a",
+            f"{term:.2f}" if term else "n/a",
+            f"{curve[VVIX]:.0f}" if curve[VVIX] else "n/a",
+            f"{event[0]} {event[1]} ({bdays_to_event} sessions)" if event else "unknown",
         )
-        if not index_vol_entry_ok(iv, fair, vix, rules):
+        if not index_vol_entry_ok(
+            iv, fair, vix, rules, term_ratio=term, vvix=curve[VVIX], bdays_to_event=bdays_to_event
+        ):
             return 0
 
         opened = self.open_iron_condor(

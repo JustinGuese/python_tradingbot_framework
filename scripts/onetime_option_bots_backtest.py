@@ -233,6 +233,10 @@ class Model:
         T = om.year_fraction(expiry, day)
         return om.delta(row.S, K, T, row.r, self.vol(row.iv, row.S, K, T), right)
 
+    def gamma(self, K: float, expiry: date, day: date, row) -> float:
+        T = om.year_fraction(expiry, day)
+        return om.gamma(row.S, K, T, row.r, self.vol(row.iv, row.S, K, T))
+
     def strike_for_delta(self, right: str, target: float, expiry: date, day: date, row) -> float:
         """Delta-targeted strike under the skewed smile (two fixed-point passes), snapped."""
         T = om.year_fraction(expiry, day)
@@ -280,6 +284,10 @@ class Book:
         return sum(leg.qty * self.model.delta(leg.right, leg.strike, leg.expiry, day, row) for leg in self.legs) + (
             self.shares
         )
+
+    def net_gamma(self, day: date, row) -> float:
+        """Share-equivalent gamma of the options (shares have none)."""
+        return sum(leg.qty * self.model.gamma(leg.strike, leg.expiry, day, row) for leg in self.legs)
 
     def trade_shares(self, qty: float, row) -> None:
         if abs(qty) < 1e-9:
@@ -470,8 +478,19 @@ def sim_mispricing(m, expiries, earnings, r: rl.MispricingRules, model: Model) -
             if rl.mispricing_exit_reason(side, gap, pnl, entry, b.dte(day), held, r):
                 b.close(day, row)
                 b.trade_shares(-b.shares, row)
-            elif side == "cheap" and abs(b.net_delta(day, row)) * row.S > r.hedge_band_pct * b.equity(day, row):
-                b.trade_shares(-round(b.net_delta(day, row)), row)
+            elif side == "cheap":
+                b.trade_shares(
+                    rl.hedge_trade(
+                        b.net_delta(day, row),
+                        row.S,
+                        b.net_gamma(day, row),
+                        b.equity(day, row),
+                        r.hedge_band_pct,
+                        r.hedge_ww_risk_aversion,
+                        r.hedge_cost_frac,
+                    ),
+                    row,
+                )
         elif b.shares:
             b.trade_shares(-b.shares, row)  # a hedge left after an expiry settled the options
         else:
@@ -763,10 +782,34 @@ def tune(m, expiries, earnings, model, split, bots: list[str]) -> None:
             print(_row(f"#{i}", "H2", x["H2"]))
 
 
+def hedge_compare(m, expiries, earnings, model, split) -> None:
+    """
+    The mispricing bot's straddle hedge: today's fixed band against
+    Whalley-Wilmott bands over a range of risk aversions. Picked on H1, judged on
+    H2, everything else at the live rules. Only the cheap side hedges.
+    """
+    name, live = "option_MispricingBot", LIVE["option_MispricingBot"]
+    variants = [replace(live, hedge_ww_risk_aversion=g) for g in (None, 1e-4, 1e-3, 1e-2, 1e-1, 1.0)]
+    results = Parallel(n_jobs=-1)(delayed(evaluate)(name, r, m, expiries, earnings, model, split) for r in variants)
+    print("\n### Straddle hedge: fixed band vs Whalley-Wilmott (live mispricing rules otherwise)")
+    print(HEADER)
+    for x in results:
+        g = x["rules"].hedge_ww_risk_aversion
+        label = "fixed 2% band" if g is None else f"WW gamma={g:g}"
+        for part in ("full", "H1", "H2"):
+            print(_row(label, part, x[part], x["trades"] if part == "full" else ""))
+    best = max(results[1:], key=lambda x: x["H1"]["t"])
+    print(
+        f"H1 pick: WW gamma={best['rules'].hedge_ww_risk_aversion:g}; H2 t {best['H2']['t']:.2f} "
+        f"vs fixed band {results[0]['H2']['t']:.2f}"
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skew", type=float, default=0.15)
     ap.add_argument("--tune", action="store_true")
+    ap.add_argument("--hedge", action="store_true", help="fixed vs Whalley-Wilmott straddle hedge")
     ap.add_argument("--bots", default="option_LeapCallBot,option_CreditSpreadBot,option_IronCondorBot")
     ap.add_argument("--only", default="", help="comma-separated bots for the default mode (default: all)")
     args = ap.parse_args()
@@ -786,6 +829,9 @@ def main() -> None:
 
     if args.tune:
         tune(m, expiries, earnings, model, split, args.bots.split(","))
+        return
+    if args.hedge:
+        hedge_compare(m, expiries, earnings, model, split)
         return
     print("\n" + HEADER)
     only = set(filter(None, args.only.split(",")))

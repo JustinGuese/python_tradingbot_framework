@@ -7,7 +7,7 @@ predictable. Bid/ask sit 5 cents either side of the model price.
 """
 
 import math
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -18,13 +18,18 @@ from tradingbot.livetrade.copier import LiveTradeCopier
 from tradingbot.option_catalystcallbot import OptionCatalystCallBot
 from tradingbot.option_collarbot import OptionCollarBot
 from tradingbot.option_creditspreadbot import OptionCreditSpreadBot
+from tradingbot.option_crossvolbot import OptionCrossVolBot
+from tradingbot.option_dispersionbot import OptionDispersionBot
 from tradingbot.option_earningscalendarbot import OptionEarningsCalendarBot
+from tradingbot.option_earningscrushbot import OptionEarningsCrushBot
 from tradingbot.option_indexvolbot import OptionIndexVolBot
 from tradingbot.option_ironcondorbot import OptionIronCondorBot
 from tradingbot.option_leapcallbot import OptionLeapCallBot
 from tradingbot.option_mispricingbot import OptionMispricingBot
+from tradingbot.option_mispricingscanbot import OptionMispricingScanBot
 from tradingbot.option_pmccbot import OptionPMCCBot
 from tradingbot.option_wheelbot import OptionWheelBot
+from tradingbot.utils import mispricing_scan as ms
 from tradingbot.utils import option_math as om
 from tradingbot.utils import option_rules as rules_mod
 from tradingbot.utils import options
@@ -53,6 +58,7 @@ class BSTicker:
     market_state = "REGULAR"
     close = S
     earnings = None
+    dividend = None  # per-share amount going ex tomorrow, or None
 
     def __init__(self, symbol):
         self.symbol = symbol
@@ -102,9 +108,15 @@ def chain(monkeypatch):
     BSTicker.market_state = "REGULAR"
     BSTicker.close = S
     BSTicker.earnings = None
+    BSTicker.dividend = None
     monkeypatch.setattr(options.yf, "Ticker", BSTicker)
     monkeypatch.setattr(options, "risk_free_rate", lambda: R)
     monkeypatch.setattr(options, "dividend_yield", lambda _u: 0.0)
+    monkeypatch.setattr(
+        options,
+        "next_dividend",
+        lambda _u, today=None: None if BSTicker.dividend is None else (TODAY + timedelta(days=1), BSTicker.dividend),
+    )
     return BSTicker
 
 
@@ -573,6 +585,27 @@ def test_physical_settlement_assigns_and_delivers(pm, db_session, chain):
     assert _portfolio(db_session) == {"USD": pytest.approx(100 * 270)}  # called away
 
 
+def test_short_call_is_assigned_early_only_when_the_dividend_beats_its_time_value(pm, db_session, chain):
+    # A deep ITM 40-day call keeps ~$1.1 of time value (mostly carry on the strike).
+    call = occ(E40, "C", 250)
+    _set_portfolio(db_session, {"USD": 0.0, "AAPL": 100, call: -100})
+    chain.dividend = 0.10
+    pm.roll_and_settle_options(roll_dte=None, target_dte=30, settlement="physical")
+    assert _portfolio(db_session)[call] == -100
+
+    chain.dividend = 3.0
+    pm.roll_and_settle_options(roll_dte=None, target_dte=30, settlement="physical")
+    assert _portfolio(db_session) == {"USD": pytest.approx(100 * 250)}  # called away early
+
+
+def test_early_assignment_cash_settles_for_a_cash_bot(pm, db_session, chain):
+    short, long = occ(E40, "C", 250), occ(E40, "C", 260)
+    _set_portfolio(db_session, {"USD": 10_000.0, short: -100, long: 100})
+    chain.dividend = 3.0
+    assert pm.assign_before_dividends(physical=False) == [short]
+    assert _portfolio(db_session) == {"USD": pytest.approx(10_000 - 100 * 50), long: 100}
+
+
 def test_physical_settlement_never_creates_short_stock(pm, db_session, chain):
     past = TODAY - timedelta(days=1)
     chain.close = 280.0
@@ -767,7 +800,13 @@ def test_mispricing_bot_buys_cheap_vol_and_hedges_it(sqlite_db, db_session, chai
     assert bot.makeOneIteration() == 1
     book = bot.option_book("AAPL")
     assert {p.contract.right for p in book.positions} == {"C", "P"} and all(p.qty > 0 for p in book.positions)
-    assert book.shares != 0 and abs(book.net_delta) <= 0.5  # delta-hedged at the open
+    # Hedged inside a Whalley-Wilmott band: an ATM straddle's small opening
+    # delta sits inside it, so no share trade is needed yet.
+    from tradingbot.utils.vol_estimators import whalley_wilmott_band
+
+    rules = OptionMispricingBot.RULES
+    band = whalley_wilmott_band(S, book.greeks.gamma, rules.hedge_cost_frac, rules.hedge_ww_risk_aversion)
+    assert abs(book.net_delta) <= band
     assert bot.makeOneIteration() == 0  # holds, hedge unchanged
 
 
@@ -804,6 +843,17 @@ def test_wheel_bot_sells_puts_then_covered_calls(sqlite_db, db_session, chain, m
     ((call, qty),) = legs.items()
     assert options.parse_occ(call).right == "C" and qty == -300
     assert options.parse_occ(call).strike >= 290  # never below the cost basis
+
+
+def test_wheel_bot_buys_back_a_call_the_dividend_would_get_assigned(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionWheelBot, mocker, _series(RICH_IV))
+    call = occ(E40, "C", 250)  # deep ITM: ~$1.1 of time value left
+    _set_portfolio(db_session, {"USD": 10_000.0, "AAPL": 100.0, call: -100.0}, "option_WheelBot")
+    bot.dbBot = BotRepository.create_or_get_bot("option_WheelBot")
+    assert bot.makeOneIteration() == 0  # no dividend coming: hold
+    chain.dividend = 3.0
+    assert bot.makeOneIteration() == -1
+    assert call not in _portfolio(db_session, "option_WheelBot")
 
 
 def test_pmcc_bot_buys_leap_then_sells_calls_against_it(sqlite_db, db_session, chain, mocker):
@@ -909,3 +959,206 @@ def test_index_vol_bot_does_not_open_off_hours(sqlite_db, db_session, chain, moc
     bot = _make_index_bot(mocker, _series(RICH_IV))
     assert bot.makeOneIteration() == 0
     assert _portfolio(db_session, "option_IndexVolBot") == {"USD": 100_000.0}
+
+
+# ------------------------------------------------------------------
+# Surface filters: put-call parity band, SVI fit
+# ------------------------------------------------------------------
+
+
+def _with_quote(view, right, strike, bid, ask):
+    frame = view.frame.copy()
+    hit = (frame["option_type"] == right) & (frame["strike"] == strike)
+    frame.loc[hit, ["bid", "ask"]] = [bid, ask]
+    return options.ChainView(view.underlying, view.expiry, frame, view.spot, view.live, view.today)
+
+
+def test_parity_band_flags_only_a_stale_pair(sqlite_db, chain):
+    view = options.load_chain("AAPL", 35)
+    assert options.parity_violations(view, R, 0.0) == set()
+    stale = _with_quote(view, "C", 300.0, 60.0, 60.2)  # call bid far above anything parity allows
+    assert options.parity_violations(stale, R, 0.0) == {300.0}
+
+
+def test_svi_fit_of_a_clean_chain_has_no_outliers_and_finds_a_planted_one(sqlite_db, chain):
+    view = options.load_chain("AAPL", 35)
+    fit = options.svi_surface_fit(view, R, 0.0)
+    assert fit.params is not None and fit.outliers == []
+    # Richer vol at 270 lifts the put AND the call there by the same amount;
+    # moving the put alone would break parity and be filtered as a stale quote.
+    rich = view
+    for right in ("P", "C"):
+        row = view.frame[(view.frame["option_type"] == right) & (view.frame["strike"] == 270.0)].iloc[0]
+        rich = _with_quote(rich, right, 270.0, row["bid"] + 1.5, row["ask"] + 1.5)
+    fit = options.svi_surface_fit(rich, R, 0.0)
+    assert fit.excluded == set()
+    assert fit.outliers and fit.outliers[0].strike == 270.0 and fit.outliers[0].resid > 0
+
+
+# ------------------------------------------------------------------
+# Round 3: rules
+# ------------------------------------------------------------------
+
+
+def test_index_vol_gates_block_only_when_set():
+    base = OptionIndexVolBot.RULES
+    ok = {"iv": 0.25, "fair": 0.15, "vix": 18.0}
+    assert rules_mod.index_vol_entry_ok(**ok, rules=base)
+    gated = rules_mod.IndexVolRules(
+        **{**vars(base), "max_term_ratio": 0.95, "max_vvix": 110.0, "event_blackout_bdays": 1}
+    )
+    assert rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=0.85, vvix=90.0, bdays_to_event=5)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=1.02, vvix=90.0, bdays_to_event=5)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=None, vvix=90.0)  # unknown = no
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=0.85, vvix=120.0)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=0.85, vvix=90.0, bdays_to_event=1)
+    z_rules = rules_mod.IndexVolRules(**{**vars(base), "min_gap": None, "min_z": 1.5})
+    assert rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=2.0)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=1.0)
+    unwind = rules_mod.IndexVolRules(unwind_term_ratio=1.0)
+    assert rules_mod.index_vol_unwind_reason(1.05, unwind) and rules_mod.index_vol_unwind_reason(0.9, unwind) is None
+    assert rules_mod.index_vol_unwind_reason(1.5, base) is None
+
+
+def test_hedge_trade_fixed_and_whalley_wilmott():
+    assert rules_mod.hedge_trade(5.0, 300.0, 5.0, 100_000.0, 0.02) == 0.0  # $1.5k < 2% of book
+    assert rules_mod.hedge_trade(10.0, 300.0, 5.0, 100_000.0, 0.01) == -10.0  # back to zero
+    band_trade = rules_mod.hedge_trade(200.0, 300.0, 5.0, 0.0, 0.0, ww_risk_aversion=1e-4)
+    assert -200.0 < band_trade < 0.0  # only back to the band's edge
+    assert rules_mod.hedge_trade(1.0, 300.0, 5.0, 0.0, 0.0, ww_risk_aversion=1e-4) == 0.0
+
+
+def test_cross_vol_candidates_rank_by_gap():
+    r = rules_mod.CrossVolRules(max_positions=2)
+    names = [
+        rules_mod.NameVol("A", 0.40, 0.30, True),
+        rules_mod.NameVol("B", 0.50, 0.30, True),
+        rules_mod.NameVol("C", 0.60, 0.30, False),  # earnings inside
+        rules_mod.NameVol("D", 0.32, 0.30, True),  # gap too small
+    ]
+    assert [n.underlying for n in rules_mod.cross_vol_candidates(names, set(), r)] == ["B", "A"]
+    assert [n.underlying for n in rules_mod.cross_vol_candidates(names, {"X"}, r)] == ["B"]
+
+
+def test_earnings_crush_rules():
+    r = rules_mod.EarningsCrushRules()
+    thu = date(2026, 10, 29)
+    assert rules_mod.reaction_session(thu, True) == date(2026, 10, 30)
+    assert rules_mod.reaction_session(thu, False) == thu
+    assert rules_mod.reaction_session(date(2026, 10, 30), True) == date(2026, 11, 2)  # Friday -> Monday
+    assert rules_mod.reaction_session(thu, None) is None
+    ok, _ = rules_mod.earnings_crush_entry_ok(thu, date(2026, 10, 30), 0.08, 0.05, 12, r)
+    assert ok
+    assert not rules_mod.earnings_crush_entry_ok(thu, date(2026, 10, 30), 0.055, 0.05, 12, r)[0]  # 1.1x
+    assert not rules_mod.earnings_crush_entry_ok(thu, date(2026, 11, 2), 0.08, 0.05, 12, r)[0]  # not tomorrow
+    assert not rules_mod.earnings_crush_entry_ok(thu, date(2026, 10, 30), 0.08, 0.05, 3, r)[0]  # thin history
+    assert rules_mod.earnings_crush_exit_due(date(2026, 10, 30), date(2026, 10, 30))
+
+
+def test_dispersion_signal_and_vega_lots():
+    r = rules_mod.DispersionRules(min_history=60)
+    hist = list(np.linspace(0.2, 0.6, 80))
+    assert rules_mod.dispersion_signal(hist[:30], 0.5, r)[0] is None
+    assert "insufficient history 30/60" in rules_mod.dispersion_signal(hist[:30], 0.5, r)[1]
+    assert rules_mod.dispersion_signal(hist, 0.58, r)[0] == "enter"
+    assert rules_mod.dispersion_signal(hist, 0.3, r)[0] == "exit"
+    lots = rules_mod.vega_weighted_lots(-1000.0, {"A": 50.0, "B": 100.0, "C": 900.0}, {"A": 2.0, "B": 1.0, "C": 1.0})
+    assert lots == {"A": 10, "B": 2, "C": 0} or lots == {"A": 10, "B": 2}  # C rounds to 0 and is dropped
+
+
+def test_scan_side_and_exit():
+    r = rules_mod.MispricingScanRules()
+    assert rules_mod.scan_side(rules_mod.NameVol("X", 0.3, 0.2, True, z=2.5), r, 20.0)[0] == "rich"
+    assert rules_mod.scan_side(rules_mod.NameVol("X", 0.3, 0.2, False, z=2.5), r, 20.0)[0] is None
+    assert rules_mod.scan_side(rules_mod.NameVol("X", 0.3, 0.2, True, z=2.5), r, 40.0)[0] is None
+    assert rules_mod.scan_side(rules_mod.NameVol("X", 0.1, 0.2, True, z=-2.5), r, 20.0)[0] == "cheap"
+    assert rules_mod.scan_side(rules_mod.NameVol("X", 0.3, 0.2, True, z=None), r, 20.0)[0] is None
+    assert rules_mod.scan_exit_reason("rich", 2.5, 60.0, 100.0, 20, 3, r) == "take profit"
+    assert rules_mod.scan_exit_reason("rich", 0.2, 0.0, 100.0, 20, 3, r)  # z back inside
+    assert rules_mod.scan_exit_reason("cheap", -2.5, 0.0, 100.0, 20, 15, r)  # max hold
+    assert rules_mod.scan_exit_reason("rich", 2.5, 0.0, 100.0, 20, 3, r) is None
+
+
+def test_shortlist_puts_always_first_then_scores():
+    got = ms.shortlist(["SPY", "QQQ", "A", "B", "C"], {"C": 3.0, "A": 1.0}, 4, always=("SPY", "QQQ"))
+    assert got == ["SPY", "QQQ", "C", "A"]
+
+
+# ------------------------------------------------------------------
+# Round 3: the bots, end to end on the fake chain
+# ------------------------------------------------------------------
+
+
+def _ohlc(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Every move in the overnight gap (open = close, a sliver of range). A bar
+    that walks straight from open to close has almost no range, which range
+    estimators (Rogers-Satchell, Yang-Zhang) rightly read as almost no
+    variance; the close-to-close vol then lands entirely in the overnight term.
+    """
+    close = pd.Series(data["close"].to_numpy(), index=pd.bdate_range(end=TODAY, periods=len(data)))
+    return pd.DataFrame({"open": close, "high": close * 1.0005, "low": close * 0.9995, "close": close})
+
+
+def _make_multi_bot(cls, module: str, mocker, data):
+    mocker.patch(f"tradingbot.{module}.UNIVERSE", ("AAPL",))
+    mocker.patch.object(ms, "load_ohlc", lambda symbols, period="3y": {s: _ohlc(data) for s in symbols})
+    mocker.patch.object(options, "earnings_events", lambda u, limit=40: [])
+    return _make_bot(cls, mocker, data)
+
+
+def test_cross_vol_bot_sells_a_condor_on_the_rich_name(sqlite_db, db_session, chain, mocker):
+    bot = _make_multi_bot(OptionCrossVolBot, "option_crossvolbot", mocker, _series(RICH_IV))  # IV 25% vs ~13%
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_CrossVolBot"))
+    assert len(legs) == 4 and sum(legs.values()) == 0
+    assert bot.makeOneIteration() == 0  # already held: nothing new, nothing to close
+
+
+def test_cross_vol_bot_waits_when_the_gap_is_small(sqlite_db, db_session, chain, mocker):
+    bot = _make_multi_bot(OptionCrossVolBot, "option_crossvolbot", mocker, _series(FAIR_IV))
+    assert bot.makeOneIteration() == 0
+    assert options.option_legs(_portfolio(db_session, "option_CrossVolBot")) == {}
+
+
+def test_mispricing_scan_bot_needs_a_z_score(sqlite_db, db_session, chain, mocker):
+    bot = _make_multi_bot(OptionMispricingScanBot, "option_mispricingscanbot", mocker, _series(RICH_IV))
+    mocker.patch("tradingbot.option_mispricingscanbot.ALWAYS", ())
+    # No vrp history at all: no z, no trade, however rich the gap looks.
+    assert bot.makeOneIteration() == 0
+    # With a year of history centred well below today's gap: rich at the tail.
+    mocker.patch.object(ms, "vrp_history", lambda u, close=None, as_of=None: pd.Series(np.linspace(-0.02, 0.02, 200)))
+    assert bot.makeOneIteration() == 1
+    legs = options.option_legs(_portfolio(db_session, "option_MispricingScanBot"))
+    assert len(legs) == 4 and sum(legs.values()) == 0  # an iron condor, sized inside the caps
+
+
+def test_earnings_crush_bot_sells_a_rich_move_and_exits_after(sqlite_db, db_session, chain, mocker):
+    bot = _make_multi_bot(OptionEarningsCrushBot, "option_earningscrushbot", mocker, _series(FAIR_IV))
+    tomorrow = (pd.Timestamp(TODAY) + pd.offsets.BDay(1)).date()
+    mocker.patch.object(options, "next_earnings_event", lambda u, today=None: (tomorrow, False))
+    past = [((pd.Timestamp(TODAY) - pd.offsets.BDay(20 * i)).date(), False) for i in range(1, 13)]
+    mocker.patch.object(options, "earnings_events", lambda u, limit=40: past)
+    # Front expiry (spanning the report) priced at 60% vs 30% behind it: a big implied move.
+    real_atm = options.atm_iv
+    mocker.patch.object(options, "atm_iv", lambda view, r=None, american=False: 0.60 if view.expiry == NEAR else 0.30)
+    assert (
+        bot.makeOneIteration(now=pd.Timestamp("2026-01-01 14:30", tz="UTC").to_pydatetime()) == 0
+    )  # morning: exits only
+    assert bot.makeOneIteration(now=pd.Timestamp("2026-01-01 19:30", tz="UTC").to_pydatetime()) == 1
+    legs = options.option_legs(_portfolio(db_session, "option_EarningsCrushBot"))
+    assert len(legs) == 4 and all(options.parse_occ(k).expiry == NEAR for k in legs)
+    mocker.patch.object(options, "atm_iv", real_atm)
+    # Next session: closed, whatever happened.
+    mocker.patch.object(options, "utc_today", lambda: tomorrow)
+    assert bot._manage(tomorrow) == 1
+    assert options.option_legs(_portfolio(db_session, "option_EarningsCrushBot")) == {}
+
+
+def test_dispersion_bot_says_why_it_waits(sqlite_db, db_session, chain, mocker):
+    import tradingbot.option_dispersionbot as mod
+
+    bot = _make_bot(OptionDispersionBot, mocker, _series(FAIR_IV))
+    log = mocker.spy(mod.logger, "info")
+    assert bot.makeOneIteration() == 0
+    assert any("insufficient history 0/60" in str(c.args) for c in log.call_args_list)

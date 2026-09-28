@@ -74,12 +74,24 @@ UNDERLYING = "AAPL"
 BENCH = "QQQ"
 
 
+def _ww(rules: MispricingRules) -> tuple[float, float] | None:
+    """The Whalley-Wilmott hedge band parameters, or None for the fixed band."""
+    if rules.hedge_ww_risk_aversion is None:
+        return None
+    return rules.hedge_cost_frac, rules.hedge_ww_risk_aversion
+
+
 class OptionMispricingBot(Bot):
     INITIAL_CAPITAL: ClassVar[float] = 100_000.0
     OPTION_ROLL_DTE: ClassVar[int | None] = None
     # Walk-forward re-tune 2026-09-26 (chosen on 2012-2019, judged on 2019-2026):
     # only a 10-point gap is worth selling, with wider wings. See the doc.
-    RULES: ClassVar[MispricingRules] = MispricingRules(rich_gap=0.10, cheap_gap=0.02, wing_sigmas=1.5, exit_dte=5)
+    # 2026-09-28: the straddle's hedge uses a Whalley-Wilmott band (risk aversion
+    # 1e-4, picked on H1) instead of the fixed 2% band: H2 alpha t 0.88 vs 0.82.
+    # Small, because the cheap side is rare. docs/backtests/option-round3-2026-09.md.
+    RULES: ClassVar[MispricingRules] = MispricingRules(
+        rich_gap=0.10, cheap_gap=0.02, wing_sigmas=1.5, exit_dte=5, hedge_ww_risk_aversion=1e-4
+    )
 
     def __init__(self, **kwargs):
         super().__init__("option_MispricingBot", symbol=UNDERLYING, interval="1d", period="5y", **kwargs)
@@ -173,7 +185,7 @@ class OptionMispricingBot(Bot):
             pick = options.select_straddle(view)
             opened = self.open_structure(pick, rules.premium_pct * book_value)
             if opened:
-                self.delta_hedge(UNDERLYING, rules.hedge_band_pct * book_value)
+                self.delta_hedge(UNDERLYING, rules.hedge_band_pct * book_value, ww=_ww(rules))
         return 1 if opened else 0
 
     def _manage(self, book: options.OptionBook, close, bench) -> int:
@@ -210,7 +222,7 @@ class OptionMispricingBot(Bot):
             self.close_options(UNDERLYING, include_stock=True)
             return -1
         if side == "cheap":
-            self.delta_hedge(UNDERLYING, rules.hedge_band_pct * self.portfolio_value())
+            self.delta_hedge(UNDERLYING, rules.hedge_band_pct * self.portfolio_value(), ww=_ww(rules))
         return 0
 
 

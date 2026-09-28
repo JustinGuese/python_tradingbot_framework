@@ -418,6 +418,12 @@ class PortfolioManager:
         - An underlying with any SHORT leg is never rolled: rolling one wing of
           a spread alone would leave the short side uncovered. Strategies that
           sell options manage their own exits.
+        - A short ITM call is assigned EARLY on the last session before its
+          underlying goes ex-dividend when its extrinsic value is below the
+          dividend: that is when a rational holder exercises to collect it
+          (assign_before_dividends). Physical bots deliver shares, cash bots
+          settle at intrinsic. Bots avoid it by closing the call first
+          (option_rules.ex_dividend_close_reason).
 
         A no-op for a bot holding no options.
         """
@@ -427,6 +433,7 @@ class PortfolioManager:
             contract = options.parse_occ(key)
             if contract.expiry < today:
                 self._settle_expired(key, contract, physical=settlement == "physical")
+        self.assign_before_dividends(physical=settlement == "physical", today=today)
         if roll_dte is None:
             return
 
@@ -451,12 +458,56 @@ class PortfolioManager:
                 # The sell already committed; the proceeds simply stay cash.
                 logger.warning("Rolled out of %s but could not roll into a new contract: %s", key, e)
 
+    def assign_before_dividends(self, physical: bool, today=None) -> list[str]:
+        """
+        Early assignment of short ITM calls whose extrinsic value is below the
+        next dividend, on the session before the ex-date (or the ex-date itself,
+        if the bot did not run the day before). Returns the keys assigned.
+        """
+        today = today or options.utc_today()
+        self._refresh_bot()
+        assigned = []
+        for key, qty in options.option_legs(self.bot.portfolio).items():
+            contract = options.parse_occ(key)
+            if qty >= 0 or contract.right != "C" or contract.expiry < today:
+                continue
+            div = options.next_dividend(contract.underlying, today)
+            if div is None or not 0 <= options.business_days_between(today, div[0]) <= 1:
+                continue
+            try:
+                spot = self.data_service.get_latest_price(contract.underlying)
+                mark = self.data_service.get_latest_price(key)
+            except Exception as e:
+                logger.warning("Early-assignment check for %s skipped: %s", key, e)
+                continue
+            intrinsic = options.intrinsic_value(contract, spot)
+            if not om.early_exercise_likely(mark - intrinsic, div[1], intrinsic):
+                continue
+            logger.info(
+                "EARLY ASSIGNMENT %s: ex-dividend %s pays %.2f, extrinsic only %.2f",
+                key,
+                div[0],
+                div[1],
+                mark - intrinsic,
+            )
+            if physical:
+                self._exercise(key, contract, intrinsic, "assigned early")
+            else:
+                self._cash_settle(key, intrinsic, "assigned early")
+            assigned.append(key)
+        if assigned:
+            self._refresh_bot()
+        return assigned
+
     def _settle_expired(self, key: str, contract: options.OptionContract, physical: bool = False) -> None:
         close = options.underlying_close_on(contract.underlying, contract.expiry)
         settle_price = options.intrinsic_value(contract, close)
         if physical and settle_price > 0:
-            self._exercise_expired(key, contract)
+            self._exercise(key, contract, settle_price, "expired")
             return
+        self._cash_settle(key, settle_price, "expired")
+
+    def _cash_settle(self, key: str, settle_price: float, reason: str) -> None:
         with get_db_session() as sess:
             self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
             qty = self.bot.portfolio.get(key, 0)
@@ -479,18 +530,16 @@ class PortfolioManager:
                 profit=proceeds if qty > 0 else None,
                 session=sess,
             )
-        logger.info("SETTLED expired %s: %.0f units at %.4f -> $%.2f", key, qty, settle_price, proceeds)
+        logger.info("SETTLED %s %s: %.0f units at %.4f -> $%.2f", reason, key, qty, settle_price, proceeds)
 
-    def _exercise_expired(self, key: str, contract: options.OptionContract) -> None:
+    def _exercise(self, key: str, contract: options.OptionContract, intrinsic: float, reason: str) -> None:
         """
-        Physical settlement of an expired ITM leg: shares change hands at the
-        strike, and the contract leaves the book at price 0 (how a broker
-        records exercise and assignment). Calls move shares with the sign of
-        the position, puts against it. Any part that would make the share count
-        negative is cash-settled at intrinsic value instead.
+        Physical settlement of an ITM leg (at expiry, or an early assignment):
+        shares change hands at the strike, and the contract leaves the book at
+        price 0 (how a broker records exercise and assignment). Calls move
+        shares with the sign of the position, puts against it. Any part that
+        would make the share count negative is cash-settled at `intrinsic`.
         """
-        close = options.underlying_close_on(contract.underlying, contract.expiry)
-        intrinsic = options.intrinsic_value(contract, close)
         u = contract.underlying
         with get_db_session() as sess:
             self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
@@ -534,7 +583,8 @@ class PortfolioManager:
                     session=sess,
                 )
         logger.info(
-            "EXERCISED expired %s (%s %.0f): %+.0f %s shares at %.2f, cash %+.2f%s",
+            "EXERCISED %s %s (%s %.0f): %+.0f %s shares at %.2f, cash %+.2f%s",
+            reason,
             key,
             "long" if qty > 0 else "short",
             abs(qty),
@@ -731,20 +781,28 @@ class PortfolioManager:
         with get_db_session() as sess:
             return _execute(sess)
 
-    def delta_hedge(self, underlying: str, band_usd: float) -> float:
+    def delta_hedge(self, underlying: str, band_usd: float, ww: tuple[float, float] | None = None) -> float:
         """
         Trade whole shares so the net delta of the options plus shares on
         `underlying` returns to about zero, once its dollar value exceeds
         `band_usd`. Returns the shares traded (signed). Gamma scalping is this,
         run every day on a long straddle: it sells rallies and buys dips.
+
+        ww=(cost_frac, risk_aversion) uses the Whalley-Wilmott band instead
+        (option_rules.hedge_trade): rehedge only outside it, and only to its edge.
         """
+        from .option_rules import hedge_trade
+
         book = self.option_book(underlying)
         if book.empty:
             return 0.0
         net = book.net_delta
-        if abs(net) * book.spot < band_usd:
-            return 0.0
-        shares = -float(round(net))
+        if ww is None:
+            if abs(net) * book.spot < band_usd:
+                return 0.0
+            shares = -float(round(net))
+        else:
+            shares = hedge_trade(net, book.spot, book.greeks.gamma, 0.0, 0.0, ww_risk_aversion=ww[1], cost_frac=ww[0])
         if shares == 0:
             return 0.0
         self.trade_option_legs([(underlying, shares)])

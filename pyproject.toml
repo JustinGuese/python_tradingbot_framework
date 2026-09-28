@@ -24,6 +24,9 @@ dependencies = [
     "pyportfolioopt>=1.5.6",
     "quantstats>=0.0.62",
     "scikit-learn>=1.7.1",
+    # Used directly by utils/svi.py (SVI fit) and utils/vol_estimators.py (GARCH).
+    # Already in the image through scikit-learn; listed so it cannot vanish.
+    "scipy>=1.11",
     "sqlalchemy>=2.0.42",
     "ta>=0.11.0",
     "telethon>=1.36.0",

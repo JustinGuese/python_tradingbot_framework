@@ -98,7 +98,17 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ option_quotes │ yfinance option-chain snapshots (bid/ask/IV/OI/spot); daily capture of SPY, QQQ + top-50 S&P 100 from 2026-09-28 │ any bot using option=; future option backtests │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
-│ stock_fundamentals │ Daily point-in-time P/E, EV/EBITDA, FCF yield, ownership (S&P 100, from 2026-09-25) │ none yet (utils/fundamentals.py) │
+│ stock_fundamentals │ Daily point-in-time P/E, EV/EBITDA, FCF yield, ownership (S&P 100, from 2026-09-25) │ implied_correlation weights (utils/fundamentals.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ vol_surface │ Per name per day from the capture: constant-maturity ATM IV, 25d skew, term slope, HAR fair vol, VRP, put/call, GEX, max pain │ option scan / cross-vol / scanner bots (utils/vol_surface.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ implied_correlation │ SPY implied correlation vs the 50 captured names, daily │ option_DispersionBot │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ option_mispricing_scan │ Daily ranked vol-mispricing list: vrp z-score, SVI outliers, parity flags │ scanner / cross-vol shortlists (utils/mispricing_scan.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ option_risk │ Per option bot and underlying, daily: $ greeks, spot/vol stress P&L, max loss, margin │ monitoring (utils/option_risk.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ macro_events │ FOMC / CPI / NFP dates, past and scheduled (FOMC static, CPI/NFP from FRED) │ option_IndexVolBot logging (utils/macro_calendar.py) │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
 
 4. AI — via OpenRouter
@@ -241,6 +251,14 @@ Existing Strategies (don't duplicate)
 │ option_CollarBot       │ AAPL + opts  │ Shares + 25-delta put / 25-delta call collar   │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ option_IndexVolBot     │ SPY options  │ 10-delta condor, 10% wings, when IV >= HAR + 3 │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_CrossVolBot     │ 50 names     │ Condors on the names furthest above forecast   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_MispricingScanBot │ SPY/QQQ + 50 │ z-scored IV vs forecast, both ways, vega caps │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_EarningsCrushBot │ 50 names    │ Iron fly over reports priced >= 1.25x history  │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ option_DispersionBot   │ SPY + top 10 │ Short SPY fly vs member straddles, rich corr   │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
@@ -660,12 +678,14 @@ Other helpers:
   options;
 - `fit_smile` and `smile_z`.
 
-**The option bots** (paper, all scheduled at 15:00–15:45 UTC):
+**The option bots** (paper, scheduled 15:00–16:00 UTC; EarningsCrush at 14:30 and 19:30):
 - `option_LeapCallBot`, `option_CreditSpreadBot`, `option_IronCondorBot`,
   `option_CatalystCallBot`.
 - Round 2: `option_MispricingBot`, `option_WheelBot`, `option_PMCCBot`,
   `option_EarningsCalendarBot`, `option_CollarBot`.
 - All of those trade AAPL. `option_IndexVolBot` trades SPY.
+- Round 3 trade many underlyings from one book: `option_CrossVolBot`,
+  `option_MispricingScanBot`, `option_EarningsCrushBot`, `option_DispersionBot`.
 - Their rules are pure functions in `utils/option_rules.py`, shared with
   `scripts/onetime_option_bots_backtest.py` (and
   `scripts/onetime_index_vol_backtest.py` for the index bot).
@@ -709,6 +729,46 @@ Other helpers:
     small.
   - The single best parameter set from the first half failed out of sample;
     the consensus of the first half's top 10 ships instead.
+- Round 3, 2026-09-28 (`docs/backtests/option-round3-2026-09.md`):
+  - **Data:**
+    - `utils/vol_indices.py`: the VIX family and the term ratio.
+    - `utils/macro_calendar.py`: FOMC static; CPI and NFP from FRED, which
+      needs `FRED_API_KEY`, an optional secret key.
+    - `vol_surface`, `implied_correlation` and `option_mispricing_scan` are
+      derived after every capture. `python -m tradingbot.optionchainsnapshot
+      --backfill` rebuilds them.
+  - **Risk:**
+    - `option_math.stress_pnl` and `options.stress_book` give spot×vol grids;
+      `optionrisksnapshot` writes `option_risk` daily.
+    - A short ITM call whose time value is below the next dividend is
+      **assigned early** the session before the ex-date
+      (`PortfolioManager.assign_before_dividends`).
+    - Wheel, PMCC, collar and the new bots close such calls two sessions
+      before (`Bot.dividend_threatened_calls`).
+  - **Math:**
+    - `utils/vol_estimators.py`: Yang-Zhang, Parkinson, Garman-Klass,
+      Rogers-Satchell, HAR on any daily variance, GARCH(1,1), VRP z-score,
+      Whalley-Wilmott band.
+    - `utils/svi.py`: SVI with butterfly and calendar arbitrage checks.
+    - `options.parity_violations`: the American parity band, used as a
+      bad-quote filter.
+    - `options.pick_metrics`: price, vega, gamma and max loss of a pick before
+      it is opened.
+  - **Hedging:** `Bot.delta_hedge(..., ww=(cost, risk_aversion))` rehedges to
+    the edge of a Whalley-Wilmott band. MispricingBot uses it (H2 t 0.88 vs
+    0.82 for the fixed band).
+  - **IndexVolBot gates, all rejected out of sample:** VIX/VIX3M, VVIX, FOMC
+    blackout, term-structure unwind, Yang-Zhang and GARCH forecasts, the
+    z-scored signal, and a tail hedge. The live rules are unchanged.
+    - The z-score **loses** to the raw 3-point gap on SPY (H2 t 0.98 vs 2.64).
+    - Closest miss: a VIX/VIX3M ≤ 1.0 entry gate, which halves drawdown but
+      has lower H2 t.
+  - **The four new bots are live-only and unproven.** Single-name option
+    history does not exist yet.
+    - `utils/option_replay.py` and
+      `scripts/onetime_option_replay_backtest.py` replay stored chains at
+      their recorded bid/ask once `option_quotes` has months, captured or
+      imported with the same columns.
 
 ### Reading another bot's state
 

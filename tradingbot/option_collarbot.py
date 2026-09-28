@@ -62,13 +62,21 @@ class OptionCollarBot(Bot):
 
         book = self.option_book(UNDERLYING)
         if not book.empty:
-            if wanted and (book.dte or 0) > rules.roll_dte:
+            threatened = self.dividend_threatened_calls(book)
+            if wanted and (book.dte or 0) > rules.roll_dte and not threatened:
                 self._rebalance_cash(allow_sell=False)
                 return 0
             if wanted and not view.live:
                 logger.info("Collar due to roll, but the chain is not live; rolling next run")
                 return 0
-            logger.info("Collar off (%s)", "rolling" if wanted else f"mode {rules.mode} says unhedged")
+            logger.info(
+                "Collar off (%s)",
+                "ex-dividend assignment risk"
+                if threatened
+                else "rolling"
+                if wanted
+                else f"mode {rules.mode} says unhedged",
+            )
             self.close_options(UNDERLYING)
         # With the options off, the shares are free: restore the cash buffer in
         # both directions (buying back a short call that finished deep in the

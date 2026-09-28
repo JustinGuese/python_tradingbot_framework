@@ -383,11 +383,16 @@ def har_rv_forecast(
     return math.sqrt(max(pred, 0.1 * long_run) * periods_per_year)
 
 
-def earnings_reaction_returns(close: pd.Series, report_dates: Iterable[date], after_close: bool = True) -> pd.Series:
+def earnings_reaction_returns(
+    close: pd.Series, report_dates: Iterable[date], after_close: bool | dict[date, bool | None] = True
+) -> pd.Series:
     """
     Log return of the session that reacts to each earnings report, indexed by
     that session. `after_close` reports (AAPL's habit) react the next session;
-    pre-market ones the same day. Reports outside the price history are skipped.
+    pre-market ones the same day. Pass a {report date: after_close} mapping for
+    per-report timing (many non-tech names report before the open); dates it
+    lacks, or maps to None, count as after the close. Reports outside the price
+    history are skipped.
     """
     s = pd.Series(close, dtype=float).dropna()
     idx = pd.DatetimeIndex(s.index).tz_localize(None).normalize() if len(s) else pd.DatetimeIndex([])
@@ -395,7 +400,8 @@ def earnings_reaction_returns(close: pd.Series, report_dates: Iterable[date], af
     out = {}
     for d in sorted(set(report_dates)):
         ts = pd.Timestamp(d)
-        pos = idx.searchsorted(ts, side="right" if after_close else "left")
+        amc = after_close.get(d, True) if isinstance(after_close, dict) else after_close
+        pos = idx.searchsorted(ts, side="right" if amc is not False else "left")
         if 1 <= pos < len(idx):
             out[idx[pos]] = math.log(s.iloc[pos] / s.iloc[pos - 1])
     return pd.Series(out, dtype=float)
@@ -625,6 +631,85 @@ def probability_of_profit(legs: Sequence[Leg], S: float, T: float, r: float, sig
         if payoff_at_expiry(legs, mid) > 0:
             total += _prob_below(hi, S, T, r, sigma, q) - _prob_below(lo, S, T, r, sigma, q)
     return total
+
+
+def early_exercise_likely(call_extrinsic: float, dividend: float, intrinsic: float = 1.0) -> bool:
+    """
+    Would the holder of an ITM call exercise it the day before ex-dividend?
+
+    Exercising gives up the call's remaining time value to collect the
+    dividend, so it pays when extrinsic < dividend. An OTM call (intrinsic 0) is
+    never exercised.
+    """
+    return intrinsic > 0 and dividend > 0 and call_extrinsic < dividend
+
+
+# ------------------------------------------------------------------
+# Stress scenarios
+# ------------------------------------------------------------------
+
+DEFAULT_SPOT_SHOCKS = (-0.20, -0.10, -0.05, 0.05, 0.10)
+DEFAULT_VOL_SHOCKS = (0.0, 0.10)
+FALLBACK_STRESS_IV = 0.30
+
+
+@dataclass(frozen=True)
+class StressLeg:
+    """One position to revalue: right "C"/"P" (per-share qty, T in years, iv) or "S" for shares."""
+
+    right: str
+    strike: float
+    qty: float
+    T: float = 0.0
+    iv: float | None = None
+
+
+def _stress_value(legs: Sequence[StressLeg], S: float, r: float, q: float, dvol: float, dt: float) -> float:
+    ivs = [leg.iv for leg in legs if leg.right != "S" and leg.iv]
+    fallback = float(np.mean(ivs)) if ivs else FALLBACK_STRESS_IV
+    total = 0.0
+    for leg in legs:
+        if leg.right == "S":
+            total += leg.qty * S
+            continue
+        T = max(leg.T - dt, 0.0)
+        sigma = max((leg.iv or fallback) + dvol, 0.01)
+        total += leg.qty * (
+            bs_price(S, leg.strike, T, r, sigma, leg.right, q) if T > 0 else intrinsic(S, leg.strike, leg.right)
+        )
+    return total
+
+
+def stress_pnl(
+    legs: Sequence[StressLeg],
+    S: float,
+    r: float,
+    q: float = 0.0,
+    spot_shocks: Sequence[float] = DEFAULT_SPOT_SHOCKS,
+    vol_shocks: Sequence[float] = DEFAULT_VOL_SHOCKS,
+    days_forward: float = 0.0,
+) -> pd.DataFrame:
+    """
+    P&L of the legs under every (spot move, vol move) pair, repriced with BSM.
+
+    Rows are relative spot shocks (-0.20 = spot down 20%), columns additive vol
+    shocks in vol units (0.10 = every leg's IV +10 points), values dollars
+    against today's model value. `days_forward` also lets that much time pass.
+    Legs without an IV use the mean IV of the others (or 30%). Sticky-strike and
+    a parallel vol shift are simplifications; the point is order of magnitude
+    and sign, which is what a risk cap needs.
+    """
+    base = _stress_value(legs, S, r, q, 0.0, 0.0)
+    dt = days_forward / 365.0
+    grid = {dv: [_stress_value(legs, S * (1 + ds), r, q, dv, dt) - base for ds in spot_shocks] for dv in vol_shocks}
+    return pd.DataFrame(grid, index=pd.Index(list(spot_shocks), name="spot_shock")).rename_axis(columns="vol_shock")
+
+
+def worst_stress(
+    legs: Sequence[StressLeg], S: float, r: float, q: float = 0.0, spot_shock: float = -0.20, vol_shock: float = 0.30
+) -> float:
+    """P&L of the crash scenario (default spot -20%, vol +30 points): negative is a loss."""
+    return float(stress_pnl(legs, S, r, q, (spot_shock,), (vol_shock,)).iloc[0, 0])
 
 
 # ------------------------------------------------------------------

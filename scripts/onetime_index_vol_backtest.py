@@ -31,8 +31,17 @@ Modes:
             plus the signal check (does IV - fair vol predict the premium?)
   --tune    walk-forward: grid-search on H1 (2000 .. mid-2013), judge on H2.
   --underlying QQQ   the same on QQQ / ^VXN (a robustness check, not a pick)
+  --gates   round 3 (2026-09-28): two walk-forward grids ON TOP of the live rules.
+            A: the vol-curve gates (^VIX/^VIX3M entry cap and unwind, ^VVIX cap,
+               FOMC/CPI blackout), 2007 -> now (where ^VIX3M and ^VVIX exist).
+            B: the fair-vol model (close-to-close HAR, Yang-Zhang HAR, GARCH),
+               the signal (raw gap or its z-score against the past year) and a
+               monthly tail hedge in 60-DTE 10-delta puts, 2000 -> now.
+            Each: pick on H1, ship only if it beats the live rules on H2 without
+            a deeper drawdown. CPI dates need FRED_API_KEY; without it the event
+            gate is FOMC-only (said in the output).
 
-Results: docs/backtests/index-vol-2026-09.md
+Results: docs/backtests/index-vol-2026-09.md, docs/backtests/option-round3-2026-09.md
 """
 
 import argparse
@@ -65,8 +74,10 @@ from onetime_option_bots_backtest import (
 )
 
 from tradingbot.option_indexvolbot import OptionIndexVolBot
+from tradingbot.utils import macro_calendar as mc
 from tradingbot.utils import option_math as om
 from tradingbot.utils import option_rules as rl
+from tradingbot.utils import vol_estimators as ve
 
 DATA_START, EVAL_START = "1999-03-10", "2000-03-10"  # QQQ (the benchmark) listed 1999-03-10
 
@@ -144,16 +155,106 @@ def load_inputs(u: Underlying) -> tuple[pd.DataFrame, list[date]]:
     return out
 
 
+def _fair_other(model: str, returns: pd.Series, dvar: pd.Series, days: list, expiries: list[date], dte: int) -> list:
+    out = []
+    for ts in days:
+        h = max(rl.business_days(ts.date(), first_expiry(expiries, ts.date(), dte)), 1)
+        if model == "har_yz":
+            out.append(ve.har_forecast_from_daily_variance(dvar.loc[:ts], h))
+        else:
+            out.append(ve.garch11_forecast(returns.loc[:ts], h))
+    return out
+
+
+def _event_dates() -> tuple[list[date], str]:
+    """FOMC statement days, plus CPI from FRED when FRED_API_KEY is set."""
+    days, label = list(mc.FOMC_STATEMENT_DATES), "FOMC only (no FRED_API_KEY)"
+    key = os.environ.get("FRED_API_KEY", "").strip()
+    if key:
+        days += mc.fetch_fred_release_dates(mc.FRED_RELEASES["CPI"], "2000-01-01", "2030-12-31", key)
+        label = "FOMC + CPI"
+    return sorted(set(days)), label
+
+
+def load_round3(u: Underlying, dte: int = 35) -> tuple[pd.DataFrame, list[date], str]:
+    """load_inputs plus the round-3 columns: vol curve, events, other fair models, z-scores."""
+    m, expiries = load_inputs(u)
+    events, event_label = _event_dates()
+    path = os.path.join(CACHE, f"index_vol_round3_{u.symbol}_{dte}_{date.today():%Y%m%d}.pkl")
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            extra = pickle.load(f)
+    else:
+        raw = _download(u.symbol)
+        extra = pd.DataFrame(index=m.index)
+        for sym, col in (("^VIX3M", "vix3m"), ("^VVIX", "vvix")):
+            extra[col] = _download(sym)["Close"].reindex(m.index).ffill(limit=5)
+        returns = om.log_returns(raw["Close"])
+        ohlc = raw[["Open", "High", "Low", "Close"]].rename(columns=str.lower)
+        dvar = ve.yang_zhang_daily_variance(ohlc)
+        days = list(m.index)
+        chunks = np.array_split(np.arange(len(days)), 32)
+        for model in ("har_yz", "garch"):
+            parts = Parallel(n_jobs=-1)(
+                delayed(_fair_other)(model, returns, dvar, [days[i] for i in c], expiries, dte) for c in chunks
+            )
+            extra[f"fair_{model}_{dte}"] = [x for p in parts for x in p]
+        with open(path, "wb") as f:
+            pickle.dump(extra, f)
+    m = m.join(extra)
+    m["term"] = m["vix"] / m["vix3m"]
+    m["bdays_to_event"] = mc.bdays_to_next_event_series(m.index, events)
+    m[f"fair_har_{dte}"] = m[f"fair_{dte}"]
+    for model in ("har", "har_yz", "garch"):
+        spread = m["iv"] - m[f"fair_{model}_{dte}"]
+        past = spread.shift(1).rolling(252, min_periods=60)
+        m[f"z_{model}_{dte}"] = (spread - past.mean()) / past.std()
+    return m, expiries, event_label
+
+
+def _open_tail_hedge(h: Book, b: Book, day: date, row, expiries, r: rl.IndexVolRules) -> None:
+    expiry = first_expiry(expiries, day, 60)
+    k = round(h.model.strike_for_delta("P", 0.10, expiry, day, row))
+    leg = Leg("P", k, expiry, 1)
+    px = h.fill(h.mid(leg, day, row), row.S, True)
+    n = int(r.tail_hedge_pct * (b.equity(day, row) + h.equity(day, row)) // (px * 100)) if px > 0 else 0
+    if n > 0:
+        h.open([Leg("P", k, expiry, 100 * n)], day, row)
+
+
 def sim_index_condor(m: pd.DataFrame, expiries, r: rl.IndexVolRules, model: Model) -> tuple[pd.Series, Book]:
-    fair = m[f"fair_{r.target_dte}"]
+    fair_col = f"fair_{r.target_dte}" if r.fair_model == "har" else f"fair_{r.fair_model}_{r.target_dte}"
+    fair = m[fair_col]
+    z = m.get(f"z_{r.fair_model}_{r.target_dte}")
     b, curve = Book(model), {}
+    hedge = Book(model, cash=0.0)  # the tail puts, kept apart so a condor exit leaves them alone
+    month = None
     for ts, row in m.iterrows():
         day = ts.date()
         b.settle(day, row)
+        hedge.settle(day, row)
+        if r.tail_hedge_pct:
+            if hedge.legs and hedge.dte(day) <= 21:
+                hedge.close(day, row)
+            if (day.year, day.month) != month and not hedge.legs:
+                _open_tail_hedge(hedge, b, day, row, expiries, r)
+            month = (day.year, day.month)
+        term = getattr(row, "term", None)
         if b.legs:
-            if rl.index_vol_exit_reason(-b.entry, b.value(day, row) - b.entry, b.dte(day), r):
+            if rl.index_vol_exit_reason(-b.entry, b.value(day, row) - b.entry, b.dte(day), r) or (
+                rl.index_vol_unwind_reason(term, r)
+            ):
                 b.close(day, row)
-        elif rl.index_vol_entry_ok(row.iv, fair.loc[ts], row.vix, r):
+        elif rl.index_vol_entry_ok(
+            row.iv,
+            fair.loc[ts],
+            row.vix,
+            r,
+            term_ratio=term,
+            vvix=getattr(row, "vvix", None),
+            bdays_to_event=getattr(row, "bdays_to_event", None),
+            z=None if z is None else z.loc[ts],
+        ):
             expiry = first_expiry(expiries, day, r.target_dte)
             w = max(round(r.width_pct * row.S), 1.0)
             kp = max(round(model.strike_for_delta("P", r.put_delta, expiry, day, row)), w + 1)
@@ -169,7 +270,7 @@ def sim_index_condor(m: pd.DataFrame, expiries, r: rl.IndexVolRules, model: Mode
             n = int(min(r.max_risk_pct * b.equity(day, row), b.cash) // per_unit) if 0 < per_unit < math.inf else 0
             if n > 0:
                 b.open([Leg(x.right, x.strike, x.expiry, x.qty * 100 * n) for x in unit], day, row)
-        curve[ts] = b.equity(day, row)
+        curve[ts] = b.equity(day, row) + hedge.equity(day, row)
     return pd.Series(curve), b
 
 
@@ -251,13 +352,69 @@ def tune(m, expiries, model, split) -> None:
     print(_row("H1 top-10 consensus", "H2", consensus["H2"]))
 
 
+def _gate_grid(label: str, variants: list[rl.IndexVolRules], m, expiries, model) -> None:
+    split = m.index[len(m) // 2]
+    live = evaluate(LIVE, m, expiries, model, split)
+    results = Parallel(n_jobs=-1)(delayed(evaluate)(r, m, expiries, model, split) for r in variants)
+    ranked = sorted(results, key=lambda x: x["H1"]["t"], reverse=True)
+    print(
+        f"\n### Grid {label}: {len(variants)} variants on top of the live rules, "
+        f"{m.index[0].date()} -> {m.index[-1].date()}, split {split.date()}"
+    )
+    print(
+        f"H2 t: live {live['H2']['t']:.2f}; mean of H1 top-10 {np.mean([x['H2']['t'] for x in ranked[:10]]):.2f}; "
+        f"share of grid with H2 t > live {np.mean([x['H2']['t'] > live['H2']['t'] for x in results]):.0%}"
+    )
+    print(HEADER)
+    for part in ("full", "H1", "H2"):
+        print(_row("live rules", part, live[part], live["trades"] if part == "full" else ""))
+    for i, x in enumerate(ranked[:8], 1):
+        print(_row(f"#{i} {_diff(x['rules'], LIVE)}", "H1", x["H1"], x["trades"]))
+        print(_row(f"#{i}", "H2", x["H2"]))
+    best = ranked[0]
+    ships = best["H2"]["t"] > live["H2"]["t"] and best["H2"]["max_dd"] >= live["H2"]["max_dd"]
+    print(
+        f"H1 winner: {_diff(best['rules'], LIVE)} -> H2 t {best['H2']['t']:.2f} (live {live['H2']['t']:.2f}), "
+        f"H2 max DD {best['H2']['max_dd']:.1%} (live {live['H2']['max_dd']:.1%}): {'SHIPS' if ships else 'does not ship'}"
+    )
+
+
+def gates(u: Underlying, model: Model) -> None:
+    m, expiries, event_label = load_round3(u)
+    print(f"Event gate uses: {event_label}")
+    curve_window = m.loc[m[["vix3m", "vvix"]].dropna().index[0] :]
+    grid_a = [
+        replace(LIVE, max_term_ratio=t, max_vvix=v, event_blackout_bdays=e, unwind_term_ratio=w)
+        for t, v, e, w in itertools.product(
+            [None, 0.90, 0.95, 1.0], [None, 110.0, 130.0], [None, 1, 2], [None, 1.0, 1.05]
+        )
+    ]
+    _gate_grid("A (vol curve, events)", grid_a, curve_window, expiries, model)
+    signals = [
+        {"min_gap": LIVE.min_gap, "min_z": None},
+        {"min_gap": None, "min_z": 1.0},
+        {"min_gap": None, "min_z": 1.5},
+        {"min_gap": None, "min_z": 2.0},
+        {"min_gap": LIVE.min_gap, "min_z": 1.0},
+    ]
+    grid_b = [
+        replace(LIVE, fair_model=f, tail_hedge_pct=t, **sig)
+        for f, sig, t in itertools.product(["har", "har_yz", "garch"], signals, [None, 0.0025, 0.005])
+    ]
+    _gate_grid("B (fair model, signal, tail hedge)", grid_b, m, expiries, model)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--underlying", default="SPY", choices=sorted(UNDERLYINGS))
     ap.add_argument("--tune", action="store_true")
+    ap.add_argument("--gates", action="store_true", help="round-3 walk-forward of the new gates")
     args = ap.parse_args()
 
     u = UNDERLYINGS[args.underlying]
+    if args.gates:
+        gates(u, Model(skew=u.put_skew, call_skew=u.call_skew))
+        return
     m, expiries = load_inputs(u)
     split = m.index[len(m) // 2]
     model = Model(skew=u.put_skew, call_skew=u.call_skew)

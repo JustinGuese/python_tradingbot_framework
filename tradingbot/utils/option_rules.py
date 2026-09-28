@@ -211,6 +211,24 @@ def short_premium_exit_reason(
     return None
 
 
+# Close a threatened short call this many sessions before the ex-date. The
+# framework simulates the assignment itself on the last session before it
+# (PortfolioManager.assign_before_dividends runs before the bot), so the bot has
+# to act one session earlier than that.
+EX_DIVIDEND_CLOSE_BDAYS = 2
+
+
+def ex_dividend_close_reason(
+    extrinsic: float, intrinsic: float, dividend: float | None, bdays_to_ex: int | None
+) -> str | None:
+    """Buy back a short ITM call whose time value is below the coming dividend, before it is assigned."""
+    if dividend is None or bdays_to_ex is None or not 0 <= bdays_to_ex <= EX_DIVIDEND_CLOSE_BDAYS:
+        return None
+    if om.early_exercise_likely(extrinsic, dividend, intrinsic):
+        return f"ex-dividend in {bdays_to_ex} sessions: time value {extrinsic:.2f} < dividend {dividend:.2f}"
+    return None
+
+
 # ------------------------------------------------------------------
 # Pricing mismatch: implied vol against a fair-vol forecast
 # ------------------------------------------------------------------
@@ -234,6 +252,11 @@ class MispricingRules:
     # Cheap: long straddle, delta-hedged with shares every run.
     premium_pct: float = 0.10  # debit as a share of the book
     hedge_band_pct: float = 0.02  # re-hedge once |net delta| x spot > this x book
+    # Whalley-Wilmott band instead: set a risk aversion (1/$) and the band is
+    # (1.5 x cost x S x gamma^2 / risk_aversion)^(1/3) shares, rehedged only to
+    # its edge (see hedge_trade). None keeps the fixed band above.
+    hedge_ww_risk_aversion: float | None = None
+    hedge_cost_frac: float = 0.0005  # stock cost per side, as ExecutionConfig
     straddle_take_profit: float = 0.30  # of the debit
     max_hold_days: int = 15
     exit_dte: int = 10
@@ -295,6 +318,36 @@ def mispricing_side(iv: float | None, fair: float | None, rules: MispricingRules
 def butterfly_width(spot: float, iv: float, T: float, rules: MispricingRules) -> float:
     """Wing distance: wing_sigmas standard deviations of the move to expiry."""
     return rules.wing_sigmas * spot * iv * math.sqrt(max(T, 0.0))
+
+
+def hedge_trade(
+    net_delta: float,
+    spot: float,
+    gamma: float,
+    book_value: float,
+    band_pct: float,
+    ww_risk_aversion: float | None = None,
+    cost_frac: float = 0.0005,
+) -> float:
+    """
+    Shares to trade (signed, whole) to re-hedge a delta-hedged position; 0 = leave it.
+
+    Fixed band (ww_risk_aversion None): once |net delta| x spot exceeds
+    band_pct of the book, trade back to zero delta.
+    Whalley-Wilmott: no trade while |net delta| is inside
+    H = (1.5·λ·S·Γ²/γ)^(1/3); outside, trade only back to the band's edge.
+    Hedging back to the edge rather than to zero is what saves the cost: the
+    next small move no longer triggers a trade.
+    """
+    from .vol_estimators import whalley_wilmott_band, ww_rehedge_target
+
+    if ww_risk_aversion is None:
+        if abs(net_delta) * spot <= band_pct * book_value:
+            return 0.0
+        return -float(round(net_delta))
+    band = whalley_wilmott_band(spot, abs(gamma), cost_frac, ww_risk_aversion)
+    target = ww_rehedge_target(net_delta, band)
+    return 0.0 if target is None else float(round(target))
 
 
 def mispricing_exit_reason(
@@ -639,14 +692,64 @@ class IndexVolRules:
     take_profit: float = 0.50
     stop_loss: float = 2.0
     exit_dte: int = 21
+    # Round 3 (2026-09-28). Every field below is off (None / "har") unless a
+    # walk-forward showed it beats the rules above out of sample; see
+    # docs/backtests/option-round3-2026-09.md for which did.
+    max_term_ratio: float | None = None  # skip entries while ^VIX / ^VIX3M is above this
+    max_vvix: float | None = None  # skip entries while ^VVIX is above this
+    event_blackout_bdays: int | None = None  # no entry within N sessions before FOMC / CPI
+    min_z: float | None = None  # z-score of (IV - fair) against its own past year must reach this
+    unwind_term_ratio: float | None = None  # close an open condor once ^VIX / ^VIX3M exceeds this
+    tail_hedge_pct: float | None = None  # monthly spend on 60-DTE 10-delta puts, share of book
+    fair_model: str = "har"  # "har" (close-to-close), "har_yz" (Yang-Zhang), "garch"
 
 
-def index_vol_entry_ok(iv: float | None, fair: float | None, vix: float | None, rules: IndexVolRules) -> bool:
-    if iv is None or fair is None or math.isnan(iv) or math.isnan(fair):
+def index_vol_entry_ok(
+    iv: float | None,
+    fair: float | None,
+    vix: float | None,
+    rules: IndexVolRules,
+    *,
+    term_ratio: float | None = None,
+    vvix: float | None = None,
+    bdays_to_event: int | None = None,
+    z: float | None = None,
+) -> bool:
+    """
+    Sell a condor today? A gate that is set but whose input is missing says no:
+    an unknown term structure is not a calm one.
+    """
+
+    def _missing(x: float | None) -> bool:
+        return x is None or (isinstance(x, float) and math.isnan(x))
+
+    if _missing(iv) or _missing(fair):
         return False
     if vix is not None and vix >= rules.max_vix:
         return False
+    if rules.max_term_ratio is not None and (_missing(term_ratio) or term_ratio > rules.max_term_ratio):
+        return False
+    if rules.max_vvix is not None and (_missing(vvix) or vvix > rules.max_vvix):
+        return False
+    if (
+        rules.event_blackout_bdays is not None
+        and bdays_to_event is not None
+        and not (isinstance(bdays_to_event, float) and math.isnan(bdays_to_event))
+        and bdays_to_event <= rules.event_blackout_bdays
+    ):
+        return False
+    if rules.min_z is not None and (_missing(z) or z < rules.min_z):
+        return False
     return rules.min_gap is None or iv - fair >= rules.min_gap
+
+
+def index_vol_unwind_reason(term_ratio: float | None, rules: IndexVolRules) -> str | None:
+    """Close an open condor when the vol curve inverts past unwind_term_ratio."""
+    if rules.unwind_term_ratio is None or term_ratio is None or math.isnan(term_ratio):
+        return None
+    if term_ratio > rules.unwind_term_ratio:
+        return f"VIX/VIX3M {term_ratio:.2f} > {rules.unwind_term_ratio:.2f}: vol curve inverted"
+    return None
 
 
 def index_vol_exit_reason(credit: float, pnl: float, dte: int | None, rules: IndexVolRules) -> str | None:
@@ -654,3 +757,226 @@ def index_vol_exit_reason(credit: float, pnl: float, dte: int | None, rules: Ind
     if reason is None and credit > 0 and -pnl >= rules.stop_loss * credit:
         reason = f"stop loss: {pnl:.2f} <= -{rules.stop_loss:g}x credit {credit:.2f}"
     return reason
+
+
+# ------------------------------------------------------------------
+# Round 3 (2026-09-28): cross-sectional short vol, earnings crush,
+# dispersion, the mispricing scanner. All live-only: no per-name option
+# history exists to backtest them (utils/option_replay.py will, once the
+# option_quotes capture or an import has history).
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NameVol:
+    """One name's implied vs forecast vol on the expiry a bot would trade."""
+
+    underlying: str
+    iv: float | None
+    fair: float | None
+    earnings_clear: bool  # no report between today and expiry
+    z: float | None = None  # (iv - fair) z-scored against its own history, when there is one
+
+    @property
+    def gap(self) -> float | None:
+        if self.iv is None or self.fair is None or math.isnan(self.iv) or math.isnan(self.fair):
+            return None
+        return self.iv - self.fair
+
+
+@dataclass(frozen=True)
+class CrossVolRules:
+    """Defaults a priori: the index bot's condor shape, spread over the richest names."""
+
+    target_dte: int = 35
+    min_gap: float = 0.05  # IV - HAR fair, vol points; single names carry more premium than SPY
+    short_delta: float = 0.10
+    width_pct: float = 0.10
+    max_positions: int = 5
+    risk_per_name_pct: float = 0.04  # worst-case loss per condor, share of the book
+    take_profit: float = 0.50
+    stop_loss: float = 2.0
+    exit_dte: int = 7
+    max_vix: float = 35.0
+    shortlist: int = 12  # names whose live chain is loaded, by yesterday's vrp_30
+
+
+def cross_vol_candidates(names: Sequence[NameVol], held: set[str], rules: CrossVolRules) -> list[NameVol]:
+    """Names to sell, richest gap first: clear of earnings, gap >= min_gap, not already held."""
+    ok = [
+        n
+        for n in names
+        if n.underlying not in held and n.earnings_clear and n.gap is not None and n.gap >= rules.min_gap
+    ]
+    return sorted(ok, key=lambda n: n.gap, reverse=True)[: max(rules.max_positions - len(held), 0)]
+
+
+def cross_vol_exit_reason(credit: float, pnl: float, dte: int | None, rules: CrossVolRules) -> str | None:
+    reason = short_premium_exit_reason(credit, pnl, dte, rules.take_profit, rules.exit_dte)
+    if reason is None and credit > 0 and -pnl >= rules.stop_loss * credit:
+        reason = f"stop loss: {pnl:.2f} <= -{rules.stop_loss:g}x credit {credit:.2f}"
+    return reason
+
+
+@dataclass(frozen=True)
+class EarningsCrushRules:
+    """
+    Sell the earnings move when the options price it well above history.
+    Defaults a priori: 1.25x is a margin over the typical ~1.1x overpricing of
+    implied earnings moves on large caps, wings at 1.5 implied moves.
+    """
+
+    min_ratio: float = 1.25  # implied move / historical RMS move
+    wing_moves: float = 1.5  # iron butterfly wings, in implied moves from the strike
+    risk_per_trade_pct: float = 0.03
+    max_concurrent: int = 4
+    hist_events: int = 12
+    min_hist_events: int = 6
+    front_max_days_after: int = 10  # the front expiry must end within this many days after the report
+    back_min_days_after_front: int = 5
+
+
+def reaction_session(report: date, after_close: bool | None) -> date | None:
+    """The session whose open prices a report: the next one after an after-close report."""
+    if after_close is None:
+        return None
+    if not after_close:
+        return report
+    return (pd.Timestamp(report) + pd.offsets.BDay(1)).date()
+
+
+def earnings_crush_entry_ok(
+    today: date, reaction: date | None, implied_move: float | None, hist_move: float | None, n_hist: int, rules
+) -> tuple[bool, str]:
+    """Enter only on the session right before the reaction, when the implied move is rich."""
+    if reaction is None:
+        return False, "report timing unknown"
+    if business_days(today, reaction) != 1:
+        return False, f"reaction session {reaction} is not tomorrow"
+    if n_hist < rules.min_hist_events or hist_move is None or not hist_move > 0:
+        return False, f"only {n_hist} past reactions"
+    if implied_move is None or not implied_move > 0:
+        return False, "no implied move"
+    ratio = implied_move / hist_move
+    if ratio < rules.min_ratio:
+        return False, f"implied {implied_move:.1%} vs historical {hist_move:.1%} ({ratio:.2f}x) not rich"
+    return True, f"implied {implied_move:.1%} vs historical {hist_move:.1%} ({ratio:.2f}x)"
+
+
+def earnings_crush_exit_due(today: date, reaction: date | None) -> bool:
+    """Out on the first run on or after the reaction session: the crush has happened."""
+    return reaction is None or today >= reaction
+
+
+@dataclass(frozen=True)
+class DispersionRules:
+    min_history: int = 60  # implied-correlation observations before any trade
+    entry_pct: float = 80.0  # percentile of implied correlation to sell index vol
+    exit_pct: float = 50.0
+    n_names: int = 10
+    target_dte: int = 35
+    max_risk_pct: float = 0.20  # fly max loss + straddle premiums, share of the book
+    wing_sigmas: float = 1.5
+    take_profit: float = 0.30  # of the net premium at stake
+    exit_dte: int = 10
+
+
+def dispersion_signal(
+    history: Sequence[float], current: float | None, rules: DispersionRules
+) -> tuple[str | None, str]:
+    """("enter" | "exit" | None, why). Needs rules.min_history observations first."""
+    values = [v for v in history if v is not None and not math.isnan(v)]
+    if len(values) < rules.min_history:
+        return None, f"insufficient history {len(values)}/{rules.min_history}"
+    if current is None or math.isnan(current):
+        return None, "no implied correlation today"
+    pct = om.iv_percentile(values, current)
+    if pct >= rules.entry_pct:
+        return "enter", f"implied correlation {current:.2f} at the {pct:.0f}th percentile"
+    if pct <= rules.exit_pct:
+        return "exit", f"implied correlation {current:.2f} back to the {pct:.0f}th percentile"
+    return None, f"implied correlation {current:.2f} at the {pct:.0f}th percentile"
+
+
+def vega_weighted_lots(index_vega: float, name_vegas: dict[str, float], weights: dict[str, float]) -> dict[str, int]:
+    """
+    Long straddle lots per name so each name carries its weight's share of the
+    index leg's vega: Nᵢ = |V_I| · wᵢ / Vᵢ (weights normalised). Whole lots only;
+    a name that rounds to 0 is left out.
+    """
+    total = sum(w for u, w in weights.items() if u in name_vegas and w > 0)
+    out = {}
+    for u, v in name_vegas.items():
+        w = weights.get(u, 0.0)
+        if v > 0 and w > 0 and total > 0:
+            lots = round(abs(index_vega) * (w / total) / v)
+            if lots >= 1:
+                out[u] = int(lots)
+    return out
+
+
+@dataclass(frozen=True)
+class MispricingScanRules:
+    """
+    The scanner bot: z-scored implied-vs-forecast vol, both directions, sized
+    by vega inside book-wide vega and stress caps. Defaults a priori.
+    """
+
+    target_dte: int = 35
+    rich_z: float = 2.0
+    cheap_z: float = -2.0
+    exit_z: float = 0.5  # |z| back below this: the mispricing is gone
+    min_obs: int = 60  # z needs this much history of the name's own spread
+    max_positions: int = 6
+    # Book-wide |vega| per vol point <= this x equity: at 1%, a 10-point vol
+    # shock moves the book at most ~10%. Each position aims at 1/max_positions of it.
+    vega_budget_pct: float = 0.01
+    stress_cap_pct: float = 0.15  # crash (-20% spot, +30 vol) loss <= this x equity
+    max_vix: float = 35.0
+    unwind_term_ratio: float = 1.0  # close short-vol positions when ^VIX / ^VIX3M inverts
+    short_delta: float = 0.16
+    width_pct: float = 0.08
+    take_profit: float = 0.50
+    stop_loss: float = 2.0
+    straddle_take_profit: float = 0.30
+    exit_dte: int = 7
+    max_hold_days: int = 15
+    hedge_ww_risk_aversion: float = 1e-4
+    hedge_cost_frac: float = 0.0005
+    shortlist: int = 12
+
+
+def scan_side(n: NameVol, rules: MispricingScanRules, vix: float | None) -> tuple[str | None, str]:
+    """("rich" | "cheap" | None, why) for one name."""
+    if n.z is None:
+        return None, "no z-score yet (too little history)"
+    if n.z >= rules.rich_z:
+        if not n.earnings_clear:
+            return None, f"rich z {n.z:+.1f} but earnings before expiry"
+        if vix is not None and vix >= rules.max_vix:
+            return None, f"rich z {n.z:+.1f} but VIX {vix:.0f}"
+        return "rich", f"z {n.z:+.1f}"
+    if n.z <= rules.cheap_z:
+        return "cheap", f"z {n.z:+.1f}"
+    return None, f"z {n.z:+.1f} inside the band"
+
+
+def scan_exit_reason(
+    side: str, z: float | None, pnl: float, stake: float, dte: int | None, held_days: int, rules: MispricingScanRules
+) -> str | None:
+    """Exit a scanner position. stake = credit (rich) or debit (cheap)."""
+    if dte is not None and dte <= rules.exit_dte:
+        return f"{dte} DTE"
+    if side == "rich":
+        if stake > 0 and pnl >= rules.take_profit * stake:
+            return "take profit"
+        if stake > 0 and -pnl >= rules.stop_loss * stake:
+            return "stop loss"
+    else:
+        if stake > 0 and pnl >= rules.straddle_take_profit * stake:
+            return "take profit"
+        if held_days >= rules.max_hold_days:
+            return f"held {held_days} days"
+    if z is not None and abs(z) < rules.exit_z:
+        return f"z {z:+.1f}: mispricing gone"
+    return None
