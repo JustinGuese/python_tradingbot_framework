@@ -10,6 +10,8 @@ catboost_info/
 # C extensions
 *.so
 
+.env.secret
+
 # Distribution / packaging
 .Python
 build/
