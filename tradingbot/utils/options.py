@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from . import corporate_events, market_calendar
 from . import option_math as om
 from .db import OptionQuote, StockEarnings, StockNews, Trade, get_db_session
 from .option_math import CONTRACT_MULTIPLIER
@@ -293,14 +294,29 @@ def risk_free_rate() -> float:
     return rate
 
 
+def _stored(underlying: str, today: date | None) -> corporate_events.StoredEvents | None:
+    """The DB copy of the symbol's earnings/dividends if fresh, else None (logged)."""
+    stored = corporate_events.stored_events(underlying, today)
+    if stored is None:
+        logger.warning(
+            "No fresh stored earnings/dividends for %s (corporateeventssnapshot); asking yfinance", underlying
+        )
+    return stored
+
+
 def next_earnings_date(underlying: str, today: date | None = None) -> date | None:
     """
     The next scheduled earnings date on or after today, or None if unknown.
 
-    yfinance's calendar first, then any future row in stock_earnings. None is a
-    real answer ("unknown"), and callers decide whether unknown blocks a trade.
+    The stored events first (corporate_events); without a fresh refresh,
+    yfinance's calendar, then any future row in stock_earnings. None is a real
+    answer ("unknown"), and callers decide whether unknown blocks a trade.
     """
     today = today or utc_today()
+    stored = _stored(underlying, today)
+    if stored is not None:
+        upcoming = [d for d, _ in stored.earnings if d >= today]
+        return upcoming[0] if upcoming else None
     try:
         cal = yf.Ticker(underlying).calendar or {}
         dates = cal.get("Earnings Date") or []
@@ -339,12 +355,12 @@ def dividend_yield(underlying: str) -> float:
 
 
 def business_days_between(start: date, end: date) -> int:
-    """Weekdays from start (inclusive) to end (exclusive): 0 = same day, 1 = next session."""
-    return int(np.busday_count(start, end))
+    """NYSE sessions from start (inclusive) to end (exclusive): 0 = same day, 1 = next session."""
+    return market_calendar.sessions_between(start, end)
 
 
 @lru_cache(maxsize=64)
-def _dividend_info(underlying: str) -> tuple[date | None, float]:
+def _yf_dividend_info(underlying: str) -> tuple[date | None, float]:
     """(next ex-dividend date from yfinance's calendar, last dividend paid per share)."""
     ticker = yf.Ticker(underlying)
     ex_date = None
@@ -371,19 +387,27 @@ def next_dividend(underlying: str, today: date | None = None) -> tuple[date, flo
     companies rarely change it between announcements.
     """
     today = today or utc_today()
-    ex_date, amount = _dividend_info(underlying)
+    stored = _stored(underlying, today)
+    if stored is not None:
+        upcoming = [(d, a) for d, a in stored.dividends if d >= today and a > 0]
+        return upcoming[0] if upcoming else None
+    ex_date, amount = _yf_dividend_info(underlying)
     if ex_date is None or ex_date < today or amount <= 0:
         return None
     return ex_date, amount
 
 
-def earnings_events(underlying: str, limit: int = 40) -> list[tuple[date, bool | None]]:
+def earnings_events(underlying: str, limit: int = 40, today: date | None = None) -> list[tuple[date, bool | None]]:
     """
-    (report date, after_close) for past and scheduled reports, oldest first,
-    from yfinance's earnings-date timestamps (New York time): a report stamped
-    at 12:00 or later is after the close, earlier is before the open, and a
-    bare midnight stamp is unknown (None). Empty when yfinance has nothing.
+    (report date, after_close) for past and scheduled reports, oldest first:
+    the stored events (corporate_events), else yfinance's earnings-date
+    timestamps. In New York time a report stamped at 12:00 or later is after
+    the close, earlier is before the open, and a bare midnight stamp is
+    unknown (None). Empty when nothing is known.
     """
+    stored = _stored(underlying, today)
+    if stored is not None:
+        return stored.earnings[-limit:]
     try:
         df = yf.Ticker(underlying).get_earnings_dates(limit=limit)
     except Exception as e:
@@ -393,25 +417,27 @@ def earnings_events(underlying: str, limit: int = 40) -> list[tuple[date, bool |
         return []
     out: dict[date, bool | None] = {}
     for ts in pd.to_datetime(df.index):
-        local = ts.tz_convert("America/New_York") if ts.tzinfo is not None else ts
-        known = local.hour != 0 or local.minute != 0
-        out[local.date()] = (local.hour >= 12) if known else None
+        out[corporate_events.report_session_date(ts)] = corporate_events.report_after_close(ts)
     return sorted(out.items())
 
 
 def next_earnings_event(underlying: str, today: date | None = None) -> tuple[date, bool | None] | None:
     """The next scheduled report on or after today with its timing, or None."""
     today = today or utc_today()
-    upcoming = [e for e in earnings_events(underlying, limit=8) if e[0] >= today]
+    upcoming = [e for e in earnings_events(underlying, limit=8, today=today) if e[0] >= today]
     return upcoming[0] if upcoming else None
 
 
 def earnings_history(underlying: str, limit: int = 40, today: date | None = None) -> list[date]:
     """
-    Past earnings report dates, oldest first: yfinance, else the stock_earnings
-    table. Used to measure the stock's typical earnings-day move.
+    Past earnings report dates, oldest first: the stored events, else yfinance,
+    else any stock_earnings rows. Used to measure the stock's typical
+    earnings-day move.
     """
     today = today or utc_today()
+    stored = _stored(underlying, today)
+    if stored is not None:
+        return [d for d, _ in stored.earnings if d < today][-limit:]
     dates: set[date] = set()
     try:
         df = yf.Ticker(underlying).get_earnings_dates(limit=limit)
@@ -1166,6 +1192,37 @@ def build_book(
         greeks=total,
         shares=shares,
     )
+
+
+def units_for_risk(per_unit: float, max_risk_usd: float, free_cash: float) -> int:
+    """Whole units whose total worst-case loss fits both the risk budget and the free cash."""
+    if not per_unit > 0 or math.isinf(per_unit):
+        return 0
+    return max(int(min(max_risk_usd, free_cash) // per_unit), 0)
+
+
+def dividend_threatened_calls(book: OptionBook, dividend: tuple[date, float] | None) -> list[str]:
+    """
+    Short ITM calls in `book` likely to be assigned early before the next
+    ex-dividend date: time value below the dividend, within
+    option_rules.EX_DIVIDEND_CLOSE_BDAYS sessions. `dividend` is
+    next_dividend()'s (ex-date, amount). Each hit is logged.
+    """
+    from .option_rules import ex_dividend_close_reason
+
+    if dividend is None:
+        return []
+    bdays = business_days_between(book.today, dividend[0])
+    out = []
+    for p in book.positions:
+        if p.qty >= 0 or p.contract.right != "C":
+            continue
+        intrinsic = intrinsic_value(p.contract, book.spot)
+        reason = ex_dividend_close_reason(p.price - intrinsic, intrinsic, dividend[1], bdays)
+        if reason:
+            logger.info("%s: %s", p.key, reason)
+            out.append(p.key)
+    return out
 
 
 def stress_legs(book: OptionBook) -> list[om.StressLeg]:

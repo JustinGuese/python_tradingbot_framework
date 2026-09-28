@@ -172,8 +172,11 @@ class LiveTradeCopier:
             if user_weight <= 0:
                 continue
 
-            bot = self.bot_repo.create_or_get_bot(bot_name)
-            portfolio = bot.portfolio or {}
+            # read_portfolio, never create_or_get_bot: a missing name must not
+            # materialise a fresh all-cash row and get copied as a signal.
+            portfolio = self.bot_repo.read_portfolio(bot_name)
+            if portfolio is None:
+                raise ValueError(f"Source bot {bot_name!r} has no row in `bots`")
 
             symbols = [s for s in portfolio if s != "USD"]
             if not symbols:

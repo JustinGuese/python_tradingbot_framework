@@ -36,6 +36,18 @@ t_stat = resid.mean() / resid.std() * sqrt(n)  # n = daily obs
 Report alpha, t-stat, beta, correlation and max drawdown together, each over the
 bot's own live window, with QQQ over that same window.
 
+**The weekly `alphareport` CronJob does exactly this** for every live bot
+(Saturdays 07:00 UTC, `utils/alpha_report.py`). It writes the
+`bot_alpha_report` table with a verdict per bot:
+- `edge`;
+- `pause candidate`;
+- `levered QQQ` / `QQQ clone`;
+- `unproven`;
+- `too short`.
+
+Start from the latest `report_date` there rather than recomputing by hand.
+`backtest_bot` uses the same `alpha_stats` function.
+
 **Backtests use the same method.** `backtest_bot` returns `alpha`, `alpha_t`, `beta`
 and `benchmark_corr` (see `_compute_alpha_metrics` in `tradingbot/utils/backtest.py`),
 and `local_optimize` / `tune_hyperparameters` rank by `alpha_t` by default. Don't

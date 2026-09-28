@@ -179,9 +179,9 @@ def _build_tools(bot: Bot) -> list:
     def get_portfolio_status() -> str:
         """Get the current portfolio worth (USD) and holdings for this bot."""
         try:
-            bot.dbBot = bot._bot_repository.create_or_get_bot(bot.bot_name)
-            worth = calculate_portfolio_worth(bot.dbBot, bot._data_service)
-            holdings = dict(bot.dbBot.portfolio)
+            snapshot = bot.dbBot
+            worth = calculate_portfolio_worth(snapshot, bot._data_service)
+            holdings = dict(snapshot.portfolio)
             return f"portfolio_worth: {worth:.2f} USD, holdings: {holdings}"
         except Exception as e:
             return f"Error getting portfolio status: {e!s}"

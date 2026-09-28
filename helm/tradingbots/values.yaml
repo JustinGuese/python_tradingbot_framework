@@ -389,7 +389,7 @@ bots:
 - name: option_dispersionbot
   schedule: "55 15 * * 1-5" # short SPY fly vs long member straddles at high implied correlation (waits for 60 days of history)
 - name: option_earningscrushbot
-  schedule: "30 14,19 * * 1-5" # 19:30 sells rich earnings moves before the reaction session, 14:30 closes after the open
+  schedule: "30 14,16,19 * * 1-5" # enters within 2h of the close (19:30, or 16:30 on an early close), 14:30 closes after the open
 
 - name: institutionalflowbot
   # Weekly top-20 of the S&P 100 passing institutional mandate filters
@@ -406,16 +406,34 @@ bots:
   # this is how a point-in-time history gets built. Nothing trades on it yet.
   schedule: "0 23 * * 1-5" # Daily 11:00 PM UTC Mon-Fri
 
+- name: alphareport
+  # Not a bot: every Saturday, alpha / t / beta / corr / max DD vs Benchmark_QQQ
+  # per live bot from portfolio_worth (weekends and >4-day gaps dropped) into
+  # bot_alpha_report, ranked table in the log, t <= -2 flagged as a pause
+  # candidate. Exits 1 if Benchmark_QQQ is missing or stale (utils/alpha_report.py).
+  schedule: "0 7 * * 6" # Saturdays 7:00 AM UTC
+
+- name: corporateeventssnapshot
+  # Not a bot: refreshes earnings dates (with before-open / after-close timing)
+  # and ex-dividend dates into stock_earnings / dividend_events for the option
+  # capture universe, every held option underlying and AAPL. The option bots
+  # read these tables instead of asking yfinance on every call. Runs before the
+  # 14:30 / 15:00 UTC option bots. Exits 1 if under 80% of the 50 names return
+  # earnings (utils/corporate_events.py).
+  schedule: "0 12 * * 1-5" # Daily 12:00 PM UTC Mon-Fri
+
 - name: optionchainsnapshot
   # Not a bot: stores one live option-chain snapshot a day into option_quotes
   # for SPY, QQQ and the 50 largest S&P 100 names (~9 expiries, strikes near
   # the money; ~35k rows/day, ~2-2.5 GB/yr). yfinance serves no historical
   # chains, so this is how an observed options history gets built. Must run
-  # while the market is open: 19:45 UTC is 15:45 EDT / 14:45 EST.
+  # while the market is open: 19:45 UTC is 15:45 EDT / 14:45 EST. The 16:45 run
+  # captures only on early-close days (13:00 New York); each run checks the NYSE
+  # calendar and captures only within 90 minutes of that day's close.
   # After the capture it condenses the day into vol_surface (constant-maturity
   # IV, skew, term slope, VRP, GEX, put/call, max pain), implied_correlation
   # and the option_mispricing_scan list.
-  schedule: "45 19 * * 1-5"
+  schedule: "45 16,19 * * 1-5"
 
 - name: optionrisksnapshot
   # Not a bot: dollar greeks, spot/vol stress P&L, max loss and margin of every

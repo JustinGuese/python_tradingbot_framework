@@ -195,7 +195,7 @@ def fair_vol_series(m: pd.DataFrame, earnings: list[date], expiries: list[date],
     out = {}
     for ts in m.index:
         day = ts.date()
-        h = max(rl.business_days(day, first_expiry(expiries, day, target_dte)), 1)
+        h = max(rl.weekdays(day, first_expiry(expiries, day, target_dte)), 1)
         out[ts] = om.har_rv_forecast(returns.loc[:ts], h, exclude=reactions[reactions <= ts])
     series = pd.Series(out)
     with open(path, "wb") as f:
@@ -474,7 +474,7 @@ def sim_mispricing(m, expiries, earnings, r: rl.MispricingRules, model: Model) -
                 pnl, entry = b.value(day, row) - b.entry, b.entry
             else:
                 pnl, entry = b.equity(day, row) - open_equity, b.entry
-            held = rl.business_days(opened, day)
+            held = rl.weekdays(opened, day)
             if rl.mispricing_exit_reason(side, gap, pnl, entry, b.dte(day), held, r):
                 b.close(day, row)
                 b.trade_shares(-b.shares, row)

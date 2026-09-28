@@ -151,7 +151,7 @@ class BotRepository:
         is_buy: bool,
         profit: float | None = None,
         session: Session | None = None,
-    ) -> Trade:
+    ) -> Trade | None:
         """
         Log a trade to the database.
 
@@ -166,7 +166,8 @@ class BotRepository:
             session: Optional existing database session
 
         Returns:
-            Created Trade object
+            The created Trade when `session` is given (still attached to it),
+            else None.
         """
 
         def _create_trade(sess: Session):
@@ -190,4 +191,7 @@ class BotRepository:
             return _create_trade(session)
 
         with get_db_session() as session:
-            return _create_trade(session)
+            _create_trade(session)
+        # The row is expired and detached once its session closes; returning it
+        # would hand the caller an object that raises on first attribute access.
+        return None

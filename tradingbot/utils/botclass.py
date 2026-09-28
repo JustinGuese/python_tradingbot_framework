@@ -29,6 +29,7 @@ Example:
 import logging
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -46,6 +47,14 @@ logger = logging.getLogger(__name__)
 # Below this many units a holding is float residue, not a position. Matches the
 # zero-holding cutoff in PortfolioManager.sell.
 DUST_QTY = 1e-6
+
+
+@dataclass(frozen=True)
+class BotSnapshot:
+    """A bot's `bots` row as plain data, read at one moment. Writing to it persists nothing."""
+
+    name: str
+    portfolio: dict
 
 
 class Bot:
@@ -191,7 +200,10 @@ class Bot:
             raise ValueError(f"{name}: USE_OPTIONS supports single-symbol bots and direct buy()/sell() only.")
 
         init_db()  # Ensure database is initialized before first access
-        self.dbBot = BotRepository.create_or_get_bot(name, initial_usd=self.INITIAL_CAPITAL)
+        self._bot_repository = BotRepository  # staticmethod namespace, never instantiated
+        # Registers the bot's own row on first run. Nothing ORM is kept: dbBot
+        # reads a fresh snapshot on every access.
+        self._bot_repository.create_or_get_bot(name, initial_usd=self.INITIAL_CAPITAL)
         self.interval = interval
         self.period = period
 
@@ -200,9 +212,7 @@ class Bot:
 
         # Initialize services
         self._data_service = DataService()
-        self._bot_repository = BotRepository  # staticmethod namespace, never instantiated
         self._portfolio_manager = PortfolioManager(
-            bot=self.dbBot,
             bot_name=self.bot_name,
             data_service=self._data_service,
             bot_repository=self._bot_repository,
@@ -561,8 +571,6 @@ class Bot:
             target_dte=dte if dte is not None else getattr(self, "OPTION_TARGET_DTE", 30),
             target_delta=delta if delta is not None else getattr(self, "OPTION_TARGET_DELTA", None),
         )
-        # Refresh dbBot reference after portfolio update
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
 
     def sell(self, symbol: str, quantity_usd: float = -1, option: bool | str | None = None) -> None:
         """
@@ -579,8 +587,27 @@ class Bot:
         self._portfolio_manager.sell(
             symbol, quantity_usd=quantity_usd, cached_data=cached, option=self._option_mode(option)
         )
-        # Refresh dbBot reference after portfolio update
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
+
+    @property
+    def dbBot(self) -> BotSnapshot:
+        """
+        This bot's row, read fresh on every access, as plain data.
+
+        It used to be the ORM row itself, re-fetched after every trade by hand.
+        Any row outlives its session and goes stale or detached, and a missed
+        re-fetch surfaced later as DetachedInstanceError or as last run's cash.
+        Reading on access makes both impossible. Bind it to a local when a
+        method needs one consistent view.
+        """
+        repository = self.__dict__.get("_bot_repository")
+        if repository is None:
+            # A bot built without a database (RuleBot(attach_db=False)): an
+            # AttributeError names the problem, and hasattr() stays False.
+            raise AttributeError(f"{type(self).__name__} has no database row (dbBot)")
+        portfolio = repository.read_portfolio(self.bot_name)
+        if portfolio is None:
+            raise LookupError(f"Bot {self.bot_name!r} has no row in `bots`")
+        return BotSnapshot(self.bot_name, portfolio)
 
     def _position_qty(self, symbol: str) -> float:
         """Units held in `symbol` — or, for a USE_OPTIONS bot, in contracts on it."""
@@ -636,13 +663,11 @@ class Bot:
         worst-case loss allows (default: all free cash). Returns units opened.
         """
         units = self._portfolio_manager.open_structure(pick, math.inf if max_risk_usd is None else max_risk_usd)
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return units
 
     def trade_option_legs(self, legs: list[tuple[str, float]]) -> float:
         """Change several legs (contracts in share-equivalents, or the underlying's shares) atomically."""
         cash = self._portfolio_manager.trade_option_legs(legs)
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return cash
 
     def close_options(self, underlying: str, include_stock: bool = False) -> float:
@@ -651,7 +676,6 @@ class Bot:
         also flattens the shares held beside them. Returns net cash.
         """
         cash = self._portfolio_manager.close_options(underlying, include_stock=include_stock)
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return cash
 
     def delta_hedge(self, underlying: str, band_usd: float, ww: tuple[float, float] | None = None) -> float:
@@ -660,7 +684,6 @@ class Bot:
         ww=(cost_frac, risk_aversion) switches to a Whalley-Wilmott band, rehedged to its edge.
         """
         shares = self._portfolio_manager.delta_hedge(underlying, band_usd, ww=ww)
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         return shares
 
     def option_book(self, underlying: str) -> options.OptionBook:
@@ -673,22 +696,7 @@ class Bot:
         ex-dividend date (time value below the dividend, within
         option_rules.EX_DIVIDEND_CLOSE_BDAYS sessions). Each is logged.
         """
-        from tradingbot.utils.option_rules import ex_dividend_close_reason
-
-        div = options.next_dividend(book.underlying, book.today)
-        if div is None:
-            return []
-        bdays = options.business_days_between(book.today, div[0])
-        out = []
-        for p in book.positions:
-            if p.qty >= 0 or p.contract.right != "C":
-                continue
-            intrinsic = options.intrinsic_value(p.contract, book.spot)
-            reason = ex_dividend_close_reason(p.price - intrinsic, intrinsic, div[1], bdays)
-            if reason:
-                logger.info("%s: %s", p.key, reason)
-                out.append(p.key)
-        return out
+        return options.dividend_threatened_calls(book, options.next_dividend(book.underlying, book.today))
 
     def portfolio_value(self) -> float:
         """Total book value: cash plus every holding at the latest price (short legs negative)."""
@@ -708,8 +716,6 @@ class Bot:
             ValueError: If weights don't sum to 1.0 (within tolerance)
         """
         self._portfolio_manager.rebalance_portfolio(targetPortfolio, only_over_50_usd=onlyOver50USD)
-        # Refresh dbBot reference after portfolio update
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
 
     # Decision and execution methods
     def decisionFunction(self, row: pd.Series) -> int:
@@ -823,8 +829,6 @@ class Bot:
 
         Catches exceptions and logs them to the database before re-raising.
         """
-        # Refresh dbBot to ensure it's attached to a session
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         bot_name = self.bot_name
         decision = -2
         try:
@@ -836,11 +840,9 @@ class Bot:
                     target_delta=getattr(self, "OPTION_TARGET_DELTA", None),
                     settlement=getattr(self, "OPTION_SETTLEMENT", "cash"),
                 )
-                self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
             decision = self.makeOneIteration()
-            # Refresh again after makeOneIteration in case portfolio was updated
-            self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-            cash = self.dbBot.portfolio.get("USD", 0)
+            portfolio = self.dbBot.portfolio  # read after the iteration traded
+            cash = portfolio.get("USD", 0)
 
             # Handle multi-asset bots gracefully
             if self.symbol:
@@ -848,7 +850,7 @@ class Bot:
                 holding_info = f"Holding: {holding}"
             else:
                 # For multi-asset bots, show portfolio summary
-                non_usd_holdings = {k: v for k, v in self.dbBot.portfolio.items() if k != "USD" and v != 0}
+                non_usd_holdings = {k: v for k, v in portfolio.items() if k != "USD" and v != 0}
                 holding_info = f"Holdings: {len(non_usd_holdings)} assets"
 
             logger.info("Decision: %s", decision)
@@ -992,8 +994,6 @@ class Bot:
             return self._run_multi_ticker_iteration()
 
         # Single-asset path
-        # Refresh dbBot to ensure it's attached to a session
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         data = self.getYFDataWithTA(saveToDB=True, interval=self.interval, period=self.period)
         # Make full dataset available so decisionFunction can access history
         # (e.g. Hurst exponent, rolling z-scores) without overriding makeOneIteration.
@@ -1260,7 +1260,6 @@ class Bot:
         Returns:
             Number of legs whose target differs materially from their current value
         """
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
         tradeable = self.tradeable_tickers
 
         # Phase 1: load ALL tickers so self.datas is complete before any
@@ -1327,7 +1326,6 @@ class Bot:
         Returns:
             Number of legs whose target differs materially from their current value
         """
-        self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
 
         # Load ALL tickers, benchmarks included: targetWeights is handed the
         # whole universe because cross-sectional strategies rank across it.

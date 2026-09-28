@@ -7,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 
+from .alpha_report import alpha_stats
 from .botclass import Bot
 from .config import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT, EXECUTION_CONFIG
 from .portfolio_manager import should_trade
@@ -352,22 +353,11 @@ def _compute_alpha_metrics(
     if len(rets) < 3:
         return unavailable
 
-    var_b = float(rets["b"].var())
-    if not np.isfinite(var_b) or var_b <= 0:
+    # The same formula the weekly live report uses (utils/alpha_report.py).
+    stats = alpha_stats(rets["p"], rets["b"], _get_periods_per_year(interval))
+    if stats is None:
         return unavailable
-
-    beta = float(rets["p"].cov(rets["b"]) / var_b)
-    resid = rets["p"] - beta * rets["b"]
-    resid_std = float(resid.std())
-    alpha_t = float(resid.mean() / resid_std * np.sqrt(len(resid))) if resid_std > 0 else 0.0
-    # A flat (all-cash) curve has no correlation to define; corr would divide by 0.
-    corr = float(rets["p"].corr(rets["b"])) if rets["p"].std() > 0 else 0.0
-    return {
-        "alpha": float(resid.mean() * _get_periods_per_year(interval)),
-        "alpha_t": alpha_t if np.isfinite(alpha_t) else 0.0,
-        "beta": beta,
-        "benchmark_corr": corr if np.isfinite(corr) else 0.0,
-    }
+    return {"alpha": stats.alpha, "alpha_t": stats.t, "beta": stats.beta, "benchmark_corr": stats.corr}
 
 
 def _resolve_benchmark_close(

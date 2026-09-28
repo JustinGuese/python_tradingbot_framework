@@ -27,7 +27,7 @@ FREE = ExecutionConfig(slippage_pct=0.0, commission_pct=0.0, min_trade_usd=1.0, 
 def _pm(bot, price, cfg):
     ds = MagicMock()
     ds.get_latest_price.return_value = price
-    return PortfolioManager(bot, bot.name, ds, BotRepository, execution_config=cfg)
+    return PortfolioManager(bot.name, ds, BotRepository, execution_config=cfg)
 
 
 # ------------------------------------------------------------------
@@ -239,7 +239,7 @@ def _rebalance_pm(bot, prices, cfg):
     ds = MagicMock()
     ds.get_latest_prices_batch.return_value = prices
     ds.get_latest_price.side_effect = lambda sym, cached=None: prices[sym]
-    return PortfolioManager(bot, bot.name, ds, BotRepository, execution_config=cfg)
+    return PortfolioManager(bot.name, ds, BotRepository, execution_config=cfg)
 
 
 def test_rebalance_skips_adjustments_inside_the_band(sqlite_db, db_session, test_bot):

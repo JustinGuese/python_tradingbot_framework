@@ -139,9 +139,9 @@ class StockNewsSentimentBot(Bot):
                 logger.info(f"    >> Skip: direction={direction}, confidence={confidence}")
                 continue
 
-            self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-            cash = self.dbBot.portfolio.get("USD", 0)
-            holding = self.dbBot.portfolio.get(symbol, 0)
+            portfolio = self.dbBot.portfolio
+            cash = portfolio.get("USD", 0)
+            holding = portfolio.get(symbol, 0)
             position_usd = round(cash * POSITION_SIZE_PCT, 2)
 
             if direction == "BUY" and position_usd > 10:

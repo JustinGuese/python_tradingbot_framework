@@ -40,6 +40,14 @@ Modes:
             Each: pick on H1, ship only if it beats the live rules on H2 without
             a deeper drawdown. CPI dates need FRED_API_KEY; without it the event
             gate is FOMC-only (said in the output).
+  --decide  the live bot's own decision function (utils/option_strategies.
+            decide_indexvol) on a synthetic chain built from the same model
+            (SyntheticMarket). select_iron_condor picks the strikes, HAR runs
+            on every close so far, horizons count NYSE sessions, and sizing
+            uses cash after margin, all as live. It runs the live rules, gated and
+            ungated, on the 2007+ window next to this fast simulator. The grids
+            above stay on the fast simulator: the decide path is too slow for
+            hundreds of 26-year runs, and it exists to show the two agree.
 
 Results: docs/backtests/index-vol-2026-09.md, docs/backtests/option-round3-2026-09.md
 """
@@ -77,7 +85,10 @@ from tradingbot.option_indexvolbot import OptionIndexVolBot
 from tradingbot.utils import macro_calendar as mc
 from tradingbot.utils import option_math as om
 from tradingbot.utils import option_rules as rl
+from tradingbot.utils import options
 from tradingbot.utils import vol_estimators as ve
+from tradingbot.utils.option_decide import Close, Holdings, Market, Open
+from tradingbot.utils.option_strategies import decide_indexvol
 
 DATA_START, EVAL_START = "1999-03-10", "2000-03-10"  # QQQ (the benchmark) listed 1999-03-10
 
@@ -121,7 +132,7 @@ def _fair(returns: pd.Series, days: list, expiries: list[date], dte: int) -> lis
     out = []
     for ts in days:
         day = ts.date()
-        h = max(rl.business_days(day, first_expiry(expiries, day, dte)), 1)
+        h = max(rl.weekdays(day, first_expiry(expiries, day, dte)), 1)
         out.append(om.har_rv_forecast(returns.loc[:ts], h))
     return out
 
@@ -158,7 +169,7 @@ def load_inputs(u: Underlying) -> tuple[pd.DataFrame, list[date]]:
 def _fair_other(model: str, returns: pd.Series, dvar: pd.Series, days: list, expiries: list[date], dte: int) -> list:
     out = []
     for ts in days:
-        h = max(rl.business_days(ts.date(), first_expiry(expiries, ts.date(), dte)), 1)
+        h = max(rl.weekdays(ts.date(), first_expiry(expiries, ts.date(), dte)), 1)
         if model == "har_yz":
             out.append(ve.har_forecast_from_daily_variance(dvar.loc[:ts], h))
         else:
@@ -404,14 +415,195 @@ def gates(u: Underlying, model: Model) -> None:
     _gate_grid("B (fair model, signal, tail hedge)", grid_b, m, expiries, model)
 
 
+# ------------------------------------------------------------------
+# --decide: the live decision function on a synthetic chain
+# ------------------------------------------------------------------
+
+CHAIN_BAND = 0.35  # strikes listed within +/- 35% of spot, on a $1 grid (SPY's)
+MIN_QUOTE = 0.01  # a contract is listed with a market down to a penny mid, as SPY's far wings are
+_RATE = {"r": 0.0}  # the day's T-bill rate, for options.* IV solves inside decide
+
+
+def _occ(u: str, expiry: date, right: str, strike: float) -> str:
+    return f"{u}{expiry:%y%m%d}{right}{round(strike * 1000):08d}"
+
+
+class SyntheticMarket(Market):
+    """utils/option_decide.Market over one row of the synthetic frame."""
+
+    def __init__(self, u: str, ts, row, spot_history: pd.Series, expiries, model: Model, book: Book):
+        day = ts.date()
+        super().__init__(day, pd.Timestamp(f"{day} 19:45", tz="UTC").to_pydatetime())
+        self.u, self.ts, self.row, self.expiries, self.model, self.book = u, ts, row, expiries, model, book
+        self.spot_history = spot_history  # the FULL series, not the evaluation window
+
+    def chain(self, underlying: str, target_dte: int) -> options.ChainView:
+        expiry = first_expiry(self.expiries, self.today, target_dte)
+        S = self.row.S
+        rows = []
+        for k in range(max(int(S * (1 - CHAIN_BAND)), 1), int(S * (1 + CHAIN_BAND)) + 1):
+            for right in ("C", "P"):
+                mid = self.model.price(right, float(k), expiry, self.today, self.row)
+                if mid < MIN_QUOTE:
+                    continue
+                rows.append(
+                    {
+                        "contract_symbol": _occ(underlying, expiry, right, k),
+                        "option_type": right,
+                        "strike": float(k),
+                        "bid": self.book.fill(mid, S, False),
+                        "ask": self.book.fill(mid, S, True),
+                        "last_price": mid,
+                        "volume": 1000.0,
+                        "open_interest": 10_000.0,
+                    }
+                )
+        return options.ChainView(underlying, expiry, pd.DataFrame(rows), S, True, self.today)
+
+    def vol_index(self, symbol: str) -> float | None:
+        col = {"^VIX": "vix", "^VIX3M": "vix3m", "^VVIX": "vvix"}[symbol]
+        value = getattr(self.row, col, None)
+        return None if value is None or pd.isna(value) else float(value)
+
+    def closes(self, underlying: str) -> pd.Series:
+        # Every close so far, as live now fetches (Market.closes).
+        return self.spot_history.loc[: self.ts]
+
+    def ohlc(self, symbols) -> dict:
+        return {}
+
+    def risk_free_rate(self) -> float:
+        return float(self.row.r)
+
+    def next_macro_event(self):
+        bdays = getattr(self.row, "bdays_to_event", None)
+        if bdays is None or pd.isna(bdays):
+            return None, None
+        return ("FOMC/CPI", "?"), int(bdays)
+
+
+class SyntheticHoldings(Holdings):
+    """utils/option_decide.Holdings over the harness's Book (legs keyed as OCC symbols)."""
+
+    def __init__(self, u: str, day: date, row, book: Book, opened: dict):
+        self.u, self.day, self.row, self.b, self._opened = u, day, row, book, opened
+
+    def underlyings(self) -> set[str]:
+        return {self.u} if self.b.legs else set()
+
+    def book(self, underlying: str) -> options.OptionBook:
+        keys = {_occ(underlying, x.expiry, x.right, x.strike): x for x in self.b.legs}
+        return options.build_book(
+            underlying,
+            {k: x.qty for k, x in keys.items()},
+            {k: self.b.mid(x, self.day, self.row) for k, x in keys.items()},
+            self.row.S,
+            {k: x.qty * x.paid for k, x in keys.items()},
+            today=self.day,
+            r=float(self.row.r),
+            q=0.0,
+        )
+
+    def opened_on(self, underlying: str):
+        return self._opened.get(underlying)
+
+    def flows_since(self, underlying: str, since) -> float:
+        return 0.0
+
+    def equity(self) -> float:
+        return self.b.equity(self.day, self.row)
+
+
+def _execute_synthetic(actions, b: Book, day: date, row, opened: dict) -> None:
+    for a in actions:
+        if isinstance(a, Close):
+            b.close(day, row)
+            opened.pop(a.underlying, None)
+        elif isinstance(a, Open):
+            unit = [
+                Leg(c.right, c.strike, c.expiry, lots)
+                for c, lots in ((options.parse_occ(k), lots) for k, lots in a.pick.legs)
+            ]
+            priced = [om.Leg(x.right, x.strike, x.qty, b.fill(b.mid(x, day, row), row.S, x.qty > 0)) for x in unit]
+            per_unit = om.max_loss(priced) * 100
+            portfolio = {"USD": b.cash, **{_occ(a.pick.underlying, x.expiry, x.right, x.strike): x.qty for x in b.legs}}
+            n = options.units_for_risk(per_unit, a.max_risk_usd, b.cash - options.margin_requirement(portfolio))
+            if n > 0:
+                b.open([Leg(x.right, x.strike, x.expiry, x.qty * 100 * n) for x in unit], day, row)
+                opened[a.pick.underlying] = day
+
+
+def sim_decide(m: pd.DataFrame, expiries, rules: rl.IndexVolRules, model: Model, spot_history: pd.Series, u="SPY"):
+    """
+    The live decide_indexvol, one step per day of `m`, on the synthetic chain.
+    spot_history is the full close series: the HAR forecast looks back 5 years
+    from each day, past the start of the evaluation window. Returns (curve, book).
+    """
+    import logging
+
+    logging.getLogger("tradingbot").setLevel(logging.WARNING)  # decide logs every day
+    real_rate, real_q = options.risk_free_rate, options.dividend_yield
+    options.risk_free_rate = lambda: _RATE["r"]
+    options.dividend_yield = lambda _u: 0.0
+    try:
+        b, curve, opened = Book(model), {}, {}
+        for ts, row in m.iterrows():
+            day = ts.date()
+            _RATE["r"] = float(row.r)
+            b.settle(day, row)
+            if not b.legs:
+                opened.pop(u, None)
+            market = SyntheticMarket(u, ts, row, spot_history, expiries, model, b)
+            actions = decide_indexvol(market, SyntheticHoldings(u, day, row, b, opened), rules, u)
+            _execute_synthetic(actions, b, day, row, opened)
+            curve[ts] = b.equity(day, row)
+        return pd.Series(curve), b
+    finally:
+        options.risk_free_rate, options.dividend_yield = real_rate, real_q
+
+
+def _decide_eval(label, rules, m, expiries, model, split, spot_history):
+    curve, book = sim_decide(m, expiries, rules, model, spot_history)
+    qqq = m["qqq"]
+    parts = {"full": curve, "H1": curve.loc[:split], "H2": curve.loc[split:]}
+    return label, {k: metrics(v, qqq) for k, v in parts.items()}, book.trades
+
+
+def decide_check(u: Underlying, model: Model) -> None:
+    """The live decision path vs the fast simulator, live rules gated and ungated, 2007+."""
+    m, expiries, _ = load_round3(u)
+    window = m.loc[m[["vix3m", "vvix"]].dropna().index[0] :]
+    split = window.index[len(window) // 2]
+    ungated = replace(LIVE, max_term_ratio=None)
+    runs = Parallel(n_jobs=2)(
+        delayed(_decide_eval)(label, r, window, expiries, model, split, m["S"])
+        for label, r in (("decide: live rules (VIX/VIX3M <= 1.0)", LIVE), ("decide: ungated", ungated))
+    )
+    print(
+        f"\n### Decide path vs fast simulator, {window.index[0].date()} -> {window.index[-1].date()}, split {split.date()}"
+    )
+    print(HEADER)
+    for label, r in (("fast sim: live rules (VIX/VIX3M <= 1.0)", LIVE), ("fast sim: ungated", ungated)):
+        x = evaluate(r, window, expiries, model, split)
+        for part in ("full", "H1", "H2"):
+            print(_row(label, part, x[part], x["trades"] if part == "full" else ""))
+    for label, res, trades in runs:
+        for part in ("full", "H1", "H2"):
+            print(_row(label, part, res[part], trades if part == "full" else ""))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--underlying", default="SPY", choices=sorted(UNDERLYINGS))
     ap.add_argument("--tune", action="store_true")
     ap.add_argument("--gates", action="store_true", help="round-3 walk-forward of the new gates")
+    ap.add_argument("--decide", action="store_true", help="the live decide path vs the fast simulator")
     args = ap.parse_args()
 
     u = UNDERLYINGS[args.underlying]
+    if args.decide:
+        decide_check(u, Model(skew=u.put_skew, call_skew=u.call_skew))
+        return
     if args.gates:
         gates(u, Model(skew=u.put_skew, call_skew=u.call_skew))
         return

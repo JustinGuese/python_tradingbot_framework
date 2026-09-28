@@ -90,7 +90,7 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ stock_news │ Recent news headlines per symbol from yfinance │ StockNewsSentimentBot │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
-│ stock_earnings │ Earnings dates, EPS estimate vs actual, surprise% │ EarningsInsiderTiltBot │
+│ stock_earnings │ Earnings dates with before-open / after-close timing (after_close), EPS estimate vs actual, surprise%; upserted │ EarningsInsiderTiltBot, option bots (options.earnings_events) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ stock_insider_trades │ Insider buy/sell transactions │ EarningsInsiderTiltBot │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
@@ -109,6 +109,12 @@ Data Available
 │ option_risk │ Per option bot and underlying, daily: $ greeks, spot/vol stress P&L, max loss, margin │ monitoring (utils/option_risk.py) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ macro_events │ FOMC / CPI / NFP dates, past and scheduled (FOMC static, CPI/NFP from FRED) │ option_IndexVolBot logging (utils/macro_calendar.py) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ dividend_events │ Ex-dividend dates and amounts, paid and next announced (daily, corporateeventssnapshot) │ options.next_dividend: early assignment, short-call bots │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ corporate_event_refresh │ When each symbol's earnings/dividends were last refreshed; readers trust the tables only within 3 days │ utils/corporate_events.py │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ bot_alpha_report │ Weekly alpha / t / beta / corr / max DD vs Benchmark_QQQ per live bot, with a verdict │ review (alphareport CronJob, utils/alpha_report.py) │
 └──────────────────────┴───────────────────────────────────────────────────┴────────────────────────┘
 
 4. AI — via OpenRouter
@@ -191,13 +197,18 @@ Practical constraints:
 
 - Bots run as Kubernetes CronJobs — no real-time streaming, no intra-bar execution
 - Minimum meaningful trade: quantityUSD > $10 (enforced in signal bots)
-- All times are UTC; market hours not enforced (strategy must handle weekends/holidays if needed)
+- All times are UTC; market hours not enforced (strategy must handle weekends/holidays if needed). `utils/market_calendar.py` has the NYSE sessions, holidays and early closes (`is_session`, `session_close_utc`, `sessions_between`).
 - acted_on flag pattern is used for event-driven bots (Telegram signals, stock news) to prevent double-execution on crash
 
 Common pitfalls:
 
 - decisionFunction is called once per historical row (~252 calls/ticker for 1y daily). Any external lookup (DB query, API call) inside it runs 252 times per ticker. Always cache per-ticker: check a dict before querying, store the result, reuse it for subsequent rows of the same ticker.
 - SQLAlchemy detached instance: ORM objects become inaccessible after their session closes. When querying inside get_db_session(), extract all needed values as plain Python types (float(), str(), etc.) before the `with` block exits. Never return an ORM object from a function that closes the session — attributes will raise DetachedInstanceError on access.
+  The framework follows this itself. Since 2026-09-28:
+  - `PortfolioManager` keeps no row. Writers lock one inside their own transaction; readers take a dict (`_portfolio()`).
+  - `Bot.dbBot` is a property returning a fresh `BotSnapshot(name, portfolio)` on every access.
+  - There is nothing left to refresh by hand. Bind `self.dbBot.portfolio` to a local when one method needs a single consistent view.
+  - `BotRepository.log_trade` without a session returns None.
 
 ---
 
@@ -678,7 +689,7 @@ Other helpers:
   options;
 - `fit_smile` and `smile_z`.
 
-**The option bots** (paper, scheduled 15:00–16:00 UTC; EarningsCrush at 14:30 and 19:30):
+**The option bots** (paper, scheduled 15:00–16:00 UTC; EarningsCrush at 14:30, 16:30 and 19:30):
 - `option_LeapCallBot`, `option_CreditSpreadBot`, `option_IronCondorBot`,
   `option_CatalystCallBot`.
 - Round 2: `option_MispricingBot`, `option_WheelBot`, `option_PMCCBot`,
@@ -689,6 +700,9 @@ Other helpers:
 - Their rules are pure functions in `utils/option_rules.py`, shared with
   `scripts/onetime_option_bots_backtest.py` (and
   `scripts/onetime_index_vol_backtest.py` for the index bot).
+- The index bot and the four round-3 bots go further. Their whole iteration
+  is one pure decision in `utils/option_strategies.py`, and live, replay and
+  synthetic backtests all execute the same function (see "Round 4" below).
 - File and Helm names are `option_<x>bot`. The CronJob template turns `_` into
   `-`, because Kubernetes names forbid underscores.
 - Synthetic backtest (Black-Scholes on a ^VXN-based IV proxy with AAPL skew),
@@ -759,16 +773,77 @@ Other helpers:
     0.82 for the fixed band).
   - **IndexVolBot gates, all rejected out of sample:** VIX/VIX3M, VVIX, FOMC
     blackout, term-structure unwind, Yang-Zhang and GARCH forecasts, the
-    z-scored signal, and a tail hedge. The live rules are unchanged.
+    z-scored signal, and a tail hedge.
     - The z-score **loses** to the raw 3-point gap on SPY (H2 t 0.98 vs 2.64).
-    - Closest miss: a VIX/VIX3M ≤ 1.0 entry gate, which halves drawdown but
-      has lower H2 t.
+    - **Exception, shipped for drawdown:** a VIX/VIX3M ≤ 1.0 entry gate
+      (`max_term_ratio=1.0`).
+      - It has lower H2 t (2.65 vs 3.46).
+      - It halves max DD (−2.7% vs −6.3%) and keeps t ≥ 2 in both halves.
+      - This overrides the walk-forward rule on purpose.
   - **The four new bots are live-only and unproven.** Single-name option
     history does not exist yet.
     - `utils/option_replay.py` and
       `scripts/onetime_option_replay_backtest.py` replay stored chains at
       their recorded bid/ask once `option_quotes` has months, captured or
       imported with the same columns.
+- Round 4, 2026-09-28: the framework around the option bots.
+  - **One decision path.** `utils/option_decide.py` defines
+    `decide(market, holdings, rules) -> [Open | Close | Hedge]`.
+    - The strategies live in `utils/option_strategies.py` (`decide_indexvol`,
+      `decide_crossvol`, `decide_earningscrush`, `decide_mispricingscan`,
+      `decide_dispersion`).
+    - Three executors run the same function:
+      - live: `OptionStrategyBot`, which opens by worst-case loss capped by
+        free cash;
+      - replay: `option_replay.run_strategy`, the same sizing
+        (`options.units_for_risk`);
+      - synthetic: `onetime_index_vol_backtest.py --decide`, index vol only.
+    - The hand-written replay loops had drifted:
+      - no inversion unwind in the index-vol loop;
+      - close-to-close HAR where the cross-vol bot uses Yang-Zhang;
+      - no front-expiry check in the earnings-crush loop.
+    - Parity: `tests/test_option_decide_parity.py`.
+    - Running the live IndexVol decision on the synthetic chain found a drift.
+      The bot fitted HAR on 5 years of closes; every backtest uses all history.
+      That alone took gated t from 4.13 to 1.35. Live now fetches
+      `period="max"`, and the shipped rules reproduce: t 4.13 / H1 2.66 /
+      H2 3.26, max DD −2.4% (docs/backtests/option-round3-2026-09.md).
+    - The nine AAPL round-1/2 bots are not migrated. Their synthetic sims
+      carry the walk-forward numbers the docs cite, and porting them would
+      re-baseline those numbers with no new data to judge them on.
+  - **`OptionUniverseBot`**: a base for bots trading many underlyings from one
+    book, set up with `UNIVERSE`, `RULES` and `DECIDE`. It needs no dummy
+    symbol.
+  - **Earnings timing and dividends in the DB.**
+    - `corporateeventssnapshot` runs at 12:00 UTC on weekdays. It fills
+      `stock_earnings.after_close` and `dividend_events` for the option
+      universe, held underlyings and AAPL.
+    - `options.earnings_events` / `next_earnings_date` / `earnings_history` /
+      `next_dividend` read the tables when the symbol was refreshed within
+      3 days, and fall back to yfinance with a warning otherwise.
+    - Earnings rows are upserted, so actual EPS arrives once reported.
+  - **Half days.** `utils/market_calendar.py` wraps XNYS.
+    - Business-day counts in `option_rules.business_days` and
+      `options.business_days_between` are NYSE sessions.
+    - The synthetic scripts keep plain weekdays (`option_rules.weekdays`) so
+      their documented numbers reproduce.
+    - `optionchainsnapshot` runs at 16:45 and 19:45 UTC and captures within
+      90 minutes of that day's close. On an early close (13:00 New York),
+      the 16:45 run captures.
+    - EarningsCrush enters within 2 hours of the close.
+  - **Weekly alpha report.** The `alphareport` CronJob runs Saturdays at
+    07:00 UTC and writes `bot_alpha_report`.
+    - It applies the CLAUDE.md formula to every live bot, against
+      `Benchmark_QQQ`, dropping weekends and >4-day gaps.
+    - `backtest._compute_alpha_metrics` calls the same `alpha_stats`.
+    - t ≤ −2 is logged as a pause candidate. Nothing is paused
+      automatically.
+  - **No ORM row is held.**
+    - `Bot.dbBot` is a property returning a fresh `BotSnapshot` on every
+      access.
+    - `PortfolioManager` locks the row inside each transaction and reads
+      dicts otherwise.
+    - This removed a latent `DetachedInstanceError` on partial option sells.
 
 ### Reading another bot's state
 
@@ -864,8 +939,9 @@ bot.sell(symbol="QQQ", quantityUSD=500)
 cash = bot.dbBot.portfolio.get("USD", 0)
 holding = bot.dbBot.portfolio.get("QQQ", 0)
 
-# Portfolio is a JSON field in database, automatically synced
-# After buy/sell, portfolio is updated via __updateBotInDB()
+# dbBot is read fresh from the database on every access (a plain BotSnapshot,
+# never an ORM row), so it already reflects the last buy/sell. Writing to it
+# persists nothing: trade through buy/sell/rebalancePortfolio/trade_option_legs.
 ```
 
 #### Price Fetching

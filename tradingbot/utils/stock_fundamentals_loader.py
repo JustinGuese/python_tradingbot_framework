@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 import pandas as pd
 import yfinance as yf
 
+from . import corporate_events
 from .db import (
     Bot,
-    StockEarnings,
     StockInsiderTrade,
     StockNews,
     get_db_session,
@@ -160,60 +160,6 @@ def _load_news_for_symbol(symbol: str, existing_links: set[tuple]) -> list:
             )
         )
         existing_links.add(key)
-
-    return to_add
-
-
-def _load_earnings_for_symbol(symbol: str, existing_dates: set[tuple]) -> list:
-    """Fetch earnings for one symbol and return list of StockEarnings to insert (new only)."""
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.get_earnings_dates(limit=EARNINGS_LIMIT)
-    except Exception as e:
-        logger.warning("Failed to fetch earnings for %s: %s", symbol, e)
-        return []
-
-    if df is None or df.empty:
-        return []
-
-    to_add = []
-    # earnings_dates: index is report date (timezone-aware), columns vary
-    for report_date, row in df.iterrows():
-        if pd.isna(report_date):
-            continue
-        report_dt = _naive_utc(report_date)
-        key = (symbol, report_dt)
-        if key in existing_dates:
-            continue
-
-        # Column names can be 'EPS Estimate', 'Reported EPS', 'Surprise(%)' etc.
-        row_dict = row.to_dict() if hasattr(row, "to_dict") else {}
-        eps_estimate = None
-        reported_eps = None
-        surprise_pct = None
-        for k, v in row_dict.items():
-            k_lower = (k or "").lower()
-            if "estimate" in k_lower and "eps" in k_lower:
-                with contextlib.suppress(TypeError, ValueError):
-                    eps_estimate = float(v) if v is not None and not pd.isna(v) else None
-            elif "reported" in k_lower and "eps" in k_lower:
-                with contextlib.suppress(TypeError, ValueError):
-                    reported_eps = float(v) if v is not None and not pd.isna(v) else None
-            elif "surprise" in k_lower:
-                with contextlib.suppress(TypeError, ValueError):
-                    surprise_pct = float(v) if v is not None and not pd.isna(v) else None
-
-        to_add.append(
-            StockEarnings(
-                symbol=symbol,
-                report_date=report_dt,
-                eps_estimate=eps_estimate,
-                reported_eps=reported_eps,
-                surprise_pct=surprise_pct,
-                fiscal_period=None,
-            )
-        )
-        existing_dates.add(key)
 
     return to_add
 
@@ -374,12 +320,6 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
             (r.symbol, r.link)
             for r in session.query(StockNews.symbol, StockNews.link).filter(StockNews.symbol.in_(symbols)).all()
         }
-        existing_earnings = {
-            (r.symbol, r.report_date)
-            for r in session.query(StockEarnings.symbol, StockEarnings.report_date)
-            .filter(StockEarnings.symbol.in_(symbols))
-            .all()
-        }
         existing_insider = set()
         # Rows stored before the loader read `Text` have an empty type. When the
         # same trade is fetched again it now arrives typed, so its key no longer
@@ -405,6 +345,7 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
 
         news_added = 0
         earnings_added = 0
+        earnings_updated = 0
         insider_added = 0
         insider_typed = 0
 
@@ -420,9 +361,11 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                     if new_news:
                         session.add_all(new_news)
 
-                    new_earnings = _load_earnings_for_symbol(symbol, existing_earnings)
-                    if new_earnings:
-                        session.add_all(new_earnings)
+                    # Upsert, not insert-only: an estimate-only row stored before
+                    # the report must get its actual EPS and surprise later, or
+                    # EarningsInsiderTilt's surprise score never sees them.
+                    earnings = corporate_events.fetch_earnings(symbol, limit=EARNINGS_LIMIT) or []
+                    earnings_new, earnings_upd = corporate_events.upsert_earnings(session, symbol, earnings)
 
                     new_insider = _load_insider_for_symbol(symbol, existing_insider)
                     new_insider, typed = _backfill_untyped_insider(session, new_insider, untyped_insider)
@@ -431,7 +374,8 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                 # Counted only after the savepoint released cleanly, so the summary
                 # reports what was actually persisted rather than what was attempted.
                 news_added += len(new_news)
-                earnings_added += len(new_earnings)
+                earnings_added += earnings_new
+                earnings_updated += earnings_upd
                 insider_added += len(new_insider)
                 insider_typed += typed
             except Exception as e:
@@ -441,9 +385,11 @@ def load_stock_news_earnings_insider(symbols: set[str]) -> None:
                 time.sleep(SYMBOL_DELAY_SECONDS)
 
         logger.info(
-            "Stock fundamentals load: %d news, %d earnings, %d insider trades added (%d legacy rows typed) for %d symbols",
+            "Stock fundamentals load: %d news, %d earnings (%d updated), %d insider trades added "
+            "(%d legacy rows typed) for %d symbols",
             news_added,
             earnings_added,
+            earnings_updated,
             insider_added,
             insider_typed,
             len(symbols),

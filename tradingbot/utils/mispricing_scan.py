@@ -137,10 +137,27 @@ def live_name_vol(
     except Exception as exc:
         logger.warning("%s: no chain (%s)", underlying, exc)
         return NameVol(underlying, None, None, False), None
+    return name_vol_from_view(view, ohlc, today, min_obs), view
+
+
+def name_vol_from_view(
+    view: options.ChainView,
+    ohlc: pd.DataFrame | None,
+    today: date,
+    min_obs: int = 60,
+    events: list | None = None,
+    next_earnings: date | bool | None = False,
+) -> NameVol:
+    """
+    live_name_vol on a chain already in hand (live, replayed or synthetic).
+    `events` / `next_earnings` default to the options.* readers; pass them to
+    read from elsewhere (False means "look it up").
+    """
+    underlying = view.underlying
     iv = options.atm_iv(view)
     fair, z = None, None
     if ohlc is not None and len(ohlc) >= 60:
-        events = options.earnings_events(underlying)
+        events = options.earnings_events(underlying) if events is None else events
         reactions = om.earnings_reaction_returns(ohlc["close"], [d for d, _ in events if d < today], dict(events))
         horizon = max(business_days(today, view.expiry), 1)
         fair = yz_fair_vol(ohlc, horizon, exclude=reactions.index)
@@ -148,8 +165,10 @@ def live_name_vol(
         history = vrp_history(underlying, ohlc["close"], today)
         if current is not None:
             z = ve.vrp_zscore(history.to_numpy(), current, min_obs=min_obs)
-    clear = earnings_clear(options.next_earnings_date(underlying, today), view.expiry, today)
-    return NameVol(underlying, iv, fair, clear, z), view
+    if next_earnings is False:
+        next_earnings = options.next_earnings_date(underlying, today)
+    clear = earnings_clear(next_earnings, view.expiry, today)
+    return NameVol(underlying, iv, fair, clear, z)
 
 
 # --------------------------------------------------------------------------- #

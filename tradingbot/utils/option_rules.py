@@ -19,6 +19,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from . import market_calendar
 from . import option_math as om
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,18 @@ def trend_side(close: float, sma50: float, sma200: float) -> str | None:
 
 
 def business_days(start: date, end: date) -> int:
-    """Weekdays from start (inclusive) to end (exclusive); negative when end < start."""
+    """NYSE sessions from start (inclusive) to end (exclusive); negative when end < start."""
+    return market_calendar.sessions_between(start, end)
+
+
+def weekdays(start: date, end: date) -> int:
+    """
+    Weekdays from start (inclusive) to end (exclusive), holidays included.
+
+    For the synthetic backtests only. Their documented results were computed
+    this way, and the difference from business_days is a day around a
+    holiday.
+    """
     return int(np.busday_count(start, end))
 
 
@@ -348,6 +360,21 @@ def hedge_trade(
     band = whalley_wilmott_band(spot, abs(gamma), cost_frac, ww_risk_aversion)
     target = ww_rehedge_target(net_delta, band)
     return 0.0 if target is None else float(round(target))
+
+
+def delta_hedge_shares(
+    net_delta: float, spot: float, gamma: float, band_usd: float, ww: tuple[float, float] | None = None
+) -> float:
+    """
+    Whole shares to trade to re-hedge options-plus-shares on one underlying (0 = leave it).
+    Fixed band: once |net delta| x spot exceeds band_usd, back to zero delta.
+    ww=(cost_frac, risk_aversion): the Whalley-Wilmott band, back to its edge (hedge_trade).
+    """
+    if ww is None:
+        if abs(net_delta) * spot < band_usd:
+            return 0.0
+        return -float(round(net_delta))
+    return hedge_trade(net_delta, spot, gamma, 0.0, 0.0, ww_risk_aversion=ww[1], cost_frac=ww[0])
 
 
 def mispricing_exit_reason(
@@ -842,7 +869,7 @@ def reaction_session(report: date, after_close: bool | None) -> date | None:
         return None
     if not after_close:
         return report
-    return (pd.Timestamp(report) + pd.offsets.BDay(1)).date()
+    return market_calendar.next_session(report)
 
 
 def earnings_crush_entry_ok(

@@ -39,6 +39,7 @@ _SESSION_CONSUMERS = (
     "tradingbot.utils.option_risk",
     "tradingbot.utils.mispricing_scan",
     "tradingbot.utils.option_replay",
+    "tradingbot.utils.corporate_events",
 )
 
 

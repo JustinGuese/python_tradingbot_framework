@@ -7,10 +7,21 @@ history: one live snapshot per weekday, near the close, of ~9 expiries per name
 (7 days .. 18 months) and the strikes around the money. See
 utils/option_capture.py for what is kept and why.
 
-Schedule: 45 19 * * 1-5 (15:45 New York in summer, 14:45 in winter: the
-market is open either way). A closed market (holiday) exits 0 with nothing
-written; a run where the market was open but every symbol failed exits 1, so an
-outage turns the CronJob red rather than passing quietly.
+Schedule: 45 16,19 * * 1-5. A run captures only within CAPTURE_WINDOW_MINUTES
+of that day's NYSE close (utils/market_calendar.py):
+  * On a regular day that is the 19:45 run: 15:45 New York in summer, 14:45 in
+    winter.
+  * On an early close (13:00 New York: the day after Thanksgiving, Christmas
+    Eve, the eve of Independence Day) it is the 16:45 run. That is 12:45 EDT
+    or 11:45 EST, before the bell.
+  * The other run logs why it skipped and exits 0.
+
+Without the early run, a half-day capture landed after the close and wrote
+nothing, the same as a holiday. A manual run outside the window needs --force.
+
+A closed market (holiday) exits 0 with nothing written. A run where the
+market was open but every symbol failed exits 1, so an outage turns the
+CronJob red rather than passing quietly.
 
 After a successful capture it condenses the day into `vol_surface` (one row
 per name: constant-maturity IV, skew, term slope, VRP, GEX, put/call, max
@@ -26,7 +37,9 @@ historical chains).
 import argparse
 import logging
 import sys
+from datetime import UTC, datetime
 
+from tradingbot.utils import market_calendar
 from tradingbot.utils.config import setup_logging
 from tradingbot.utils.db import init_db
 from tradingbot.utils.option_capture import capture_universe
@@ -34,6 +47,23 @@ from tradingbot.utils.universes import OPTION_CAPTURE_UNIVERSE
 from tradingbot.utils.vol_surface import captured_dates, snapshot_implied_correlation, snapshot_vol_surface
 
 logger = logging.getLogger(__name__)
+
+CAPTURE_WINDOW_MINUTES = 90
+
+
+def capture_due(now: datetime) -> tuple[bool, str]:
+    """Whether a run at `now` is the day's capture: within the window before the close."""
+    left = market_calendar.minutes_to_close(now)
+    if left is None:
+        return False, "not an NYSE session"
+    if left <= 0:
+        early = market_calendar.is_early_close(now.astimezone(market_calendar.NEW_YORK).date())
+        return False, f"market closed {-left:.0f} min ago" + (
+            " (early close, captured by the earlier run)" if early else ""
+        )
+    if left > CAPTURE_WINDOW_MINUTES:
+        return False, f"{left:.0f} min to the close; the capture runs in the last {CAPTURE_WINDOW_MINUTES}"
+    return True, f"{left:.0f} min to the close"
 
 
 def derive(day=None) -> bool:
@@ -63,11 +93,17 @@ def backfill() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backfill", action="store_true", help="rebuild the derived tables for every captured date")
+    parser.add_argument("--force", action="store_true", help="capture now, whatever the time to the close")
     args = parser.parse_args(argv)
     setup_logging()
     init_db()
     if args.backfill:
         return backfill()
+    due, why = capture_due(datetime.now(UTC))
+    if not due and not args.force:
+        logger.info("option chain snapshot: skipped, %s", why)
+        return 0
+    logger.info("option chain snapshot: capturing, %s", why)
     result = capture_universe(OPTION_CAPTURE_UNIVERSE)
     if result.market_closed:
         logger.info("option chain snapshot: market closed, nothing to capture")

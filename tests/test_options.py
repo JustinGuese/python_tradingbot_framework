@@ -97,7 +97,7 @@ def pm(sqlite_db, db_session, test_bot, fake_yf):
     ds.get_latest_price.side_effect = lambda sym, *a, **k: (
         options.option_price(sym) if options.is_option_symbol(sym) else SPOT
     )
-    return PortfolioManager(test_bot, test_bot.name, ds, BotRepository, execution_config=NO_COSTS)
+    return PortfolioManager(test_bot.name, ds, BotRepository, execution_config=NO_COSTS)
 
 
 def _portfolio(db_session, name="TestBot") -> dict:
@@ -326,7 +326,7 @@ def test_copier_drops_option_holdings_even_under_strict_mapping():
     bot = MagicMock(spec=BotModel)
     bot.portfolio = {"USD": 0, "QQQ": 1.0, contract: 100.0}
     copier.bot_repo = MagicMock()
-    copier.bot_repo.create_or_get_bot.return_value = bot
+    copier.bot_repo.read_portfolio.return_value = bot.portfolio
     copier.data_service = MagicMock()
     copier.data_service.get_latest_prices_batch.return_value = {"QQQ": 500.0, contract: 5.0}
 

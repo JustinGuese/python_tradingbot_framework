@@ -13,7 +13,7 @@ def test_portfolio_manager_buy(db_session, test_bot):
     # Initial state
     assert test_bot.portfolio["USD"] == 10000.0
 
-    pm = PortfolioManager(test_bot, test_bot.name, mock_ds, BotRepository)
+    pm = PortfolioManager(test_bot.name, mock_ds, BotRepository)
 
     # Execute buy in a session to test transactional behavior
     pm.buy("AAPL", quantity_usd=1000.0, session=db_session)
@@ -35,7 +35,7 @@ def test_portfolio_manager_sell(db_session, test_bot):
     mock_ds = MagicMock()
     mock_ds.get_latest_price.return_value = 150.0
 
-    pm = PortfolioManager(test_bot, test_bot.name, mock_ds, BotRepository)
+    pm = PortfolioManager(test_bot.name, mock_ds, BotRepository)
 
     # Execute sell
     pm.sell("AAPL", quantity_usd=750.0, session=db_session)
@@ -57,7 +57,7 @@ def test_rebalance_portfolio(sqlite_db, db_session, test_bot):
     mock_ds.get_latest_prices_batch.return_value = {"AAPL": 100.0, "GOOG": 200.0}
     mock_ds.get_latest_price.side_effect = lambda sym, cached: {"AAPL": 100.0, "GOOG": 200.0}[sym]
 
-    pm = PortfolioManager(test_bot, test_bot.name, mock_ds, BotRepository)
+    pm = PortfolioManager(test_bot.name, mock_ds, BotRepository)
 
     # Target: 50% AAPL, 50% GOOG (Total worth $10,000)
     target = {"AAPL": 0.5, "GOOG": 0.5}

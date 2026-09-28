@@ -251,60 +251,80 @@ consensus frameworks for leveraged ETF strategies.
 ## option_indexvolbot.py (OptionIndexVolBot)
 
 Sells SPY iron condors when implied vol sits above a forecast of the vol SPY
-will actually deliver. The one option bot with backtested, uncorrelated alpha
-(+2.0%/yr, t 4.28, beta 0.01) — see
-[Index Vol Backtest](../backtests/index-vol-2026-09.md).
+will actually deliver. It is the one option bot with backtested, uncorrelated
+alpha: +2.0%/yr, t 4.28, beta 0.01 (see
+[Index Vol Backtest](../backtests/index-vol-2026-09.md)). Since 2026-09-28 it
+skips entries while the vol curve is inverted, which gives half the drawdown
+([round 3](../backtests/option-round3-2026-09.md)).
 
-**Pattern**: `makeOneIteration()` using the options framework (`tradingbot/utils/options.py`,
-`utils/option_rules.py`). Manages a held structure, or opens one when off; not
-backtestable with the built-in engine (`scripts/onetime_index_vol_backtest.py`
-runs its own synthetic backtest instead — see [Options](#options) below).
+**Pattern**: an `OptionStrategyBot`. The bot only names its rules and calls
+one pure decision function. The function reads the market and the book and
+returns actions (`Open`, `Close`, `Hedge`), and the framework executes them.
+The same function runs in the replay backtest over stored chains
+(`utils/option_replay.py`) and on the synthetic chain
+(`scripts/onetime_index_vol_backtest.py --decide`). The backtests therefore
+test exactly what trades, which the built-in engine cannot do for options. See
+[Options](#options) below.
 
 ```python
-class OptionIndexVolBot(Bot):
+class OptionIndexVolBot(OptionStrategyBot):
     RULES: ClassVar[IndexVolRules] = IndexVolRules(
-        target_dte=35, put_delta=0.10, call_delta=0.10, width_pct=0.10, min_gap=0.03, exit_dte=7
+        target_dte=35,
+        put_delta=0.10,
+        call_delta=0.10,
+        width_pct=0.10,
+        min_gap=0.03,
+        exit_dte=7,
+        max_term_ratio=1.0,  # no new condor while VIX > VIX3M
     )
 
-    def makeOneIteration(self):
-        book = self.option_book("SPY")
-        if not book.empty:
-            # Close at take-profit, a stop, few days left, or a VIX/VIX3M inversion.
-            reason = index_vol_exit_reason(book.credit, book.pnl, book.dte, self.RULES)
-            if reason:
-                self.close_options("SPY")
-                return -1
-            return 0
+    def __init__(self, **kwargs):
+        super().__init__("option_IndexVolBot", symbol="SPY", interval="1d", period="5y", **kwargs)
 
-        view = options.load_chain("SPY", self.RULES.target_dte)
-        if not view.live:
-            return 0  # never opens a structure off-hours
-        fair = om.har_rv_forecast(...)  # HAR-RV forecast of SPY's realized vol to expiry
-        iv = options.atm_iv(view)
-        if not index_vol_entry_ok(iv, fair, self.getLatestPrice("^VIX"), self.RULES):
-            return 0  # only sells when IV >= fair vol + a gap
-        opened = self.open_iron_condor(
-            "SPY",
-            short_delta=self.RULES.put_delta,
-            width=self.RULES.width_pct * view.spot,
-            dte=self.RULES.target_dte,
-            max_risk_usd=self.RULES.max_risk_pct * self.portfolio_value(),
-            view=view,
-        )
-        return 1 if opened else 0
+    def decide(self, market: Market, holdings: Holdings) -> list[Action]:
+        return decide_indexvol(market, holdings, self.RULES, "SPY")
+
+
+# utils/option_strategies.py: pure, shared by the live bot and every backtest
+def decide_indexvol(market, holdings, rules, underlying="SPY"):
+    if underlying in holdings.underlyings():
+        book = holdings.book(underlying)  # the same OptionBook live and in replay
+        reason = index_vol_exit_reason(book.credit, book.pnl, book.dte, rules)
+        return [Close(underlying, reason=reason)] if reason else []
+
+    view = market.chain(underlying, rules.target_dte)
+    if view is None or not view.live:
+        return []  # never opens a structure off-hours
+    fair = om.har_rv_forecast(...)  # HAR-RV forecast of realized vol to expiry
+    iv = options.atm_iv(view)
+    term = term_ratio(market.vol_index("^VIX"), market.vol_index("^VIX3M"))
+    if not index_vol_entry_ok(iv, fair, market.vol_index("^VIX"), rules, term_ratio=term):
+        return []  # only sells when IV >= fair vol + a gap and the curve is not inverted
+    pick = options.select_iron_condor(
+        underlying,
+        rules.put_delta,
+        rules.width_pct * view.spot,
+        rules.target_dte,
+        view=view,
+        call_delta=rules.call_delta,
+    )
+    return [Open(pick, rules.max_risk_pct * holdings.equity())]  # sized by worst-case loss
 ```
 
 **Key details:**
 | Setting | Value |
 |---|---|
 | Structure | 10-delta short put/call, wings 10% of spot further out |
-| Entry gate | ATM IV ≥ HAR fair vol + 3 points, ^VIX < 40 |
+| Entry gate | ATM IV ≥ HAR fair vol + 3 points, ^VIX < 40, VIX/VIX3M ≤ 1.0 |
 | Exit | 50% of credit, 2x credit stop, or 7 DTE left |
-| Sizing | worst-case loss ≤ 20% of the book (`max_risk_usd` on `open_iron_condor`) |
+| Sizing | worst-case loss ≤ 20% of the book (`Open.max_risk_usd`, capped by free cash) |
 
-Rules live as pure functions in `utils/option_rules.py` (`IndexVolRules`,
-`index_vol_entry_ok`, `index_vol_exit_reason`), shared between the live bot
-and its synthetic backtest — the same pattern every option bot follows.
+The rules are pure functions in `utils/option_rules.py` (`IndexVolRules`,
+`index_vol_entry_ok`, `index_vol_exit_reason`). The decision that combines
+them is `utils/option_strategies.decide_indexvol`.
+
+For many underlyings from one book, subclass `OptionUniverseBot` and set
+`UNIVERSE`, `RULES` and `DECIDE`. `option_crossvolbot.py` is about 20 lines.
 
 ## Options
 

@@ -14,7 +14,8 @@ def _bot(fg, usd, qqq):
     bot.bot_name = "FearGreedBotQQQInverse"
     bot.symbol = "QQQ"
     bot.currentFearGreed = fg
-    bot.dbBot = SimpleNamespace(portfolio={"USD": usd, "QQQ": qqq})
+    # dbBot reads through the repository on every access.
+    bot._bot_repository = SimpleNamespace(read_portfolio=lambda name: {"USD": usd, "QQQ": qqq})
     bot.buy = MagicMock()
     bot.sell = MagicMock()
     return bot

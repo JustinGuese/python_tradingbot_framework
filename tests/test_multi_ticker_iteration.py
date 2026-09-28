@@ -54,8 +54,7 @@ def runner(mocker, sqlite_db, db_session):
 
         bot._bot_repository = BotRepository
         bot._data_service = ds
-        bot.dbBot = dbbot
-        bot._portfolio_manager = PortfolioManager(dbbot, name, ds, BotRepository, execution_config=FREE)
+        bot._portfolio_manager = PortfolioManager(name, ds, BotRepository, execution_config=FREE)
 
         # Stub the network-facing helpers only.
         bot.getYFDataWithTA = mocker.MagicMock(side_effect=lambda symbol, **kw: pd.DataFrame({"close": [1.0]}))

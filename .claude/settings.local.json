@@ -9,7 +9,12 @@
       "Bash(.venv/bin/ruff check *)"
     ],
     "additionalDirectories": [
-      "/home/jguese/code/tradingbot/tradingbot-ui-backend"
+      "/home/jguese/code/tradingbot/tradingbot-ui-backend",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tradingbot/utils",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tradingbot",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tests",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/helm/tradingbots",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/docs/architecture"
     ]
   }
 }

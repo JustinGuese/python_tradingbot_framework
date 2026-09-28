@@ -115,9 +115,9 @@ class TelegramSignalsBankBot(Bot):
 
             logger.info(f"  Msg {message_id}: {channel_symbol} → {yf_symbol} | {direction}")
 
-            self.dbBot = self._bot_repository.create_or_get_bot(self.bot_name)
-            cash = self.dbBot.portfolio.get("USD", 0)
-            holding = self.dbBot.portfolio.get(yf_symbol, 0)
+            portfolio = self.dbBot.portfolio
+            cash = portfolio.get("USD", 0)
+            holding = portfolio.get(yf_symbol, 0)
             position_usd = round(cash * POSITION_SIZE_PCT, 2)
 
             if direction == "BUY" and position_usd > 10:

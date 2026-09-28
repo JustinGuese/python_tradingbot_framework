@@ -28,7 +28,7 @@ class TestLiveTrade(unittest.TestCase):
         # Mock bot portfolio
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 1000, "AAPL": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
 
         # Mock prices
         self.data_service.get_latest_prices_batch.return_value = {"AAPL": 150.0}
@@ -68,7 +68,7 @@ class TestLiveTrade(unittest.TestCase):
         """
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 1000, "AAPL": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"AAPL": 150.0}
         self.broker.map_symbol.return_value = {"symbol": "AAPL", "type": "stock"}
         self.broker.get_total_equity.return_value = 10_000.0
@@ -86,7 +86,7 @@ class TestLiveTrade(unittest.TestCase):
         # Mock target weights
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 1000, "UNKNOWN": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"UNKNOWN": 10.0}
 
         # Mock broker mapping failure
@@ -104,7 +104,7 @@ class TestLiveTrade(unittest.TestCase):
 
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 1000, "^XAU": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"^XAU": 100.0}
 
         # What SymbolMapper's default rules actually do with an unknown index.
@@ -122,7 +122,7 @@ class TestLiveTrade(unittest.TestCase):
         self.copier.strict_mapping = True
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 0, "QQQ": 10, "RENW.DE": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"QQQ": 100.0, "RENW.DE": 100.0}
         self.broker.is_tradeable.side_effect = lambda s: not s.endswith(".DE")
         self.broker.map_symbol.side_effect = lambda s: {"symbol": s, "type": "stock"}
@@ -196,7 +196,7 @@ class TestLiveTrade(unittest.TestCase):
 
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 0, "^GSPC": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"^GSPC": 100.0}
         self.broker.map_symbol.return_value = {"symbol": "SPX", "type": "index"}
         self.broker.get_total_equity.return_value = 1000.0
@@ -274,7 +274,7 @@ class TestLiveTrade(unittest.TestCase):
         # Mock target weights
         mock_bot = MagicMock(spec=Bot)
         mock_bot.portfolio = {"USD": 1000, "AAPL": 10}
-        self.bot_repo.create_or_get_bot.return_value = mock_bot
+        self.bot_repo.read_portfolio.return_value = mock_bot.portfolio
         self.data_service.get_latest_prices_batch.return_value = {"AAPL": 150.0}
 
         # Mock negative equity and empty positions

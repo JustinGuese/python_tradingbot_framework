@@ -74,6 +74,50 @@ class PortfolioWorth(Base):
     created_at: datetime
 ```
 
+## BotAlphaReport Model
+
+Alpha vs QQQ per bot, weekly, over each bot's own live window. Written every
+Saturday by `tradingbot/alphareport.py` (`utils/alpha_report.py`) from
+`portfolio_worth`:
+- weekend rows and day pairs more than 4 days apart are dropped;
+- a worth of 0 or less counts as a failed valuation and is dropped too;
+- the benchmark is `Benchmark_QQQ` over the same dates.
+
+It uses the same formula as `backtest_bot`'s alpha keys (`alpha_report.alpha_stats`).
+
+```python
+class BotAlphaReport(Base):
+    id: int  # Auto-increment primary key
+    report_date: date  # the Saturday it was written (indexed)
+    bot_name: str  # indexed
+    window_start: date  # first and last shared weekday
+    window_end: date
+    n_obs: int  # daily returns used
+    alpha: float  # annualised, nullable (too little data)
+    alpha_t: float
+    beta: float
+    corr: float
+    max_dd: float  # negative fraction
+    bot_return: float  # over the window
+    qqq_return: float  # QQQ over the same window
+    verdict: str  # see below
+    created_at: datetime
+```
+
+**Verdicts:**
+
+| Verdict | When |
+|---|---|
+| `too short` | fewer than 60 daily returns |
+| `edge` | t ≥ 2 |
+| `pause candidate` | t ≤ −2 |
+| `levered QQQ` | corr ≥ 0.8 and beta ≥ 1.5 |
+| `QQQ clone` | beta and corr ≥ 0.8 |
+| `unproven` | anything else |
+
+**Unique constraint**: `(report_date, bot_name)`, so a rerun upserts, and older
+report dates keep the history of each verdict.
+
 ## StockNews Model
 
 News articles per symbol from yfinance (loaded daily with portfolio worth).
@@ -95,21 +139,74 @@ class StockNews(Base):
 
 ## StockEarnings Model
 
-Earnings dates and results per symbol from yfinance (loaded daily with portfolio worth).
+Earnings dates and results per symbol from yfinance. Two jobs load it:
+- the nightly portfolio-worth run, for held symbols;
+- `corporateeventssnapshot` (12:00 UTC weekdays), for the option universe.
+
+Both upsert through `utils/corporate_events.upsert_earnings`, which does two things:
+- an estimate-only row gets its actual EPS and surprise once reported (the
+  loader used to insert only, so they never arrived);
+- rows match on the report's New York date, so a calendar placeholder and the
+  timed stamp are one report.
 
 ```python
 class StockEarnings(Base):
     id: int  # Auto-increment primary key
     symbol: str  # Trading symbol (indexed)
-    report_date: datetime  # Earnings report date
+    report_date: datetime  # Report timestamp, naive UTC, time of day kept
     eps_estimate: float  # Estimated EPS (nullable)
     reported_eps: float  # Reported EPS (nullable)
     surprise_pct: float  # Surprise percentage (nullable)
     fiscal_period: str  # Fiscal period if available (nullable)
+    after_close: bool  # True after the close, False before the open, None unknown
     created_at: datetime
 ```
 
 **Unique constraint**: `(symbol, report_date)` to avoid duplicate earnings rows. Index on `symbol`.
+
+`after_close` comes from the New York time of yfinance's stamp. 12:00 or
+later means after the close, earlier means before the open, and a bare
+midnight means unknown.
+
+## DividendEvent Model
+
+Ex-dividend dates per symbol, written by `corporateeventssnapshot`
+(`utils/corporate_events.py`):
+- the last 10 years of paid dividends (`source="history"`);
+- the next announced ex-date with the last amount paid (`source="calendar"`).
+
+A paid amount replaces an announced one. An announced future date the calendar
+no longer lists is deleted, because the date moved. The table is read by
+`options.next_dividend`, and through it by the early-assignment checks and
+the short-call bots.
+
+```python
+class DividendEvent(Base):
+    id: int  # Auto-increment primary key
+    symbol: str  # indexed
+    ex_date: date
+    amount: float  # per share
+    source: str  # "history" or "calendar"
+    created_at: datetime
+```
+
+**Unique constraint**: `(symbol, ex_date)`.
+
+## CorporateEventRefresh Model
+
+When each symbol's earnings and dividends were last refreshed, one row per
+symbol. The readers (`options.earnings_events`, `next_earnings_date`,
+`earnings_history` and `next_dividend`) trust the tables only for a symbol
+refreshed within 3 days. Then an empty answer is real, such as a stock that
+pays no dividend. Otherwise they fall back to yfinance and log a warning.
+
+```python
+class CorporateEventRefresh(Base):
+    symbol: str  # Primary key
+    refreshed_at: datetime  # naive UTC
+    n_earnings: int  # rows yfinance returned on that refresh
+    n_dividends: int
+```
 
 ## StockInsiderTrade Model
 

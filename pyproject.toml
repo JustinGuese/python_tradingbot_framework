@@ -46,6 +46,7 @@ dependencies = [
     # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account;
     # pulls no numpy, so the numpy<2.4 pin above is unaffected.
     "hyperliquid-python-sdk>=0.24.0",
+    "exchange-calendars>=4.5",
 ]
 [project.optional-dependencies]
 dev = [

@@ -218,6 +218,39 @@ class PortfolioWorth(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class BotAlphaReport(Base):
+    """
+    Weekly alpha vs QQQ per bot over its own live window (utils/alpha_report.py).
+
+    Written by the `alphareport` CronJob from portfolio_worth. Weekend rows and
+    day pairs more than 4 days apart are dropped, and the benchmark is
+    Benchmark_QQQ over the same dates. One row per bot per report date, so the
+    table is also a history of how each verdict evolved.
+    Verdicts: "edge" (t >= 2), "pause candidate" (t <= -2), "levered QQQ"
+    (corr >= 0.8, beta >= 1.5), "QQQ clone" (beta and corr >= 0.8), "unproven",
+    "too short" (< 60 daily returns).
+    """
+
+    __tablename__ = "bot_alpha_report"
+    __table_args__ = (UniqueConstraint("report_date", "bot_name", name="uq_bot_alpha_report_date_bot"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    bot_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    window_start: Mapped[date] = mapped_column(Date, nullable=False)
+    window_end: Mapped[date] = mapped_column(Date, nullable=False)
+    n_obs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    alpha: Mapped[float | None] = mapped_column(Float, nullable=True)  # annualised
+    alpha_t: Mapped[float | None] = mapped_column(Float, nullable=True)
+    beta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    corr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_dd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    qqq_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    verdict: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class StockNews(Base):
     """
     Stock news model for storing news articles per symbol from yfinance.
@@ -262,7 +295,13 @@ class StockEarnings(Base):
         reported_eps: Reported EPS (nullable)
         surprise_pct: Surprise percentage (nullable)
         fiscal_period: Fiscal period if available (nullable)
+        after_close: True = after the close, False = before the open, None = unknown
+            (yfinance stamps an unknown time as bare midnight New York)
         created_at: When this record was created
+
+    report_date keeps the time of day, stored as naive UTC (16:00 New York is
+    20:00 UTC). Rows are upserted: an estimate-only row gets its actual EPS and
+    surprise filled in once the report is out.
     """
 
     __tablename__ = "stock_earnings"
@@ -275,7 +314,46 @@ class StockEarnings(Base):
     reported_eps: Mapped[float | None] = mapped_column(Float, nullable=True)
     surprise_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     fiscal_period: Mapped[str | None] = mapped_column(String, nullable=True)
+    after_close: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class DividendEvent(Base):
+    """
+    One ex-dividend date per symbol, past and next scheduled.
+
+    Written daily by corporateeventssnapshot (utils/corporate_events.py): past
+    ex-dates and amounts from yfinance's dividend history (source "history"),
+    plus the next announced ex-date from its calendar with the last amount paid
+    (source "calendar", replaced by the paid amount once it is history). Read by
+    the early-assignment checks and the short-call bots.
+    """
+
+    __tablename__ = "dividend_events"
+    __table_args__ = (UniqueConstraint("symbol", "ex_date", name="uq_dividend_events_symbol_ex_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    ex_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class CorporateEventRefresh(Base):
+    """
+    When a symbol's earnings and dividends were last refreshed from yfinance.
+
+    It is what lets readers trust the tables. A recent row means an empty answer
+    is real (a stock that pays no dividend), not a gap, so no yfinance fallback.
+    """
+
+    __tablename__ = "corporate_event_refresh"
+
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    n_earnings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_dividends: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class StockInsiderTrade(Base):

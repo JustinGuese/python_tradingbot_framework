@@ -9,7 +9,6 @@ from . import options
 from .bot_repository import BotRepository
 from .config import EXECUTION_CONFIG, PORTFOLIO_CONFIG, ExecutionConfig
 from .data_service import DataService
-from .db import Bot as BotModel
 from .db import get_db_session
 from .weights import require_normalized
 
@@ -51,7 +50,6 @@ class PortfolioManager:
 
     def __init__(
         self,
-        bot: BotModel,
         bot_name: str,
         data_service: DataService,
         bot_repository: type[BotRepository],
@@ -60,9 +58,14 @@ class PortfolioManager:
         """
         Initialize portfolio manager.
 
+        No ORM row is ever kept on the instance. Writers lock the bot's row
+        inside their own transaction and let it go with the session; readers
+        take a plain dict (_portfolio). A row held across sessions is expired
+        at commit and detached at close, and reading it raises
+        DetachedInstanceError at whichever call happens to come next.
+
         Args:
-            bot: BotModel instance representing the bot's portfolio
-            bot_name: Name of the bot (passed separately to avoid DetachedInstanceError)
+            bot_name: Name of the bot whose `bots` row this manages
             data_service: DataService instance for fetching prices
             bot_repository: BotRepository class (used via its staticmethods, never instantiated)
             execution_config: Costs and no-trade band. Injected rather than read
@@ -71,15 +74,17 @@ class PortfolioManager:
                 import, so monkeypatching config.EXECUTION_CONFIG would be
                 silently invisible here. Bots override via env vars instead.
         """
-        self.bot = bot
         self.bot_name = bot_name
         self.data_service = data_service
         self.bot_repository = bot_repository
         self.execution_config = execution_config or EXECUTION_CONFIG
 
-    def _refresh_bot(self, session: Session | None = None) -> None:
-        """Ensure the Bot instance is attached to an active session."""
-        self.bot = self.bot_repository.create_or_get_bot(self.bot_name, session=session)
+    def _portfolio(self, session: Session | None = None) -> dict:
+        """The bot's portfolio as a plain dict, read now (inside `session` if given)."""
+        portfolio = self.bot_repository.read_portfolio(self.bot_name, session=session)
+        if portfolio is None:
+            raise LookupError(f"Bot {self.bot_name!r} has no row in `bots`")
+        return portfolio
 
     def _option_fill(self, contract: str, ref_price: float, *, is_buy: bool) -> float:
         """Buys fill at the ask, sells at the bid; ref_price +/- option slippage without a market."""
@@ -104,7 +109,6 @@ class PortfolioManager:
         symbol: str,
         quantity_usd: float = -1,
         cached_data: pd.DataFrame | None = None,
-        refresh: bool = True,
         session: Session | None = None,
         option: bool | str | None = None,
         target_dte: int = 30,
@@ -117,7 +121,6 @@ class PortfolioManager:
             symbol: Trading symbol to buy — for options, the UNDERLYING
             quantity_usd: Amount in USD to spend (-1 means use all available cash)
             cached_data: Optional cached DataFrame for price lookup
-            refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
             option: None/False buys the symbol itself. True / "call" / "put"
                 buys a contract on it instead, chosen by options.select_contract
@@ -145,15 +148,10 @@ class PortfolioManager:
             symbol = options.select_contract(symbol, right, target_dte, spot=spot, delta=target_delta)
 
         def _execute_buy(sess: Session):
-            if sess:
-                # Lock row if in transaction
-                self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
-            elif refresh:
-                self._refresh_bot()
-
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
             cfg = self.execution_config
-            cash = self.bot.portfolio.get("USD", 0)
-            spendable = cash - options.margin_requirement(self.bot.portfolio)
+            cash = row.portfolio.get("USD", 0)
+            spendable = cash - options.margin_requirement(row.portfolio)
 
             # `quantity_usd` is the GROSS cash budget; commission comes out of it
             # rather than on top. That is what makes the spend-all-cash case
@@ -214,12 +212,12 @@ class PortfolioManager:
                 logger.warning(f"Calculated quantity for {symbol} is <= 0")
                 return
 
-            portfolio = self.bot.portfolio.copy()
+            portfolio = row.portfolio.copy()
             portfolio["USD"] = cash - debit  # stocks: the full gross budget; options: exact spend
             portfolio[symbol] = portfolio.get(symbol, 0) + quantity
 
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
                 bot_name=self.bot_name,
                 symbol=symbol,
@@ -252,7 +250,6 @@ class PortfolioManager:
         symbol: str,
         quantity_usd: float = -1,
         cached_data: pd.DataFrame | None = None,
-        refresh: bool = True,
         session: Session | None = None,
         option: bool | str | None = None,
     ) -> float:
@@ -263,7 +260,6 @@ class PortfolioManager:
             symbol: Trading symbol to sell — for options, the UNDERLYING
             quantity_usd: Amount in USD to sell (-1 means sell all holdings)
             cached_data: Optional cached DataFrame for price lookup
-            refresh: Whether to refresh the bot from DB before executing
             session: Optional existing database session
             option: None/False sells the symbol itself. True sells every option
                 held on it; "call" / "put" only that side. Earliest expiry first.
@@ -276,14 +272,9 @@ class PortfolioManager:
             return self._sell_options(symbol, right, quantity_usd, session)
 
         def _execute_sell(sess: Session) -> float:
-            if sess:
-                # Lock row if in transaction
-                self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
-            elif refresh:
-                self._refresh_bot()
-
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
             cfg = self.execution_config
-            holding = self.bot.portfolio.get(symbol, 0)
+            holding = row.portfolio.get(symbol, 0)
             if holding <= 0:
                 logger.warning(f"No holdings of {symbol} to sell")
                 return 0.0
@@ -323,7 +314,7 @@ class PortfolioManager:
             commission_cost = gross_proceeds * cfg.commission_pct
             net_proceeds = gross_proceeds - commission_cost
 
-            portfolio = self.bot.portfolio.copy()
+            portfolio = row.portfolio.copy()
             portfolio["USD"] = portfolio.get("USD", 0) + net_proceeds
             portfolio[symbol] = holding - quantity
 
@@ -347,8 +338,8 @@ class PortfolioManager:
                     )
                     return 0.0
 
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
                 bot_name=self.bot_name,
                 symbol=symbol,
@@ -376,8 +367,10 @@ class PortfolioManager:
 
     def _sell_options(self, underlying: str, right: str | None, quantity_usd: float, session: Session | None) -> float:
         """Sell option holdings on `underlying`, earliest expiry first, up to quantity_usd."""
-        self._refresh_bot(session)
-        keys = options.held_option_keys(self.bot.portfolio, underlying, right)
+        # One snapshot for the whole loop: each sell() below commits (without a
+        # session) and nothing read before it may be touched afterwards.
+        held = self._portfolio(session)
+        keys = options.held_option_keys(held, underlying, right)
         if not keys:
             logger.warning("No %s option holdings to sell", underlying)
             return 0.0
@@ -389,7 +382,7 @@ class PortfolioManager:
                 continue
             if remaining <= 0:
                 break
-            value = self.bot.portfolio.get(key, 0) * self.data_service.get_latest_price(key)
+            value = held.get(key, 0) * self.data_service.get_latest_price(key)
             part = min(remaining, value)
             proceeds += self.sell(key, quantity_usd=part, session=session)
             remaining -= part
@@ -427,9 +420,8 @@ class PortfolioManager:
 
         A no-op for a bot holding no options.
         """
-        self._refresh_bot()
         today = options.utc_today()
-        for key in options.option_legs(self.bot.portfolio):
+        for key in options.option_legs(self._portfolio()):
             contract = options.parse_occ(key)
             if contract.expiry < today:
                 self._settle_expired(key, contract, physical=settlement == "physical")
@@ -437,9 +429,9 @@ class PortfolioManager:
         if roll_dte is None:
             return
 
-        self._refresh_bot()
-        shorted = {options.parse_occ(k).underlying for k, q in options.option_legs(self.bot.portfolio).items() if q < 0}
-        for key in options.held_option_keys(self.bot.portfolio):
+        portfolio = self._portfolio()
+        shorted = {options.parse_occ(k).underlying for k, q in options.option_legs(portfolio).items() if q < 0}
+        for key in options.held_option_keys(portfolio):
             contract = options.parse_occ(key)
             if contract.underlying in shorted or (contract.expiry - today).days > roll_dte:
                 continue
@@ -465,9 +457,8 @@ class PortfolioManager:
         if the bot did not run the day before). Returns the keys assigned.
         """
         today = today or options.utc_today()
-        self._refresh_bot()
         assigned = []
-        for key, qty in options.option_legs(self.bot.portfolio).items():
+        for key, qty in options.option_legs(self._portfolio()).items():
             contract = options.parse_occ(key)
             if qty >= 0 or contract.right != "C" or contract.expiry < today:
                 continue
@@ -495,8 +486,6 @@ class PortfolioManager:
             else:
                 self._cash_settle(key, intrinsic, "assigned early")
             assigned.append(key)
-        if assigned:
-            self._refresh_bot()
         return assigned
 
     def _settle_expired(self, key: str, contract: options.OptionContract, physical: bool = False) -> None:
@@ -509,18 +498,18 @@ class PortfolioManager:
 
     def _cash_settle(self, key: str, settle_price: float, reason: str) -> None:
         with get_db_session() as sess:
-            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
-            qty = self.bot.portfolio.get(key, 0)
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            qty = row.portfolio.get(key, 0)
             if abs(qty) < 1e-6:
                 return
             # Signed: a long ITM leg is credited, a short ITM leg debited (the
             # cash for that was reserved as margin when it was opened).
             proceeds = qty * settle_price
-            portfolio = self.bot.portfolio.copy()
+            portfolio = row.portfolio.copy()
             portfolio["USD"] = portfolio.get("USD", 0) + proceeds
             del portfolio[key]
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
                 bot_name=self.bot_name,
                 symbol=key,
@@ -542,11 +531,11 @@ class PortfolioManager:
         """
         u = contract.underlying
         with get_db_session() as sess:
-            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
-            qty = self.bot.portfolio.get(key, 0)
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            qty = row.portfolio.get(key, 0)
             if abs(qty) < 1e-6:
                 return
-            portfolio = self.bot.portfolio.copy()
+            portfolio = row.portfolio.copy()
             shares = float(portfolio.get(u, 0.0))
             delta_shares = qty if contract.right == "C" else -qty
             physical_shares = (
@@ -561,8 +550,8 @@ class PortfolioManager:
             else:
                 portfolio[u] = new_shares
             del portfolio[key]
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
                 bot_name=self.bot_name,
                 symbol=key,
@@ -636,9 +625,9 @@ class PortfolioManager:
         refs = {key: self.data_service.get_latest_price(key) for key, _ in legs}
 
         def _execute(sess: Session) -> float:
-            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
             cfg = self.execution_config
-            portfolio = self.bot.portfolio.copy()
+            portfolio = row.portfolio.copy()
             allowed = traded_underlyings | options.option_underlyings(portfolio)
             naked = [k for k in stock_keys if k not in allowed]
             if naked:
@@ -669,8 +658,8 @@ class PortfolioManager:
                     f"< margin required ${required:,.2f}"
                 )
 
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             for key, qty, price, flow in fills:
                 self.bot_repository.log_trade(
                     bot_name=self.bot_name,
@@ -723,9 +712,9 @@ class PortfolioManager:
             logger.warning("Structure %s shows no risk at fill prices (bad quotes?); skipping", pick.legs)
             return 0
 
-        self._refresh_bot()
-        free = self.bot.portfolio.get("USD", 0) - options.margin_requirement(self.bot.portfolio)
-        units = int(min(max_risk_usd, free) // per_unit)
+        portfolio = self._portfolio()
+        free = portfolio.get("USD", 0) - options.margin_requirement(portfolio)
+        units = options.units_for_risk(per_unit, max_risk_usd, free)
         if units < 1:
             logger.warning(
                 "One %s unit risks $%.2f; budget $%.2f, free cash $%.2f — skipping",
@@ -745,9 +734,9 @@ class PortfolioManager:
         transaction. include_stock also flattens the shares held beside them
         (the hedge of a straddle, the stock of a collar).
         """
-        self._refresh_bot(session)
-        legs = options.option_legs(self.bot.portfolio, underlying)
-        shares = float(self.bot.portfolio.get(underlying, 0.0) or 0.0) if include_stock else 0.0
+        portfolio = self._portfolio(session)
+        legs = options.option_legs(portfolio, underlying)
+        shares = float(portfolio.get(underlying, 0.0) or 0.0) if include_stock else 0.0
         if not legs:
             return self._flatten_stock(underlying, shares, session) if abs(shares) > 1e-9 else 0.0
         if abs(shares) > 1e-9:
@@ -764,13 +753,13 @@ class PortfolioManager:
         price = self.execution_config.buy_execution_price(ref)
 
         def _execute(sess: Session) -> float:
-            self.bot = self.bot_repository.get_bot_locked(sess, self.bot_name)
-            portfolio = self.bot.portfolio.copy()
+            row = self.bot_repository.get_bot_locked(sess, self.bot_name)
+            portfolio = row.portfolio.copy()
             cost = -qty * price * (1 + self.execution_config.commission_pct)
             portfolio["USD"] = portfolio.get("USD", 0) - cost
             portfolio.pop(symbol, None)
-            self.bot.portfolio = portfolio
-            self.bot_repository.update_bot(self.bot, session=sess)
+            row.portfolio = portfolio
+            self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
                 bot_name=self.bot_name, symbol=symbol, quantity=-qty, price=price, is_buy=True, session=sess
             )
@@ -791,18 +780,13 @@ class PortfolioManager:
         ww=(cost_frac, risk_aversion) uses the Whalley-Wilmott band instead
         (option_rules.hedge_trade): rehedge only outside it, and only to its edge.
         """
-        from .option_rules import hedge_trade
+        from .option_rules import delta_hedge_shares
 
         book = self.option_book(underlying)
         if book.empty:
             return 0.0
         net = book.net_delta
-        if ww is None:
-            if abs(net) * book.spot < band_usd:
-                return 0.0
-            shares = -float(round(net))
-        else:
-            shares = hedge_trade(net, book.spot, book.greeks.gamma, 0.0, 0.0, ww_risk_aversion=ww[1], cost_frac=ww[0])
+        shares = delta_hedge_shares(net, book.spot, book.greeks.gamma, band_usd, ww)
         if shares == 0:
             return 0.0
         self.trade_option_legs([(underlying, shares)])
@@ -811,18 +795,17 @@ class PortfolioManager:
 
     def option_book(self, underlying: str) -> options.OptionBook:
         """Positions, marks, entry value, P&L and net greeks of the options on `underlying`."""
-        self._refresh_bot()
-        legs = options.option_legs(self.bot.portfolio, underlying)
+        portfolio = self._portfolio()
+        legs = options.option_legs(portfolio, underlying)
         spot = self.data_service.get_latest_price(underlying)
         prices = {k: self.data_service.get_latest_price(k) for k in legs}
         entries = {k: options.entry_value(self.bot_name, k) for k in legs}
-        shares = float(self.bot.portfolio.get(underlying, 0.0) or 0.0)
+        shares = float(portfolio.get(underlying, 0.0) or 0.0)
         return options.build_book(underlying, legs, prices, spot, entries, shares=shares)
 
     def total_value(self) -> float:
         """Cash plus every holding (short option legs negative) at the latest price."""
-        self._refresh_bot()
-        portfolio = self.bot.portfolio
+        portfolio = self._portfolio()
         held = [s for s, q in portfolio.items() if s != "USD" and abs(q) > 1e-6]
         prices = self.data_service.get_latest_prices_batch(held) if held else {}
         return portfolio.get("USD", 0) + sum(portfolio[s] * prices.get(s, 0.0) for s in held)
@@ -846,8 +829,7 @@ class PortfolioManager:
             # selection and rolling inside the rebalance. Not supported — held
             # contracts absent from the target are sold like any other exit.
             raise ValueError(f"rebalancePortfolio cannot target option contracts {contracts}; use buy/sell(option=...)")
-        self._refresh_bot()
-        shorts = [k for k, q in self.bot.portfolio.items() if k != "USD" and q < -1e-9]
+        shorts = [k for k, q in self._portfolio().items() if k != "USD" and q < -1e-9]
         if shorts:
             # A weight-based rebalance values and exits long holdings; a short leg
             # would be ignored in the total and "exited" via buy() of a raw
@@ -862,23 +844,21 @@ class PortfolioManager:
         # so every other writer for the same bot — the copier, the worth
         # calculator, a concurrent run — blocked for as long as a third party took
         # to respond, with the statement timeout as the only ceiling.
-        with get_db_session() as preview_session:
-            snapshot = preview_session.query(BotModel).filter_by(name=self.bot_name).one()
-            preview_symbols = sorted(set(target_portfolio) | set(snapshot.portfolio))
+        preview_symbols = sorted(set(target_portfolio) | set(self._portfolio()))
         prices = self.data_service.get_latest_prices_batch([s for s in preview_symbols if s != "USD"])
 
         with get_db_session() as session:
             # Lock bot row for the entire duration of rebalance
-            self.bot = self.bot_repository.get_bot_locked(session, self.bot_name)
+            row = self.bot_repository.get_bot_locked(session, self.bot_name)
 
             # Step 3: Calculate current portfolio value
-            current_usd = self.bot.portfolio.get("USD", 0)
+            current_usd = row.portfolio.get("USD", 0)
 
             # Get all symbols involved. Sorted, not set-ordered: buys are sized
             # against the pre-trade snapshot, so whichever symbol comes last
             # absorbs any cash shortfall. Hash-order would make that symbol vary
             # between processes — invisible before costs existed, visible now.
-            all_involved_symbols = sorted(set(list(target_portfolio.keys()) + list(self.bot.portfolio.keys())))
+            all_involved_symbols = sorted(set(list(target_portfolio.keys()) + list(row.portfolio.keys())))
             all_involved_symbols = [s for s in all_involved_symbols if s != "USD"]
 
             # The unlocked snapshot above can be stale: another writer may have
@@ -894,7 +874,7 @@ class PortfolioManager:
             current_values = {"USD": current_usd}
 
             for symbol in all_involved_symbols:
-                qty = self.bot.portfolio.get(symbol, 0)
+                qty = row.portfolio.get(symbol, 0)
                 if qty > 0:
                     price = prices.get(symbol)
                     if price:
@@ -980,10 +960,10 @@ class PortfolioManager:
 
             # Step 5: Execute trades (Sells first)
             for symbol, usd_amt in trades_to_sell.items():
-                self.sell(symbol, quantity_usd=usd_amt, refresh=False, session=session)
+                self.sell(symbol, quantity_usd=usd_amt, session=session)
 
             # Re-read cash after sells
             for symbol, usd_amt in trades_to_buy.items():
-                self.buy(symbol, quantity_usd=usd_amt, refresh=False, session=session)
+                self.buy(symbol, quantity_usd=usd_amt, session=session)
 
             logger.info("Rebalance complete")

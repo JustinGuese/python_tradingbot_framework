@@ -123,7 +123,7 @@ def chain(monkeypatch):
 def _price(sym, *_, **__):
     if options.is_option_symbol(sym):
         return options.option_price(sym)
-    return {"^VIX": 20.0}.get(sym, S)
+    return {"^VIX": 20.0, "^VIX3M": 22.0, "^VVIX": 90.0}.get(sym, S)
 
 
 def _data_service():
@@ -135,7 +135,7 @@ def _data_service():
 
 @pytest.fixture
 def pm(sqlite_db, db_session, test_bot, chain):
-    return PortfolioManager(test_bot, test_bot.name, _data_service(), BotRepository, execution_config=NO_COSTS)
+    return PortfolioManager(test_bot.name, _data_service(), BotRepository, execution_config=NO_COSTS)
 
 
 def _portfolio(db_session, name="TestBot") -> dict:
@@ -570,6 +570,39 @@ def test_sell_refuses_to_uncover_a_short_call(pm, db_session):
     assert _portfolio(db_session)["AAPL"] == pytest.approx(100)
 
 
+def test_partial_option_sell_across_contracts_needs_no_session(pm, db_session):
+    """
+    Regression: each sell() inside _sell_options commits in its own session.
+    The loop used to re-read self.bot, a row detached by that commit, and
+    raised DetachedInstanceError on the second contract.
+    """
+    options.load_chain("AAPL", 35)
+    near, far = occ(E40, "C", 300), occ(E75, "C", 300)
+    _set_portfolio(db_session, {"USD": 1000.0, near: 100.0, far: 100.0})
+    first = 100 * options.option_price(near)
+    proceeds = pm.sell("AAPL", quantity_usd=first + 100 * options.option_price(far) / 2 + 1, option=True)
+    assert proceeds > 0
+    book = _portfolio(db_session)
+    assert near not in book and far in book  # earliest expiry went first, the rest partly
+
+
+def test_manager_and_bot_hold_no_orm_rows(pm, db_session):
+    """Reads are fresh snapshots: nothing held can go stale or detach."""
+    assert not hasattr(pm, "bot")
+    options.load_chain("AAPL", 35)
+    pm.buy("AAPL", quantity_usd=3000.0)
+    pm.sell("AAPL", quantity_usd=1000.0)
+    assert pm._portfolio()["USD"] == pytest.approx(8000.0, abs=5.0)
+    assert pm.option_book("AAPL").empty
+
+
+def test_bot_dbbot_is_a_fresh_snapshot(sqlite_db, db_session, chain, mocker):
+    bot = _make_bot(OptionCollarBot, mocker, _series(FAIR_IV))
+    assert bot.dbBot.portfolio == {"USD": 100_000.0}
+    _set_portfolio(db_session, {"USD": 5.0}, "option_CollarBot")  # written behind the bot's back
+    assert bot.dbBot.portfolio == {"USD": 5.0}  # no manual refresh needed
+
+
 def test_physical_settlement_assigns_and_delivers(pm, db_session, chain):
     past = TODAY - timedelta(days=1)
     chain.close = 280.0
@@ -665,7 +698,7 @@ def test_copier_keeps_structure_stock_away_from_the_broker():
     call = occ(E40, "C", 320)
     bot.portfolio = {"USD": 1000.0, "AAPL": 100.0, call: -100.0, "QQQ": 2.0}
     copier.bot_repo = MagicMock()
-    copier.bot_repo.create_or_get_bot.return_value = bot
+    copier.bot_repo.read_portfolio.return_value = bot.portfolio
     copier.data_service = MagicMock()
     copier.data_service.get_latest_prices_batch.return_value = {"AAPL": 300.0, call: 5.0, "QQQ": 500.0}
     weights = copier._calculate_target_weights()
@@ -837,7 +870,6 @@ def test_wheel_bot_sells_puts_then_covered_calls(sqlite_db, db_session, chain, m
     # Assigned: 300 shares at 290, recorded as the broker would.
     _set_portfolio(db_session, {"USD": 13_000.0, "AAPL": 300.0}, "option_WheelBot")
     BotRepository.log_trade("option_WheelBot", "AAPL", 300, 290.0, True)
-    bot.dbBot = BotRepository.create_or_get_bot("option_WheelBot")  # run() refreshes it after settlement
     assert bot.makeOneIteration() == 1
     legs = options.option_legs(_portfolio(db_session, "option_WheelBot"))
     ((call, qty),) = legs.items()
@@ -849,7 +881,6 @@ def test_wheel_bot_buys_back_a_call_the_dividend_would_get_assigned(sqlite_db, d
     bot = _make_bot(OptionWheelBot, mocker, _series(RICH_IV))
     call = occ(E40, "C", 250)  # deep ITM: ~$1.1 of time value left
     _set_portfolio(db_session, {"USD": 10_000.0, "AAPL": 100.0, call: -100.0}, "option_WheelBot")
-    bot.dbBot = BotRepository.create_or_get_bot("option_WheelBot")
     assert bot.makeOneIteration() == 0  # no dividend coming: hold
     chain.dividend = 3.0
     assert bot.makeOneIteration() == -1
@@ -954,6 +985,15 @@ def test_index_vol_bot_waits_when_iv_is_below_the_forecast(sqlite_db, db_session
     assert _portfolio(db_session, "option_IndexVolBot") == {"USD": 100_000.0}
 
 
+def test_index_vol_bot_waits_while_the_vol_curve_is_inverted(sqlite_db, db_session, chain, mocker):
+    bot = _make_index_bot(mocker, _series(RICH_IV))
+    prices = {"^VIX": 23.1, "^VIX3M": 22.0}  # VIX/VIX3M 1.05
+    bot._data_service.get_latest_price.side_effect = lambda s, *a, **k: prices.get(s) or _price(s)
+    assert OptionIndexVolBot.RULES.max_term_ratio == 1.0
+    assert bot.makeOneIteration() == 0
+    assert _portfolio(db_session, "option_IndexVolBot") == {"USD": 100_000.0}
+
+
 def test_index_vol_bot_does_not_open_off_hours(sqlite_db, db_session, chain, mocker):
     chain.market_state = "CLOSED"
     bot = _make_index_bot(mocker, _series(RICH_IV))
@@ -1003,7 +1043,9 @@ def test_svi_fit_of_a_clean_chain_has_no_outliers_and_finds_a_planted_one(sqlite
 def test_index_vol_gates_block_only_when_set():
     base = OptionIndexVolBot.RULES
     ok = {"iv": 0.25, "fair": 0.15, "vix": 18.0}
-    assert rules_mod.index_vol_entry_ok(**ok, rules=base)
+    assert rules_mod.index_vol_entry_ok(**ok, rules=base, term_ratio=0.9)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=base)  # live gate: unknown curve = no entry
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=base, term_ratio=1.01)
     gated = rules_mod.IndexVolRules(
         **{**vars(base), "max_term_ratio": 0.95, "max_vvix": 110.0, "event_blackout_bdays": 1}
     )
@@ -1013,8 +1055,8 @@ def test_index_vol_gates_block_only_when_set():
     assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=0.85, vvix=120.0)
     assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, term_ratio=0.85, vvix=90.0, bdays_to_event=1)
     z_rules = rules_mod.IndexVolRules(**{**vars(base), "min_gap": None, "min_z": 1.5})
-    assert rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=2.0)
-    assert not rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=1.0)
+    assert rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=2.0, term_ratio=0.9)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=z_rules, z=1.0, term_ratio=0.9)
     unwind = rules_mod.IndexVolRules(unwind_term_ratio=1.0)
     assert rules_mod.index_vol_unwind_reason(1.05, unwind) and rules_mod.index_vol_unwind_reason(0.9, unwind) is None
     assert rules_mod.index_vol_unwind_reason(1.5, base) is None
@@ -1142,21 +1184,25 @@ def test_earnings_crush_bot_sells_a_rich_move_and_exits_after(sqlite_db, db_sess
     # Front expiry (spanning the report) priced at 60% vs 30% behind it: a big implied move.
     real_atm = options.atm_iv
     mocker.patch.object(options, "atm_iv", lambda view, r=None, american=False: 0.60 if view.expiry == NEAR else 0.30)
-    assert (
-        bot.makeOneIteration(now=pd.Timestamp("2026-01-01 14:30", tz="UTC").to_pydatetime()) == 0
-    )  # morning: exits only
-    assert bot.makeOneIteration(now=pd.Timestamp("2026-01-01 19:30", tz="UTC").to_pydatetime()) == 1
+    # Today closes at 20:00 UTC whatever the real calendar says, so the test runs any day.
+    mocker.patch(
+        "tradingbot.utils.market_calendar.session_close_utc",
+        lambda d: pd.Timestamp(d).tz_localize("UTC").to_pydatetime().replace(hour=20),
+    )
+    at = lambda hhmm: pd.Timestamp(f"{TODAY} {hhmm}", tz="UTC").to_pydatetime()  # noqa: E731
+    assert bot.makeOneIteration(now=at("14:30")) == 0  # morning: exits only
+    assert bot.makeOneIteration(now=at("19:30")) == 1
     legs = options.option_legs(_portfolio(db_session, "option_EarningsCrushBot"))
     assert len(legs) == 4 and all(options.parse_occ(k).expiry == NEAR for k in legs)
     mocker.patch.object(options, "atm_iv", real_atm)
     # Next session: closed, whatever happened.
     mocker.patch.object(options, "utc_today", lambda: tomorrow)
-    assert bot._manage(tomorrow) == 1
+    assert bot.makeOneIteration(now=at("14:30")) == -1  # the morning run closes it
     assert options.option_legs(_portfolio(db_session, "option_EarningsCrushBot")) == {}
 
 
 def test_dispersion_bot_says_why_it_waits(sqlite_db, db_session, chain, mocker):
-    import tradingbot.option_dispersionbot as mod
+    import tradingbot.utils.option_strategies as mod  # the decision (and its log) lives here
 
     bot = _make_bot(OptionDispersionBot, mocker, _series(FAIR_IV))
     log = mocker.spy(mod.logger, "info")

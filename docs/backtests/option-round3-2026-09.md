@@ -16,8 +16,10 @@ beats the live rules out of sample.
 **The short version:**
 - **Nothing added to `option_IndexVolBot` beat its live rules out of sample.**
   That covers the term-structure, VVIX and FOMC gates, the unwind, the
-  Yang-Zhang and GARCH forecasts, the z-scored signal and the tail hedge. All
-  stay off. The closest miss was a VIX/VIX3M ≤ 1.0 entry gate (details below).
+  Yang-Zhang and GARCH forecasts, the z-scored signal and the tail hedge.
+  - All stay off except one. The closest miss, a VIX/VIX3M ≤ 1.0 entry gate,
+    **shipped on 2026-09-28 anyway**, for its drawdown. See "Shipped anyway"
+    below.
 - **The Whalley-Wilmott hedging band ships** on `option_MispricingBot`'s
   straddle hedge. It is a small improvement.
 - **The four new bots are live-only and unproven.** Their evidence has to come
@@ -124,6 +126,7 @@ What this says:
   t. It loses on H2 (2.65 vs 3.46), so under the protocol it does not ship.
   - It is the first thing to revisit when the live record exists.
   - It is also the natural candidate if drawdown ever matters more than t.
+    That is what happened; see "Shipped anyway" below.
 - **Unwinding on inversion hurts.** It closes condors at the worst marks, just
   before vol mean-reverts.
 - **The tail hedge buys negative correlation at the cost of drawdown in
@@ -136,6 +139,84 @@ What this says:
     2 sessions score H1 1.47 and H2 3.76. The live rules score 1.67 and 3.46.
   - The 2-session blackout wins on H2 but loses on H1, where the choice is
     made, so it is not picked.
+
+### Shipped anyway: VIX/VIX3M ≤ 1.0 (2026-09-28)
+
+`option_IndexVolBot.RULES` now carries `max_term_ratio=1.0`. While the vol
+curve is inverted (VIX above VIX3M), no new condor opens. This is a
+deliberate override of the walk-forward protocol: the gate lost on H2.
+
+It trades H2 alpha t for drawdown, on the 2007–2026 window:
+
+| | Gate | Ungated live rules |
+|---|---|---|
+| H2 t | 2.65 | 3.46 |
+| H1 t | 2.84 | 1.67 |
+| Full t | 3.87 | 3.35 |
+| Max drawdown | −2.7% | −6.3% |
+| Trades | 56 | 80 |
+
+Both halves stay at t ≥ 2 with the gate, which the ungated rules do not
+manage on H1.
+
+The mechanism is plain: an inverted curve means the market is already pricing
+near-term stress, and a 35-DTE short condor opened then is the trade that makes
+the drawdown.
+
+A missing ^VIX3M quote blocks the entry. Revisit this with the live record,
+since this choice has no out-of-sample support.
+
+### The live decision path, re-baselined (round 4, 2026-09-28)
+
+Round 4 moved the bot's logic into one pure function,
+`utils/option_strategies.decide_indexvol`. The live bot, the replay over stored
+chains and a synthetic chain now all execute it.
+`scripts/onetime_index_vol_backtest.py --decide` runs it on a synthetic SPY
+chain built from the same model as the fast simulator above:
+- a $1 strike grid, with contracts listed down to a $0.01 mid;
+- the harness's fills;
+- strikes chosen by `select_iron_condor`;
+- sizing from cash after margin.
+
+**It found a live-vs-backtest drift.** The live bot fitted HAR on 5 years of
+closes (`getYFData(period="5y")`). Every backtest, including the walk-forward
+that picked these rules, fits it on an expanding window from 1999. On the
+2007–2026 window that difference alone was large:
+
+| Live decision path | Full t | H1 t | H2 t | Max DD |
+|---|---|---|---|---|
+| gated, HAR on 5 years | 1.35 | 0.18 | 1.81 | −5.6% |
+| gated, HAR on all history | 4.13 | 2.66 | 3.26 | −2.4% |
+
+The live bot now uses all history (`LiveMarket.closes`, `period="max"`), and
+replay and the synthetic chain do the same.
+
+With that fixed, the decision path next to the fast simulator, 2007–2026
+(split 2016-11):
+
+| Variant | Full t | H1 t | H2 t | Max DD | Trades |
+|---|---|---|---|---|---|
+| fast sim, live rules (gate on) | 3.87 | 2.84 | 2.65 | −2.7% | 56 |
+| **decide path, live rules (gate on)** | **4.13** | **2.66** | **3.26** | **−2.4%** | 59 |
+| fast sim, ungated | 3.35 | 1.67 | 3.46 | −6.3% | 80 |
+| decide path, ungated | 2.44 | 0.50 | 3.88 | −7.7% | 80 |
+
+**Result for the shipped rules:** they reproduce within the ±0.3 t acceptance
+band on full and H1 (+0.26, −0.18), and do better on H2 and drawdown.
+
+**The ungated rules do not reproduce:** H1 falls from 1.67 to 0.50, with
+2008 in that half. What differs is strike selection on a smile-consistent
+chain, wings that stop at the last quoted strike, and IVs solved per
+contract. They matter most in a crash.
+
+**What this means for the gate:** on the path the bot actually trades, it
+beats the ungated rules on full t, H1 t and drawdown, and loses only H2
+(3.26 vs 3.88). The drawdown-over-t choice looks better here than it did on
+the fast simulator.
+
+The research grids (`--tune`, `--gates`) stay on the fast simulator: the decide
+path takes about 3 s per simulated year. Treat their rankings as relative;
+confirm a winner with `--decide` before shipping it.
 
 ## The new bots
 
