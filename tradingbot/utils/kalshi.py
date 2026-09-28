@@ -203,17 +203,27 @@ _CONTRACT_TYPES = {
     "less_or_equal": "close_below",
     "between": "range",
 }
-_SUFFIX_THRESHOLD = re.compile(r"-T(-?\d+(?:\.\d+)?)$")
-_SUFFIX_BETWEEN = re.compile(r"-B(-?\d+(?:\.\d+)?)$")
+# legacy tickers write a negative strike as "N": GDP-23JUL27-TN0.6 is -0.6
+_SUFFIX_THRESHOLD = re.compile(r"-T(N|-)?(\d+(?:\.\d+)?)$")
+_SUFFIX_BETWEEN = re.compile(r"-B(N|-)?(\d+(?:\.\d+)?)$")
+_BELOW_WORDS = re.compile(r"\b(below|lower|less|under)\b", re.IGNORECASE)
+
+
+def _suffix_value(match: re.Match) -> float:
+    value = float(match.group(2))
+    return -value if match.group(1) else value
 
 
 def market_strike(market: dict) -> tuple[str, float | None, float | None, str | None]:
     """(contract_type, strike, strike_cap, label) for a market.
 
-    Uses Kalshi's strike fields when present; legacy markets carry them only in
-    the ticker (`-T4.50` = above 4.50, `-B7737` = a range centred there), and
-    FEDDECISION-style outcomes (`-H0`, `-C25`) are event contracts whose outcome
-    is the label.
+    Uses Kalshi's strike fields when present. Legacy markets carry the strike
+    only in the ticker: `-T4.50` is a threshold, `-B7737` a range centred there.
+    The ticker does not say which side a `-T` is on — the S&P ladders' tails
+    ("INX-22MAY03-T4000": "3999.99 or lower") are below-thresholds, the Fed
+    ladders ("Above 4.50%") above ones — so the direction comes from the
+    wording of `yes_sub_title` / `title`. FEDDECISION-style outcomes (`-H0`,
+    `-C25`) are event contracts whose outcome is the label.
     """
     ticker = market.get("ticker", "")
     strike_type = market.get("strike_type")
@@ -226,9 +236,11 @@ def market_strike(market: dict) -> tuple[str, float | None, float | None, str | 
             return kind, cap, None, label
         return kind, floor, cap, label
     if m := _SUFFIX_THRESHOLD.search(ticker):
-        return "close_above", float(m.group(1)), None, label
+        wording = f"{market.get('yes_sub_title') or ''} {market.get('title') or ''}"
+        kind = "close_below" if _BELOW_WORDS.search(wording) else "close_above"
+        return kind, _suffix_value(m), None, label
     if m := _SUFFIX_BETWEEN.search(ticker):
-        return "range", float(m.group(1)), None, label
+        return "range", _suffix_value(m), None, label
     suffix = ticker.rsplit("-", 1)[-1] if "-" in ticker else None
     return "event", None, None, label or suffix
 

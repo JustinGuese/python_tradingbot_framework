@@ -72,6 +72,11 @@ def test_legacy_cent_fields_parse_to_none():
         ),
         ({"ticker": "KXINX-X-T7050", "strike_type": "less", "cap_strike": 7050}, ("close_below", 7050.0, None)),
         ({"ticker": "KXFEDDECISION-26OCT-C25", "strike_type": "custom"}, ("event", None, None)),
+        # legacy S&P tails carry the side only in the wording
+        ({"ticker": "INX-22MAY03-T4000", "yes_sub_title": "3999.99 or lower"}, ("close_below", 4000.0, None)),
+        ({"ticker": "FED-22DEC-T4.75", "yes_sub_title": "Above 4.75%"}, ("close_above", 4.75, None)),
+        # legacy negative strikes are written "N"
+        ({"ticker": "CPI-22AUG-TN0.1", "yes_sub_title": "Above -0.1%"}, ("close_above", -0.1, None)),
     ],
 )
 def test_market_strike(market, expected):
