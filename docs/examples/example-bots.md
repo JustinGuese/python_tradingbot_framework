@@ -248,6 +248,76 @@ Run `RecursiveDecayHarvestBot().local_optimize()` to find the best combination o
 volatility decay theory, beta slippage mathematics, dark pool footprints, and multi-agent AI
 consensus frameworks for leveraged ETF strategies.
 
+## option_indexvolbot.py (OptionIndexVolBot)
+
+Sells SPY iron condors when implied vol sits above a forecast of the vol SPY
+will actually deliver. The one option bot with backtested, uncorrelated alpha
+(+2.0%/yr, t 4.28, beta 0.01) — see
+[Index Vol Backtest](../backtests/index-vol-2026-09.md).
+
+**Pattern**: `makeOneIteration()` using the options framework (`tradingbot/utils/options.py`,
+`utils/option_rules.py`). Manages a held structure, or opens one when off; not
+backtestable with the built-in engine (`scripts/onetime_index_vol_backtest.py`
+runs its own synthetic backtest instead — see [Options](#options) below).
+
+```python
+class OptionIndexVolBot(Bot):
+    RULES: ClassVar[IndexVolRules] = IndexVolRules(
+        target_dte=35, put_delta=0.10, call_delta=0.10, width_pct=0.10, min_gap=0.03, exit_dte=7
+    )
+
+    def makeOneIteration(self):
+        book = self.option_book("SPY")
+        if not book.empty:
+            # Close at take-profit, a stop, few days left, or a VIX/VIX3M inversion.
+            reason = index_vol_exit_reason(book.credit, book.pnl, book.dte, self.RULES)
+            if reason:
+                self.close_options("SPY")
+                return -1
+            return 0
+
+        view = options.load_chain("SPY", self.RULES.target_dte)
+        if not view.live:
+            return 0  # never opens a structure off-hours
+        fair = om.har_rv_forecast(...)  # HAR-RV forecast of SPY's realized vol to expiry
+        iv = options.atm_iv(view)
+        if not index_vol_entry_ok(iv, fair, self.getLatestPrice("^VIX"), self.RULES):
+            return 0  # only sells when IV >= fair vol + a gap
+        opened = self.open_iron_condor(
+            "SPY",
+            short_delta=self.RULES.put_delta,
+            width=self.RULES.width_pct * view.spot,
+            dte=self.RULES.target_dte,
+            max_risk_usd=self.RULES.max_risk_pct * self.portfolio_value(),
+            view=view,
+        )
+        return 1 if opened else 0
+```
+
+**Key details:**
+| Setting | Value |
+|---|---|
+| Structure | 10-delta short put/call, wings 10% of spot further out |
+| Entry gate | ATM IV ≥ HAR fair vol + 3 points, ^VIX < 40 |
+| Exit | 50% of credit, 2x credit stop, or 7 DTE left |
+| Sizing | worst-case loss ≤ 20% of the book (`max_risk_usd` on `open_iron_condor`) |
+
+Rules live as pure functions in `utils/option_rules.py` (`IndexVolRules`,
+`index_vol_entry_ok`, `index_vol_exit_reason`), shared between the live bot
+and its synthetic backtest — the same pattern every option bot follows.
+
+## Options
+
+Ten more option bots trade AAPL and the S&P 100 with strike-by-delta selection,
+spreads, condors, the wheel, PMCC, collars, cross-sectional and
+earnings-driven strategies. Full list, strategy table and framework reference
+(selecting by delta, margin math, physical settlement, greeks, IV solving,
+the vol surface): [AGENTS.md § Options](../../AGENTS.md#options-paper-opt-in).
+Backtests: [option-bots-2026-09.md](../backtests/option-bots-2026-09.md),
+[option-bots-round2-2026-09.md](../backtests/option-bots-round2-2026-09.md),
+[index-vol-2026-09.md](../backtests/index-vol-2026-09.md),
+[option-round3-2026-09.md](../backtests/option-round3-2026-09.md).
+
 ## Learning from Examples
 
 Each example demonstrates:

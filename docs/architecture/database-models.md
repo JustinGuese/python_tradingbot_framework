@@ -156,6 +156,153 @@ class OptionQuote(Base):
 **Unique constraint**: `(contract_symbol, snapshot_at)`. Index on
 `(contract_symbol, snapshot_at)`.
 
+## MacroEvent Model
+
+Scheduled macro releases: FOMC statements (a static table transcribed from
+federalreserve.gov) and CPI / jobs-report dates (FRED's release calendar,
+future scheduled dates included). Filled weekly by
+`tradingbot/macrocalendarsnapshot.py`; read by option bots that avoid opening
+short vol right before one. See `tradingbot/utils/macro_calendar.py`.
+
+```python
+class MacroEvent(Base):
+    id: int  # Auto-increment primary key
+    kind: str  # "FOMC" / "CPI" / "NFP"
+    event_date: date  # Indexed
+    source: str  # e.g. "federalreserve.gov" or "FRED release 10"
+    created_at: datetime
+```
+
+**Unique constraint**: `(kind, event_date)`.
+
+## VolSurfaceSnapshot Model
+
+One row per underlying per day: the day's `OptionQuote` capture condensed
+into constant-maturity IV, skew, term slope, a HAR fair-vol forecast and its
+gap to IV, and options "TA" (put/call ratios, dealer gamma exposure, max
+pain, unusual activity). Written after each daily capture
+(`tradingbot/utils/vol_surface.py`); every ranking bot (cross-vol, the
+scanner, dispersion) reads it instead of re-scanning raw quotes.
+
+```python
+class VolSurfaceSnapshot(Base):
+    id: int  # Auto-increment primary key
+    underlying: str  # Indexed
+    snapshot_date: date  # Indexed
+    spot: float
+    atm_iv_7: float  # Constant-maturity ATM IV, 7/30/60/90/180 days
+    atm_iv_30: float
+    atm_iv_60: float
+    atm_iv_90: float
+    atm_iv_180: float
+    iv_25p_30: float  # 25-delta put/call IV at 30 days
+    iv_25c_30: float
+    rr25_30: float  # 25d put IV - 25d call IV (risk reversal)
+    fly25_30: float  # wings average - ATM (butterfly)
+    term_slope: float  # atm_iv_90 / atm_iv_30
+    fair_vol_30: float  # HAR-RV forecast, 30 days
+    vrp_30: float  # atm_iv_30 - fair_vol_30 (the variance risk premium)
+    pc_volume: float  # Put/call ratio, by volume
+    pc_oi: float  # Put/call ratio, by open interest
+    gex_usd: float  # Dealer $ gamma exposure per 1% move (calls +, puts -)
+    max_pain: float  # Strike where open option holders lose the most at expiry
+    unusual_count: int  # Contracts trading > 3x open interest
+    n_contracts: int
+    created_at: datetime
+```
+
+**Unique constraint**: `(underlying, snapshot_date)`.
+
+## ImpliedCorrelation Model
+
+Daily implied correlation of an index (SPY) against its largest captured
+members, from 30-day ATM IVs and market-cap weights. Feeds
+`option_DispersionBot`, which trades nothing until 60 observations exist.
+
+```python
+class ImpliedCorrelation(Base):
+    id: int  # Auto-increment primary key
+    index_symbol: str  # e.g. "SPY"
+    snapshot_date: date  # Indexed
+    value: float  # (index_iv^2 - sum(w_i^2 sigma_i^2)) / sum(cross terms)
+    index_iv: float
+    n_names: int  # Members with a surface row that day
+    weight_coverage: float  # n_names / captured members
+    created_at: datetime
+```
+
+**Unique constraint**: `(index_symbol, snapshot_date)`.
+
+## OptionRiskSnapshot Model
+
+Daily risk of every option bot's book, per underlying: dollar greeks,
+scenario P&L under spot/vol shocks, worst-case loss at expiry, and reserved
+margin. Written after the close by `tradingbot/optionrisksnapshot.py`
+(`tradingbot/utils/option_risk.py`); marks come from the newest stored quote,
+never a refetch.
+
+```python
+class OptionRiskSnapshot(Base):
+    id: int  # Auto-increment primary key
+    bot_name: str  # Indexed
+    underlying: str
+    snapshot_date: date  # Indexed
+    spot: float
+    value: float
+    delta_usd: float
+    gamma_usd: float  # $ delta change per 1% move
+    vega: float  # $ per vol point
+    theta: float  # $ per day
+    stress_down20: float  # P&L: spot -20%
+    stress_down10: float
+    stress_up10: float
+    stress_vol_up10: float  # P&L: vol +10 points, spot unchanged
+    stress_crash: float  # P&L: spot -20%, vol +30 points
+    max_loss: float  # Worst case at expiry, from entry prices
+    margin: float  # Reserved margin (utils/options.margin_requirement)
+    created_at: datetime
+```
+
+**Unique constraint**: `(bot_name, underlying, snapshot_date)`.
+
+## MispricingScanRow Model
+
+One candidate from the daily vol-mispricing scan
+(`tradingbot/utils/mispricing_scan.py`), written after each capture and read
+by the cross-vol and scanner bots to shortlist which live chains to load.
+
+```python
+class MispricingScanRow(Base):
+    id: int  # Auto-increment primary key
+    scan_date: date  # Indexed
+    underlying: str  # Indexed
+    expiry: date  # Nullable
+    kind: str  # "vrp" | "svi" | "event" | "parity"
+    strike: float  # Nullable (set for "svi" / "parity")
+    right: str  # "C" / "P", nullable
+    iv: float  # Nullable
+    fair: float  # Nullable: forecast vol ("vrp") or SVI-fitted IV ("svi")
+    z: float  # Nullable: z-score of the gap against the name's own history
+    half_spread_vol: float  # Nullable: bid/ask half-spread in vol terms
+    score: float  # Nullable: ranking value (z for "vrp", resid/half-spread for "svi")
+    note: str  # Human-readable summary, nullable
+    created_at: datetime
+```
+
+No unique constraint — several rows per underlying per day (one per `kind`,
+and several `svi`/`parity` rows per strike).
+
+- **"vrp"**: ATM IV against a Yang-Zhang HAR forecast, z-scored against the
+  name's own `vol_surface.vrp_30` history (`z` is `None` below 60 observations).
+- **"svi"**: a strike off an arbitrage-free SVI fit (`utils/svi.py`) by more
+  than half its own bid/ask spread in vol terms.
+- **"event"**: the implied earnings move against the historical RMS move
+  (logged for the record; `option_EarningsCrushBot` computes this live rather
+  than reading it, since it needs the report's exact timing).
+- **"parity"**: a strike pair outside the American put-call band at bid/ask —
+  bad data (stale quote, dividend, borrow), excluded from the rest, never
+  traded.
+
 ## TelegramMessage Model
 
 Monitored Telegram channel messages with AI summaries (written by the Telegram monitor CronJob).
