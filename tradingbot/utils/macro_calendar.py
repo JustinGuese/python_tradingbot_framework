@@ -31,6 +31,9 @@ import pandas as pd
 from tradingbot.utils.db import MacroEvent, get_db_session
 
 logger = logging.getLogger(__name__)
+# httpx logs every request URL at INFO, and FRED takes the API key as a query
+# parameter: without this the key lands in plain text in every pod's logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 FRED_URL = "https://api.stlouisfed.org/fred/release/dates"
 FRED_RELEASES = {"CPI": 10, "NFP": 50}

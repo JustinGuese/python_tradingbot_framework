@@ -73,8 +73,8 @@ live rules (0.10Δ, 10% wings, 35 DTE, gap ≥ 3 points):
 - **Grid B**, the forecast, signal and tail hedge, runs from 2000 with the
   split at 2013-06.
 
-The event gate was FOMC-only for this run, because no `FRED_API_KEY` was
-available. CPI days are added automatically once the key exists.
+The event gate was first run FOMC-only, then rerun with FOMC + CPI once
+`FRED_API_KEY` existed (bullet below the table).
 
 **Grid A** has 108 variants: VIX/VIX3M cap × VVIX cap × FOMC blackout ×
 unwind. The H1 winner (VIX/VIX3M ≤ 0.95 + VVIX ≤ 110 + 1-day blackout) traded
@@ -130,6 +130,12 @@ What this says:
   calm years.** At 0.25%/month the H2 t is flat, but the max DD is worse.
 - **The FOMC blackout changes almost nothing.** A 35-DTE condor holds through
   one or two meetings whatever day it opens.
+- **Adding CPI days (rerun with `FRED_API_KEY`) changes nothing either.**
+  - Grid A's H1 winner is the same variant and makes the same H2 t of 0.01.
+  - On its own, a FOMC+CPI blackout of 1 session scores H1 1.38 and H2 3.24;
+    2 sessions score H1 1.47 and H2 3.76. The live rules score 1.67 and 3.46.
+  - The 2-session blackout wins on H2 but loses on H1, where the choice is
+    made, so it is not picked.
 
 ## The new bots
 
@@ -152,8 +158,9 @@ starts now.
 - **The SPY skew is calibrated on one day** (see
   [index-vol-2026-09.md](index-vol-2026-09.md)). `vol_surface.rr25_30` now
   records it daily, so it can be recalibrated against months of real data.
-- **CPI dates need `FRED_API_KEY`** in the cluster secret. Without it,
-  `macrocalendarsnapshot` exits 1 and the calendar is FOMC-only.
+- **CPI and jobs-report dates come from FRED** (`FRED_API_KEY`, in the
+  cluster secret since 2026-09-28). If the key goes missing,
+  `macrocalendarsnapshot` exits 1 and the calendar stays FOMC-only.
 
 ## Reproduce
 
