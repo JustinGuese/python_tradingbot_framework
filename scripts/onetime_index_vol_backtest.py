@@ -40,6 +40,13 @@ Modes:
             Each: pick on H1, ship only if it beats the live rules on H2 without
             a deeper drawdown. CPI dates need FRED_API_KEY; without it the event
             gate is FOMC-only (said in the output).
+  --pm      round 5 (2026-09-29): Kalshi release uncertainty (event_std_z, how
+            unusually wide the CPI / unemployment ladder for the next print is;
+            utils/prediction_market_features.py) as an entry gate and a size-down,
+            on top of the live rules. 2021-10 -> now (the ladders' history), split
+            2024-01-01 as in docs/backtests/prediction-markets-2026-09.md; pick on
+            H1, same ship rule as --gates, then the decide path for the pick.
+            Reads prediction_market_snapshots: needs POSTGRES_URI (port-forward).
   --decide  the live bot's own decision function (utils/option_strategies.
             decide_indexvol) on a synthetic chain built from the same model
             (SyntheticMarket). select_iron_condor picks the strikes, HAR runs
@@ -289,6 +296,7 @@ def sim_index_condor(m: pd.DataFrame, expiries, r: rl.IndexVolRules, model: Mode
             vvix=getattr(row, "vvix", None),
             bdays_to_event=getattr(row, "bdays_to_event", None),
             z=None if z is None else z.loc[ts],
+            event_std_z=getattr(row, "event_std_z", None),
         ):
             expiry = first_expiry(expiries, day, r.target_dte)
             w = max(round(r.width_pct * row.S), 1.0)
@@ -302,7 +310,8 @@ def sim_index_condor(m: pd.DataFrame, expiries, r: rl.IndexVolRules, model: Mode
             ]
             priced = [om.Leg(x.right, x.strike, x.qty, b.fill(b.mid(x, day, row), row.S, x.qty > 0)) for x in unit]
             per_unit = om.max_loss(priced) * 100
-            n = int(min(r.max_risk_pct * b.equity(day, row), b.cash) // per_unit) if 0 < per_unit < math.inf else 0
+            budget = r.max_risk_pct * rl.index_vol_risk_mult(getattr(row, "event_std_z", None), r) * b.equity(day, row)
+            n = int(min(budget, b.cash) // per_unit) if 0 < per_unit < math.inf else 0
             if n > 0:
                 b.open([Leg(x.right, x.strike, x.expiry, x.qty * 100 * n) for x in unit], day, row)
         curve[ts] = b.equity(day, row) + hedge.equity(day, row)
@@ -390,8 +399,8 @@ def tune(m, expiries, model, split) -> None:
     print(_row("H1 top-10 consensus", "H2", consensus["H2"]))
 
 
-def _gate_grid(label: str, variants: list[rl.IndexVolRules], m, expiries, model) -> None:
-    split = m.index[len(m) // 2]
+def _gate_grid(label: str, variants: list[rl.IndexVolRules], m, expiries, model, split=None) -> dict:
+    split = m.index[len(m) // 2] if split is None else pd.Timestamp(split)
     live = evaluate(LIVE, m, expiries, model, split)
     results = Parallel(n_jobs=-1)(delayed(evaluate)(r, m, expiries, model, split) for r in variants)
     ranked = sorted(results, key=lambda x: x["H1"]["t"], reverse=True)
@@ -415,6 +424,7 @@ def _gate_grid(label: str, variants: list[rl.IndexVolRules], m, expiries, model)
         f"H1 winner: {_diff(best['rules'], LIVE)} -> H2 t {best['H2']['t']:.2f} (live {live['H2']['t']:.2f}), "
         f"H2 max DD {best['H2']['max_dd']:.1%} (live {live['H2']['max_dd']:.1%}): {'SHIPS' if ships else 'does not ship'}"
     )
+    return {"best": best, "live": live, "ships": ships}
 
 
 def gates(u: Underlying, model: Model) -> None:
@@ -440,6 +450,58 @@ def gates(u: Underlying, model: Model) -> None:
         for f, sig, t in itertools.product(["har", "har_yz", "garch"], signals, [None, 0.0025, 0.005])
     ]
     _gate_grid("B (fair model, signal, tail hedge)", grid_b, m, expiries, model)
+
+
+# ------------------------------------------------------------------
+# --pm: prediction-market release uncertainty (round 5)
+# ------------------------------------------------------------------
+
+PM_SPLIT = "2024-01-01"
+
+
+def load_pm(u: Underlying) -> tuple[pd.DataFrame, list[date]]:
+    """load_round3 plus event_std_z (point-in-time, from the DB), cut to where it exists."""
+    from tradingbot.utils import prediction_market_features as pmf
+
+    # Only what the live rules read (the vol curve); not load_round3's GARCH / Yang-Zhang
+    # fair vols over 1999+, which take an hour and are not used here.
+    m, expiries = load_inputs(u)
+    for sym, col in (("^VIX3M", "vix3m"), ("^VVIX", "vvix")):
+        m[col] = _download(sym)["Close"].reindex(m.index).ffill(limit=5)
+    m["term"] = m["vix"] / m["vix3m"]
+    path = os.path.join(CACHE, f"index_vol_pm_{u.symbol}_{date.today():%Y%m%d}.pkl")
+    if os.path.exists(path):
+        z = pd.read_pickle(path)
+    else:
+        z = pmf.feature_frame(m.index, series=list(pmf.EVENT_SERIES))["event_std_z"]
+        z.to_pickle(path)
+    m["event_std_z"] = z.reindex(m.index)
+    return m.loc[m["event_std_z"].first_valid_index() :], expiries
+
+
+def pm(u: Underlying, model: Model) -> None:
+    m, expiries = load_pm(u)
+    z = m["event_std_z"]
+    print(
+        f"event_std_z: {z.notna().mean():.0%} of days known; share > 1.0 / 1.5 / 2.0: "
+        f"{(z > 1).mean():.0%} / {(z > 1.5).mean():.0%} / {(z > 2).mean():.0%}"
+    )
+    variants = [
+        replace(LIVE, max_event_std_z=g, event_size_z=s)
+        for g, s in itertools.product([None, 1.0, 1.5, 2.0], [None, (1.0, 0.5), (1.5, 0.5)])
+        if (g, s) != (None, None)
+    ]
+    res = _gate_grid("PM (release uncertainty)", variants, m, expiries, model, split=PM_SPLIT)
+    pick = res["best"]["rules"]
+    runs = Parallel(n_jobs=2)(
+        delayed(_decide_eval)(label, r, m, expiries, model, pd.Timestamp(PM_SPLIT), m["S"])
+        for label, r in (("decide: live rules", LIVE), (f"decide: {_diff(pick, LIVE)}", pick))
+    )
+    print("\n### Decide path, same window")
+    print(HEADER)
+    for label, parts, trades in runs:
+        for part in ("full", "H1", "H2"):
+            print(_row(label, part, parts[part], trades if part == "full" else ""))
 
 
 # ------------------------------------------------------------------
@@ -507,6 +569,10 @@ class SyntheticMarket(Market):
         if bdays is None or pd.isna(bdays):
             return None, None
         return ("FOMC/CPI", "?"), int(bdays)
+
+    def event_uncertainty(self) -> float | None:
+        z = getattr(self.row, "event_std_z", None)
+        return None if z is None or pd.isna(z) else float(z)
 
 
 class SyntheticHoldings(Holdings):
@@ -631,9 +697,13 @@ def main() -> None:
         default="real",
         help="real: fitted on the 2019-26 SPY chains (default); original: the one-day 2026-09-25 fit",
     )
+    ap.add_argument("--pm", action="store_true", help="walk-forward of the Kalshi release-uncertainty gate")
     args = ap.parse_args()
 
     u = (UNDERLYINGS if args.calibration == "real" else ORIGINAL_CALIBRATION)[args.underlying]
+    if args.pm:
+        pm(u, u.model())
+        return
     if args.decide:
         decide_check(u, u.model())
         return

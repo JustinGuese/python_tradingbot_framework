@@ -379,3 +379,53 @@ def test_overlay_sma200_ablation():
     assert _overlay(signal="static").targetWeights(_rows()) == pytest.approx(
         {"SPY": 0.4, "QQQ": 0.4, "IEF": 0.1, "GLD": 0.1}
     )
+
+
+# ------------------------------------------------------------------
+# Round 5: release uncertainty (option_IndexVolBot gate)
+# ------------------------------------------------------------------
+
+
+def test_daily_features_u3_next_release_ladder():
+    rows = [
+        _snap("2026-09-25", "unemployment", "KXU3-26OCT", f"KXU3-26OCT-T{k}", p, k, expiry="2026-10-02 12:30")
+        for k, p in ((4.2, 0.9), (4.3, 0.5), (4.4, 0.1))
+    ] + [  # a later release is ignored
+        _snap("2026-09-25", "unemployment", "KXU3-26NOV", "KXU3-26NOV-T4.3", 0.99, 4.3, expiry="2026-11-06 12:30")
+    ]
+    feats = pmf.daily_features(pd.DataFrame(rows)).loc["2026-09-25"]
+    mean, std = pmf.ladder_moments([4.2, 4.3, 4.4], [0.9, 0.5, 0.1], step=0.1)
+    assert feats["u3_next_mean"] == pytest.approx(mean) and feats["u3_next_std"] == pytest.approx(std)
+    assert feats["u3_next_days"] == 7
+
+
+def test_std_z_uses_only_earlier_days_of_the_same_bucket():
+    days = pd.date_range("2025-01-01", periods=60, freq="D")
+    rng = np.random.default_rng(0)
+    std = pd.Series(0.12 * np.exp(rng.normal(0, 0.1, len(days))), index=days)
+    to_release = pd.Series(np.where(np.arange(len(days)) % 2 == 0, 3.0, 30.0), index=days)
+    z = pmf._std_z(std, to_release)
+    assert z.iloc[: 2 * pmf.EVENT_Z_MIN_OBS - 1].isna().all()  # each bucket needs its own history
+    bumped = std.copy()
+    bumped.iloc[-1] = 1.0  # a shock on the last day moves only the last day's z
+    z2 = pmf._std_z(bumped, to_release)
+    pd.testing.assert_series_equal(z.iloc[:-1], z2.iloc[:-1])
+    assert z2.iloc[-1] > 5
+    # a wide "30 days out" ladder does not inflate a "3 days out" z
+    far = std.where(to_release < 10, std * 3)
+    assert pmf._std_z(far, to_release)[to_release < 10].equals(z[to_release < 10])
+
+
+def test_event_std_z_is_the_max_and_survives_one_series_missing():
+    daily = pd.DataFrame(
+        {"cpi_next_std": [0.1], "cpi_next_days": [5.0], "u3_next_std": [np.nan], "u3_next_days": [np.nan]},
+        index=pd.to_datetime(["2026-09-25"]),
+    )
+    out = pmf.add_event_uncertainty(daily)
+    assert {"cpi_std_z", "u3_std_z", "event_std_z"} <= set(out)
+    frame = pd.DataFrame({"cpi_std_z": [1.0, np.nan], "u3_std_z": [2.0, -0.5]})
+    assert frame.max(axis=1, skipna=True).tolist() == [2.0, -0.5]
+
+
+def test_event_uncertainty_is_none_without_snapshots(sqlite_db):
+    assert pmf.event_uncertainty(date(2026, 9, 29)) is None

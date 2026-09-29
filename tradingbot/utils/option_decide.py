@@ -148,6 +148,16 @@ class Market(ABC):
             logger.warning("Macro calendar unavailable: %s", exc)
             return None, None
 
+    def event_uncertainty(self) -> float | None:
+        """event_std_z from Kalshi's CPI / unemployment ladders as of yesterday; None if unknown."""
+        from . import prediction_market_features as pmf
+
+        try:
+            return pmf.event_uncertainty(self.today)
+        except Exception as exc:
+            logger.warning("Prediction-market release uncertainty unavailable: %s", exc)
+            return None
+
     def scan_scores(self) -> dict[str, float]:
         """|z| per name from the latest mispricing scan on or before today."""
         from . import mispricing_scan as ms

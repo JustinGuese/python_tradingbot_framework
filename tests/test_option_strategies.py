@@ -1062,6 +1062,22 @@ def test_index_vol_gates_block_only_when_set():
     assert rules_mod.index_vol_unwind_reason(1.5, base) is None
 
 
+def test_index_vol_release_uncertainty_gate_and_size():
+    base = OptionIndexVolBot.RULES
+    ok = {"iv": 0.25, "fair": 0.15, "vix": 18.0, "term_ratio": 0.9}
+    assert rules_mod.index_vol_entry_ok(**ok, rules=base, event_std_z=9.0)  # off unless set
+    assert rules_mod.index_vol_risk_mult(9.0, base) == 1.0
+    gated = rules_mod.IndexVolRules(**{**vars(base), "max_event_std_z": 1.5, "event_size_z": (1.0, 0.5)})
+    assert rules_mod.index_vol_entry_ok(**ok, rules=gated, event_std_z=1.2)
+    assert not rules_mod.index_vol_entry_ok(**ok, rules=gated, event_std_z=1.6)
+    assert rules_mod.index_vol_entry_ok(**ok, rules=gated, event_std_z=None)  # feed down: trade as usual
+    assert rules_mod.index_vol_entry_ok(**ok, rules=gated, event_std_z=float("nan"))
+    assert rules_mod.index_vol_risk_mult(1.2, gated) == 0.5
+    assert rules_mod.index_vol_risk_mult(0.8, gated) == 1.0
+    assert rules_mod.index_vol_risk_mult(None, gated) == 1.0
+    assert rules_mod.index_vol_risk_mult(float("nan"), gated) == 1.0
+
+
 def test_hedge_trade_fixed_and_whalley_wilmott():
     assert rules_mod.hedge_trade(5.0, 300.0, 5.0, 100_000.0, 0.02) == 0.0  # $1.5k < 2% of book
     assert rules_mod.hedge_trade(10.0, 300.0, 5.0, 100_000.0, 0.01) == -10.0  # back to zero

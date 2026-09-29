@@ -34,6 +34,7 @@ from .option_rules import (
     earnings_crush_exit_due,
     index_vol_entry_ok,
     index_vol_exit_reason,
+    index_vol_risk_mult,
     index_vol_unwind_reason,
     reaction_session,
     scan_exit_reason,
@@ -91,8 +92,10 @@ def decide_indexvol(market: Market, holdings: Holdings, rules: IndexVolRules, un
     vix, vix3m, vvix = market.vol_index(VIX), market.vol_index(VIX3M), market.vol_index(VVIX)
     term = term_ratio(vix, vix3m)
     event, bdays_to_event = market.next_macro_event()
+    event_z = market.event_uncertainty()
     logger.info(
-        "%s %s: ATM IV %s vs HAR fair %.1f%% (gap %s), VIX %s, VIX/VIX3M %s, VVIX %s, next event %s",
+        "%s %s: ATM IV %s vs HAR fair %.1f%% (gap %s), VIX %s, VIX/VIX3M %s, VVIX %s, next event %s, "
+        "release uncertainty z %s",
         underlying,
         view.expiry,
         _fmt(iv, ".1%"),
@@ -102,9 +105,13 @@ def decide_indexvol(market: Market, holdings: Holdings, rules: IndexVolRules, un
         _fmt(term, ".2f"),
         _fmt(vvix, ".0f"),
         f"{event[0]} {event[1]} ({bdays_to_event} sessions)" if event else "unknown",
+        _fmt(event_z, "+.2f"),
     )
-    if not index_vol_entry_ok(iv, fair, vix, rules, term_ratio=term, vvix=vvix, bdays_to_event=bdays_to_event):
+    if not index_vol_entry_ok(
+        iv, fair, vix, rules, term_ratio=term, vvix=vvix, bdays_to_event=bdays_to_event, event_std_z=event_z
+    ):
         return []
+    risk = rules.max_risk_pct * index_vol_risk_mult(event_z, rules) * holdings.equity()
     try:
         pick = options.select_iron_condor(
             underlying,
@@ -117,7 +124,7 @@ def decide_indexvol(market: Market, holdings: Holdings, rules: IndexVolRules, un
     except ValueError as exc:
         logger.warning("%s: no condor (%s)", underlying, exc)
         return []
-    return [Open(pick, rules.max_risk_pct * holdings.equity(), reason=f"IV {iv:.1%} vs fair {fair:.1%}")]
+    return [Open(pick, risk, reason=f"IV {iv:.1%} vs fair {fair:.1%}")]
 
 
 # ------------------------------------------------------------------

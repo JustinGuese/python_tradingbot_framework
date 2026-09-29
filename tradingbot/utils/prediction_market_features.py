@@ -21,7 +21,12 @@ Features (NaN where the series has no data yet):
                        0 when none is open (no deadline pending), NaN before the
                        series' first day.
 - pm_shutdown_prob     same, Polymarket.
-- cpi_next_mean/std    m/m CPI distribution for the next release, from its ladder.
+- cpi_next_mean/std    m/m CPI distribution for the next release, from its ladder
+                       (cpi_next_days: calendar days until that release).
+- u3_next_mean/std     same for the unemployment rate (KXU3), u3_next_days.
+- cpi_std_z, u3_std_z  log(std) z-scored against the trailing year within the same
+                       days-to-release bucket; event_std_z = their max. How unusually
+                       uncertain the market is about the next print (option_IndexVolBot).
 
 Ladders are "above X" survival functions; `ladder_moments` makes them monotone
 before taking moments (last prices of neighbouring strikes can cross).
@@ -190,16 +195,55 @@ def _fed_decision_cut(day_rows: pd.DataFrame, day: pd.Timestamp) -> float:
     return float(nxt.loc[suffix.str.startswith("C"), "prob"].sum() / total)
 
 
-def _cpi(day_rows: pd.DataFrame, day: pd.Timestamp) -> tuple[float, float]:
+def _next_release(day_rows: pd.DataFrame, day: pd.Timestamp, step: float) -> tuple[float, float, float]:
+    """(mean, std, calendar days to expiry) of the next release's "above X" ladder."""
     ladder = day_rows[(day_rows["contract_type"] == "close_above") & (day_rows["expiry"] > day + timedelta(days=1))]
     if ladder.empty:
-        return np.nan, np.nan
-    nxt = ladder[ladder["event_ticker"] == ladder.sort_values("expiry").iloc[0]["event_ticker"]].dropna(
-        subset=["strike"]
-    )
+        return np.nan, np.nan, np.nan
+    first = ladder.sort_values("expiry").iloc[0]
+    nxt = ladder[ladder["event_ticker"] == first["event_ticker"]].dropna(subset=["strike"])
     if len(nxt) < 2:
-        return np.nan, np.nan
-    return ladder_moments(nxt["strike"], nxt["prob"], step=0.1)
+        return np.nan, np.nan, np.nan
+    mean, std = ladder_moments(nxt["strike"], nxt["prob"], step=step)
+    return mean, std, float((first["expiry"] - day).days)
+
+
+# Release uncertainty: the ladder's std narrows ~30% over the month before a
+# release and moves with the regime (CPI median 0.20pp in 2022, 0.12pp in 2025),
+# so it is z-scored as log(std) against the trailing year, within
+# days-to-release buckets. Payrolls is left out: open interest ~10 contracts.
+EVENT_SERIES = ("cpi_mom", "unemployment")
+EVENT_Z_WINDOW = "365D"
+EVENT_Z_MIN_OBS = 20
+EVENT_DAY_BUCKETS = (7, 21)  # <=7, 8..21, >21 calendar days to the release
+
+
+def _std_z(std: pd.Series, days: pd.Series) -> pd.Series:
+    """Point-in-time z of log(std) vs the trailing window of the same days-to-release bucket."""
+    log_std = np.log(std.where(std > 0))
+    bucket = np.digitize(days.fillna(-1), EVENT_DAY_BUCKETS, right=True)
+    out = pd.Series(np.nan, index=std.index)
+    for b in np.unique(bucket):
+        s = log_std[(bucket == b) & days.notna()].dropna()
+        if s.empty:
+            continue
+        past = s.rolling(EVENT_Z_WINDOW, min_periods=EVENT_Z_MIN_OBS)
+        mean, sd = past.mean().shift(1), past.std().shift(1)  # strictly earlier days
+        out.loc[s.index] = (s - mean) / sd
+    return out
+
+
+def add_event_uncertainty(daily: pd.DataFrame) -> pd.DataFrame:
+    """Add cpi_std_z / u3_std_z and their max, event_std_z, to a covered-day feature frame."""
+    daily = daily.copy()
+    zs = []
+    for prefix, name in (("cpi_next", "cpi_std_z"), ("u3_next", "u3_std_z")):
+        if f"{prefix}_std" in daily and f"{prefix}_days" in daily:
+            daily[name] = _std_z(daily[f"{prefix}_std"], daily[f"{prefix}_days"])
+            zs.append(name)
+    if zs:
+        daily["event_std_z"] = daily[zs].max(axis=1, skipna=True)
+    return daily
 
 
 def fill_gaps(snapshots: pd.DataFrame, limit: int = STALE_DAYS) -> pd.DataFrame:
@@ -260,14 +304,15 @@ def daily_features(snapshots: pd.DataFrame) -> pd.DataFrame:
             if key in first and day >= first[key]:
                 r = rows.get(key)
                 rec[name] = _max_open(r, day) if r is not None else 0.0
-        if rows.get("cpi_mom") is not None:
-            rec["cpi_next_mean"], rec["cpi_next_std"] = _cpi(rows["cpi_mom"], day)
+        for key, prefix in (("cpi_mom", "cpi_next"), ("unemployment", "u3_next")):
+            if rows.get(key) is not None:
+                rec[f"{prefix}_mean"], rec[f"{prefix}_std"], rec[f"{prefix}_days"] = _next_release(rows[key], day, 0.1)
         records.append(rec)
     frame = pd.DataFrame(records, index=days)
     if "fed_cut_next_ladder" in frame:
         cut = frame["fed_cut_next_prob"] if "fed_cut_next_prob" in frame else pd.Series(np.nan, index=frame.index)
         frame["fed_cut_next_prob"] = cut.fillna(frame.pop("fed_cut_next_ladder"))
-    return frame
+    return add_event_uncertainty(frame)
 
 
 def as_of_bars(daily: pd.DataFrame, bar_dates) -> pd.DataFrame:
@@ -289,3 +334,12 @@ def feature_frame(bar_dates, series: list[str] | None = None) -> pd.DataFrame:
     bars = pd.DatetimeIndex(pd.to_datetime(bar_dates))
     start = (bars.min() - timedelta(days=400)).date() if len(bars) else None
     return as_of_bars(daily_features(load_snapshots(series, start=start)), bars)
+
+
+def event_uncertainty(day: date) -> float | None:
+    """event_std_z as bar `day` sees it (prices through day-1), None when unknown."""
+    frame = feature_frame([day], series=list(EVENT_SERIES))
+    if "event_std_z" not in frame or frame.empty:
+        return None
+    value = frame["event_std_z"].iloc[-1]
+    return None if pd.isna(value) else float(value)

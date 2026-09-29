@@ -146,7 +146,22 @@ Data Available
 - `feature_frame(bar_dates)` → point-in-time daily features: `recession_prob`, `fed_next_bps`,
   `fed_path_bps` (expected change of the fed funds upper bound by ~6 months out),
   `fed_cut_next_prob`, `shutdown_prob`, `cpi_next_mean/std`, plus Polymarket cross-checks.
+- `u3_next_mean/std` (KXU3 ladder) and `event_std_z`: how unusually wide the CPI / U3
+  distribution for the next print is. It is log(std) z-scored against the trailing year
+  within days-to-release buckets. `Market.event_uncertainty()` hands it to option bots, and
+  `option_IndexVolBot` logs it. As a gate or size-down it lost to the live rules out of
+  sample (2026-09-29), so `IndexVolRules.max_event_std_z` / `event_size_z` stay None.
 - Bar D only sees prices covering day D-1 or earlier (a day's price is observed after its close).
+- Round 2 findings, all in docs/backtests/prediction-markets-2026-09.md:
+  - Kalshi's S&P range mispricing is in last-trade prices only. Taker rules at the
+    bid/ask lose after fees; a maker upper bound is flat except in 2026
+    (`onetime_prediction_market_calibration.py --executable`).
+  - Polymarket tariff and election odds move with the ETFs they should move on the
+    same day, but don't lead them (`onetime_prediction_event_basket_study.py`).
+- Venue trading (quoting, arbitrage, market making) belongs in a separate long-running
+  module, not here. Its hook into this framework: own a `bots` row with portfolio
+  `{"USD": NAV}`. The daily worth calculator then writes `portfolio_worth` and the weekly
+  `alphareport` judges it (`portfolio_worth.bot_name` is an FK to `bots`).
 - Series are hand-curated in utils/prediction_market_series.py; never auto-discover markets.
   Kalshi's "recession in 2026" means two negative GDP quarters in 2025 *or* 2026.
 - API quirks (verified 2026-09-28): Kalshi markets settled before `/historical/cutoff` live

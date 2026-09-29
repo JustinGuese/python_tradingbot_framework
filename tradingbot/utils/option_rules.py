@@ -729,6 +729,21 @@ class IndexVolRules:
     unwind_term_ratio: float | None = None  # close an open condor once ^VIX / ^VIX3M exceeds this
     tail_hedge_pct: float | None = None  # monthly spend on 60-DTE 10-delta puts, share of book
     fair_model: str = "har"  # "har" (close-to-close), "har_yz" (Yang-Zhang), "garch"
+    # Prediction markets (2026-09-29): event_std_z = how unusually wide Kalshi's
+    # CPI / unemployment distribution for the next print is (utils/
+    # prediction_market_features.py). A missing value never blocks or shrinks:
+    # the feed is an optional overlay and a capture outage must not stop the bot.
+    # Both lost to the live rules out of sample (docs/backtests/prediction-markets-2026-09.md).
+    max_event_std_z: float | None = None  # skip entries while event_std_z is above this
+    event_size_z: tuple[float, float] | None = None  # (z0, mult): risk budget x mult while event_std_z > z0
+
+
+def index_vol_risk_mult(event_std_z: float | None, rules: IndexVolRules) -> float:
+    """Share of max_risk_pct to put on a new condor given the release uncertainty."""
+    if rules.event_size_z is None or event_std_z is None or math.isnan(event_std_z):
+        return 1.0
+    z0, mult = rules.event_size_z
+    return mult if event_std_z > z0 else 1.0
 
 
 def index_vol_entry_ok(
@@ -741,10 +756,13 @@ def index_vol_entry_ok(
     vvix: float | None = None,
     bdays_to_event: int | None = None,
     z: float | None = None,
+    event_std_z: float | None = None,
 ) -> bool:
     """
     Sell a condor today? A gate that is set but whose input is missing says no:
-    an unknown term structure is not a calm one.
+    an unknown term structure is not a calm one. The two calendar-driven gates
+    (event blackout, prediction-market uncertainty) are the exception and let a
+    missing input through.
     """
 
     def _missing(x: float | None) -> bool:
@@ -766,6 +784,8 @@ def index_vol_entry_ok(
     ):
         return False
     if rules.min_z is not None and (_missing(z) or z < rules.min_z):
+        return False
+    if rules.max_event_std_z is not None and not _missing(event_std_z) and event_std_z > rules.max_event_std_z:
         return False
     return rules.min_gap is None or iv - fair >= rules.min_gap
 
