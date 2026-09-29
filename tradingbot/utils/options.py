@@ -315,8 +315,8 @@ def next_earnings_date(underlying: str, today: date | None = None) -> date | Non
     today = today or utc_today()
     stored = _stored(underlying, today)
     if stored is not None:
-        upcoming = [d for d, _ in stored.earnings if d >= today]
-        return upcoming[0] if upcoming else None
+        event = stored.next_earnings(today)
+        return event[0] if event else None
     try:
         cal = yf.Ticker(underlying).calendar or {}
         dates = cal.get("Earnings Date") or []
@@ -389,8 +389,7 @@ def next_dividend(underlying: str, today: date | None = None) -> tuple[date, flo
     today = today or utc_today()
     stored = _stored(underlying, today)
     if stored is not None:
-        upcoming = [(d, a) for d, a in stored.dividends if d >= today and a > 0]
-        return upcoming[0] if upcoming else None
+        return stored.next_dividend(today)
     ex_date, amount = _yf_dividend_info(underlying)
     if ex_date is None or ex_date < today or amount <= 0:
         return None
@@ -403,11 +402,14 @@ def earnings_events(underlying: str, limit: int = 40, today: date | None = None)
     the stored events (corporate_events), else yfinance's earnings-date
     timestamps. In New York time a report stamped at 12:00 or later is after
     the close, earlier is before the open, and a bare midnight stamp is
-    unknown (None). Empty when nothing is known.
+    unknown (None). Empty when nothing is known. From the stored events the
+    last `limit` are counted back from today, so a past `today` sees the
+    reports it would have seen then.
     """
+    today = today or utc_today()
     stored = _stored(underlying, today)
     if stored is not None:
-        return stored.earnings[-limit:]
+        return stored.known_by(today, limit)
     try:
         df = yf.Ticker(underlying).get_earnings_dates(limit=limit)
     except Exception as e:
@@ -437,7 +439,7 @@ def earnings_history(underlying: str, limit: int = 40, today: date | None = None
     today = today or utc_today()
     stored = _stored(underlying, today)
     if stored is not None:
-        return [d for d, _ in stored.earnings if d < today][-limit:]
+        return stored.history(today, limit)
     dates: set[date] = set()
     try:
         df = yf.Ticker(underlying).get_earnings_dates(limit=limit)

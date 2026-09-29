@@ -33,7 +33,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 
-from tradingbot.utils import market_calendar, options
+from tradingbot.utils import corporate_events, macro_calendar, market_calendar, options
 from tradingbot.utils import option_math as om
 from tradingbot.utils.config import EXECUTION_CONFIG
 from tradingbot.utils.db import OptionQuote, get_db_session
@@ -43,12 +43,16 @@ from tradingbot.utils.option_rules import delta_hedge_shares
 logger = logging.getLogger(__name__)
 
 FALLBACK_SLIPPAGE = 0.02  # fills when a leg has no two-sided quote: mid ± 2%, as live off-hours
+EARNINGS_EVENTS = 40  # options.earnings_events' default window
 
 
 class ReplayMarket:
     """The latest snapshot of each contract per underlying per day, loaded once."""
 
     def __init__(self, start: date, end: date, underlyings: Iterable[str] | None = None):
+        # Event tables, read once per run: a query per replayed day costs hours over a port-forward.
+        self._events: dict[str, corporate_events.StoredEvents | None] = {}
+        self._macro: pd.DataFrame | None = None
         with get_db_session() as session:
             query = session.query(OptionQuote).filter(
                 OptionQuote.snapshot_at >= datetime.combine(start, datetime.min.time()),
@@ -103,6 +107,21 @@ class ReplayMarket:
         spot = self.spot(underlying, day)
         live = bool((pd.to_numeric(one["bid"], errors="coerce").fillna(0) > 0).any())
         return options.ChainView(underlying, expiries[0], one, spot, live, day) if spot else None
+
+    def events(self, underlying: str) -> corporate_events.StoredEvents | None:
+        """The stored earnings/dividends of `underlying` (None: not refreshed, use the live readers)."""
+        if underlying not in self._events:
+            self._events[underlying] = corporate_events.stored_events(underlying)
+        return self._events[underlying]
+
+    def macro_events(self) -> pd.DataFrame:
+        if self._macro is None:
+            try:
+                self._macro = macro_calendar.macro_events_frame(start="1990-01-01").sort_values("event_date")
+            except Exception as exc:
+                logger.warning("Macro calendar unavailable: %s", exc)
+                self._macro = pd.DataFrame(columns=["kind", "event_date"])
+        return self._macro
 
     def quote(self, key: str, day: date) -> tuple[float | None, float | None, float | None]:
         """(bid, ask, mid) of a contract on `day`; Nones when it was not recorded."""
@@ -380,6 +399,30 @@ class ReplayDayMarket(Market):
             if part is not None:
                 out[u] = part
         return out
+
+    # The event readers answer from the run's cached tables, point in time.
+
+    def earnings_events(self, underlying: str) -> list[tuple[date, bool | None]]:
+        stored = self._market.events(underlying)
+        return stored.known_by(self.today, EARNINGS_EVENTS) if stored else super().earnings_events(underlying)
+
+    def next_earnings_event(self, underlying: str) -> tuple[date, bool | None] | None:
+        stored = self._market.events(underlying)
+        return stored.next_earnings(self.today) if stored else super().next_earnings_event(underlying)
+
+    def next_earnings_date(self, underlying: str) -> date | None:
+        stored = self._market.events(underlying)
+        if stored is None:
+            return super().next_earnings_date(underlying)
+        event = stored.next_earnings(self.today)
+        return event[0] if event else None
+
+    def next_dividend(self, underlying: str) -> tuple[date, float] | None:
+        stored = self._market.events(underlying)
+        return stored.next_dividend(self.today) if stored else super().next_dividend(underlying)
+
+    def next_macro_event(self) -> tuple[tuple[str, date] | None, int | None]:
+        return macro_calendar.next_event_in(self._market.macro_events(), self.today)
 
 
 class ReplayHoldings(Holdings):

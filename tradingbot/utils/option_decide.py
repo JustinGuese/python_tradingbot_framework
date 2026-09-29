@@ -123,7 +123,7 @@ class Market(ABC):
         return options.risk_free_rate()
 
     def earnings_events(self, underlying: str) -> list[tuple[date, bool | None]]:
-        return options.earnings_events(underlying)
+        return options.earnings_events(underlying, today=self.today)
 
     def next_earnings_event(self, underlying: str) -> tuple[date, bool | None] | None:
         return options.next_earnings_event(underlying, self.today)

@@ -119,3 +119,21 @@ def test_a_stale_refresh_falls_back_to_yfinance(sqlite_db, db_session, aapl_yf, 
     yf_ticker = mocker.patch.object(options.yf, "Ticker", side_effect=lambda s: FakeTicker(s, None, None))
     options.earnings_events("AAPL")
     yf_ticker.assert_called()
+
+
+def test_stored_events_are_point_in_time():
+    """A replayed past day must not see reports from years later as its 'next' or 'last N'."""
+    quarters = [date(2019, 1, 30) + timedelta(days=91 * i) for i in range(32)]  # 2019..2026
+    stored = ce.StoredEvents(
+        earnings=[(d, True) for d in quarters],
+        dividends=[(d + timedelta(days=10), 0.2) for d in quarters],
+        refreshed_at=datetime(2026, 9, 28),
+    )
+    day = date(2020, 6, 1)
+    assert stored.next_earnings(day)[0] == min(d for d in quarters if d >= day)
+    assert stored.history(day, 3) == [d for d in quarters if d < day][-3:]
+    assert stored.known_by(day, 8)[-1][0] <= day + timedelta(days=ce.SCHEDULE_HORIZON_DAYS)
+    assert stored.known_by(day, 8)[0][0] < day  # the window ends near today, not at the newest row
+    assert stored.next_dividend(day)[0] == min(
+        d + timedelta(days=10) for d in quarters if d + timedelta(days=10) >= day
+    )

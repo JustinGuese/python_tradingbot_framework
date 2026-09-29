@@ -1,6 +1,6 @@
 """Macro event calendar: FRED parsing, idempotent storage, next-event lookups."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import numpy as np
@@ -72,3 +72,15 @@ def test_bdays_to_next_event_series():
     got = mc.bdays_to_next_event_series(idx, [date(2026, 10, 14), date(2026, 10, 28)])
     assert got.iloc[:3].tolist() == [2, 0, 9]
     assert np.isnan(got.iloc[3])
+
+
+def test_next_event_in_matches_the_db_reader_rules():
+    rows = pd.DataFrame(
+        [("CPI", date(2024, 1, 11)), ("FOMC", date(2024, 1, 31)), ("NFP", date(2024, 1, 5))],
+        columns=["kind", "event_date"],
+    )
+    assert mc.next_event_in(rows, date(2024, 1, 2)) == (("CPI", date(2024, 1, 11)), 7)
+    assert mc.next_event_in(rows, date(2024, 1, 12)) == (("FOMC", date(2024, 1, 31)), 13)
+    assert mc.next_event_in(rows, date(2024, 2, 1)) == (None, None)
+    far = date(2024, 1, 31) - timedelta(days=mc.STALE_AFTER_DAYS + 1)
+    assert mc.next_event_in(rows[rows.kind == "FOMC"], far) == (None, None)  # past the stale window

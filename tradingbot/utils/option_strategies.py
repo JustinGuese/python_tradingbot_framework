@@ -105,14 +105,18 @@ def decide_indexvol(market: Market, holdings: Holdings, rules: IndexVolRules, un
     )
     if not index_vol_entry_ok(iv, fair, vix, rules, term_ratio=term, vvix=vvix, bdays_to_event=bdays_to_event):
         return []
-    pick = options.select_iron_condor(
-        underlying,
-        rules.put_delta,
-        rules.width_pct * view.spot,
-        rules.target_dte,
-        view=view,
-        call_delta=rules.call_delta,
-    )
+    try:
+        pick = options.select_iron_condor(
+            underlying,
+            rules.put_delta,
+            rules.width_pct * view.spot,
+            rules.target_dte,
+            view=view,
+            call_delta=rules.call_delta,
+        )
+    except ValueError as exc:
+        logger.warning("%s: no condor (%s)", underlying, exc)
+        return []
     return [Open(pick, rules.max_risk_pct * holdings.equity(), reason=f"IV {iv:.1%} vs fair {fair:.1%}")]
 
 
@@ -175,9 +179,13 @@ def decide_crossvol(market: Market, holdings: Holdings, rules: CrossVolRules, un
     budget = rules.risk_per_name_pct * holdings.equity()
     for nv in cross_vol_candidates(scanned, held, rules):
         view = views[nv.underlying]
-        pick = options.select_iron_condor(
-            nv.underlying, rules.short_delta, rules.width_pct * view.spot, rules.target_dte, view=view
-        )
+        try:
+            pick = options.select_iron_condor(
+                nv.underlying, rules.short_delta, rules.width_pct * view.spot, rules.target_dte, view=view
+            )
+        except ValueError as exc:  # one broken chain must not stop the other names
+            logger.warning("%s: no condor (%s)", nv.underlying, exc)
+            continue
         actions.append(Open(pick, budget, reason=f"gap {nv.gap * 100:+.1f} pts"))
     return actions
 

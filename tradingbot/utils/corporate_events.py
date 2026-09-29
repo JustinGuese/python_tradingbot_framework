@@ -37,6 +37,7 @@ NEW_YORK = "America/New_York"
 EARNINGS_LIMIT = 40  # ~10 years of quarterly reports: enough for a historical RMS move
 DIVIDEND_YEARS = 10
 MAX_STALE_DAYS = 3  # a Friday refresh still covers Monday's runs
+SCHEDULE_HORIZON_DAYS = 366  # companies schedule reports at most a few quarters ahead
 SYMBOL_DELAY_SECONDS = 0.3
 
 
@@ -310,6 +311,25 @@ class StoredEvents:
     earnings: list[tuple[date, bool | None]]  # (New York report date, after_close), oldest first
     dividends: list[tuple[date, float]]  # (ex-date, amount), oldest first
     refreshed_at: datetime
+
+    # Point-in-time views: the table holds ~10 years, so "the last N" must be
+    # counted back from `today`, not from the newest row, or a replayed 2020
+    # day would see 2025's reports as its next ones.
+
+    def known_by(self, today: date, limit: int) -> list[tuple[date, bool | None]]:
+        """The last `limit` reports up to a year past today (past and scheduled), oldest first."""
+        horizon = today + timedelta(days=SCHEDULE_HORIZON_DAYS)
+        return [e for e in self.earnings if e[0] <= horizon][-limit:]
+
+    def next_earnings(self, today: date) -> tuple[date, bool | None] | None:
+        return next((e for e in self.earnings if e[0] >= today), None)
+
+    def history(self, today: date, limit: int) -> list[date]:
+        """Report dates before today, oldest first."""
+        return [d for d, _ in self.earnings if d < today][-limit:]
+
+    def next_dividend(self, today: date) -> tuple[date, float] | None:
+        return next(((d, a) for d, a in self.dividends if d >= today and a > 0), None)
 
 
 def stored_events(symbol: str, today: date | None = None, max_stale_days: int = MAX_STALE_DAYS) -> StoredEvents | None:

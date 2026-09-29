@@ -101,7 +101,7 @@ def test_earnings_crush_decides_the_same_live_and_in_replay(sqlite_db, mocker, c
     mocker.patch("tradingbot.utils.option_strategies.business_days", one_session)
     mocker.patch.object(options, "next_earnings_event", lambda u, today=None: (tomorrow, False))
     past = [((pd.Timestamp(TODAY) - pd.offsets.BDay(20 * i)).date(), False) for i in range(1, 13)]
-    mocker.patch.object(options, "earnings_events", lambda u, limit=40: past)
+    mocker.patch.object(options, "earnings_events", lambda u, limit=40, today=None: past)
     mocker.patch.object(options, "atm_iv", lambda view, r=None, american=False: 0.60 if view.expiry == NEAR else 0.30)
     rules = OptionEarningsCrushBot.RULES
     evening = pd.Timestamp(f"{TODAY} 19:30", tz="UTC").to_pydatetime()

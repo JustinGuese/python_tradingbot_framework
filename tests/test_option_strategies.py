@@ -1145,7 +1145,7 @@ def _ohlc(data: pd.DataFrame) -> pd.DataFrame:
 def _make_multi_bot(cls, module: str, mocker, data):
     mocker.patch(f"tradingbot.{module}.UNIVERSE", ("AAPL",))
     mocker.patch.object(ms, "load_ohlc", lambda symbols, period="3y": {s: _ohlc(data) for s in symbols})
-    mocker.patch.object(options, "earnings_events", lambda u, limit=40: [])
+    mocker.patch.object(options, "earnings_events", lambda u, limit=40, today=None: [])
     return _make_bot(cls, mocker, data)
 
 
@@ -1180,7 +1180,7 @@ def test_earnings_crush_bot_sells_a_rich_move_and_exits_after(sqlite_db, db_sess
     tomorrow = (pd.Timestamp(TODAY) + pd.offsets.BDay(1)).date()
     mocker.patch.object(options, "next_earnings_event", lambda u, today=None: (tomorrow, False))
     past = [((pd.Timestamp(TODAY) - pd.offsets.BDay(20 * i)).date(), False) for i in range(1, 13)]
-    mocker.patch.object(options, "earnings_events", lambda u, limit=40: past)
+    mocker.patch.object(options, "earnings_events", lambda u, limit=40, today=None: past)
     # Front expiry (spanning the report) priced at 60% vs 30% behind it: a big implied move.
     real_atm = options.atm_iv
     mocker.patch.object(options, "atm_iv", lambda view, r=None, american=False: 0.60 if view.expiry == NEAR else 0.30)

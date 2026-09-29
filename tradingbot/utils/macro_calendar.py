@@ -153,13 +153,32 @@ def next_event(today: date | None = None, kinds: Iterable[str] = ("FOMC", "CPI")
     return events[0] if events else None
 
 
+def next_event_in(
+    events: pd.DataFrame, today: date, kinds: Iterable[str] = ("FOMC", "CPI")
+) -> tuple[tuple[str, date] | None, int | None]:
+    """
+    next_event and business_days_to_next_event over preloaded rows
+    (macro_events_frame), for backtests that ask once per replayed day.
+    """
+    kinds = set(kinds)
+    end = today + timedelta(days=STALE_AFTER_DAYS)
+    for kind, day in events.sort_values("event_date").itertuples(index=False):
+        if kind in kinds and today <= day <= end:
+            return (kind, day), _busdays(today, day)
+    return None, None
+
+
+def _busdays(today: date, day: date) -> int:
+    return int(np.busday_count(today, day))
+
+
 def business_days_to_next_event(today: date | None = None, kinds: Iterable[str] = ("FOMC", "CPI")) -> int | None:
     """Business days from today to the next event: 0 = today, 1 = tomorrow. None if unknown."""
     today = today or datetime.now(UTC).date()
     event = next_event(today, kinds)
     if event is None:
         return None
-    return int(np.busday_count(today, event[1]))
+    return _busdays(today, event[1])
 
 
 def stale_warning(today: date | None = None) -> str | None:
