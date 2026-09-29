@@ -762,6 +762,16 @@ Other helpers:
     small.
   - The single best parameter set from the first half failed out of sample;
     the consensus of the first half's top 10 ships instead.
+  - **On real SPY option prices (2026-09-29) the edge is gone**
+    (`docs/backtests/index-vol-real-surface-2026-09.md`):
+    - 2019–2026: t 0.45; since early 2024: t −1.01. The synthetic said 3.23
+      over the same window.
+    - The synthetic's call skew, calibrated on one calm day, puts 10-delta short
+      calls 9% out of the money. Real ones sit at 7%, and the 2020 and 2022
+      rallies ran through them.
+    - The test is `onetime_option_replay_backtest.py --live-expiries` over the
+      DoltHub backfill. `utils/option_surface.py` prices the legs a day did not
+      record off that day's surface.
 - Round 3, 2026-09-28 (`docs/backtests/option-round3-2026-09.md`):
   - **Data:**
     - `utils/vol_indices.py`: the VIX family and the term ratio.

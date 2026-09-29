@@ -649,3 +649,29 @@ See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configura
 - **gptbasedstrategytabased.py** - GPT-based strategy with technical analysis
 
 See [Example Bots](docs/examples/example-bots.md) for implementation details.
+
+## 🧭 Next Steps
+
+### Options
+
+Parked on purpose, as of 2026-09-29:
+
+- **LEAP / PMCC on real quotes: not possible with the current data.** The DoltHub
+  SPY/AAPL backfill in `option_quotes` holds only ~3 expiries a day, the longest
+  about 65 days out. A real-quote test of `option_LeapCallBot` and
+  `option_PMCCBot` needs a source with long-dated history. Until then their
+  synthetic results in `docs/backtests/option-bots-2026-09.md` are all there is.
+- **Dispersion backtest: needs member chains.** DoltHub has SPY and AAPL only.
+  Our own `optionchainsnapshot` capture of 52 names started 2026-09-28. Revisit
+  once `implied_correlation` holds 60+ days, around January 2027. That is also
+  when `option_DispersionBot`'s own history gate opens.
+- **The other round-3 bots (CrossVol, MispricingScan, EarningsCrush): wait for
+  the capture.** `scripts/onetime_option_replay_backtest.py` works on the
+  captured full chains as it is. Allow about 60–80 sessions before reading a
+  t-stat.
+- **SVI fitter iteration cap: low value.** `svi.fit_svi` stops at scipy's
+  default 500 evaluations and treats that as a failed fit (about 15 of 52 names
+  on a typical day). Raising `max_nfev` only takes the usable fits from 30/52 to
+  33/52. Most rejections are butterfly arbitrage in the extrapolated wings, so
+  the better fix is to run the arbitrage check only over the quoted strike
+  range. `smile_outliers` covers for it in the meantime.

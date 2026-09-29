@@ -27,13 +27,14 @@ dates come from the DB-first readers, which hold the past too.
 """
 
 import logging
+import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 
-from tradingbot.utils import corporate_events, macro_calendar, market_calendar, options
+from tradingbot.utils import corporate_events, macro_calendar, market_calendar, option_surface, options
 from tradingbot.utils import option_math as om
 from tradingbot.utils.config import EXECUTION_CONFIG
 from tradingbot.utils.db import OptionQuote, get_db_session
@@ -136,6 +137,103 @@ class ReplayMarket:
         last = options._num(row["last_price"].iloc[0])
         mid = (bid + ask) / 2 if bid and ask and bid > 0 and ask > 0 else last
         return bid, ask, mid
+
+
+class SurfaceReplayMarket(ReplayMarket):
+    """
+    A ReplayMarket for sampled histories (the DoltHub backfill): a contract the
+    day's chain did not record is quoted off that day's interpolated surface
+    (utils/option_surface) instead of reading as missing. Recorded quotes are
+    used as they are.
+
+    live_expiries=True also replaces the sampled expiries a strategy may enter:
+    view() builds the chain of the expiry the live bot would pick (the first
+    Friday at least target_dte out) on a listed strike grid, quoted off the
+    surface. The sample alone offers ~14/30/45-65 DTE buckets, so a 35-DTE
+    strategy replayed on it enters at a median ~53 DTE, which is a different
+    trade.
+    """
+
+    def __init__(self, start: date, end: date, underlyings: Iterable[str] | None = None, live_expiries: bool = False):
+        super().__init__(start, end, underlyings)
+        self.live_expiries = live_expiries
+        self._surfaces: dict[tuple[str, date], option_surface.DaySurface | None] = {}
+        self.recorded = self.modelled = 0
+
+    def view(self, underlying: str, day: date, target_dte: int) -> options.ChainView | None:
+        if not self.live_expiries:
+            return super().view(underlying, day, target_dte)
+        spot = self.spot(underlying, day)
+        if not spot or self.surface(underlying, day) is None:
+            return None
+        expiry = live_expiry(day, target_dte)
+        step = strike_step(underlying, spot)
+        rows = []
+        for i in range(math.ceil(spot * (1 - CHAIN_BAND) / step), math.floor(spot * (1 + CHAIN_BAND) / step) + 1):
+            strike = round(i * step, 2)
+            for right in ("C", "P"):
+                key = f"{underlying}{expiry:%y%m%d}{right}{round(strike * 1000):08d}"
+                bid, ask, mid = self._price(key, day)
+                if mid is None or mid < MIN_QUOTE:
+                    continue
+                rows.append(
+                    {
+                        "contract_symbol": key,
+                        "option_type": right,
+                        "strike": strike,
+                        "bid": bid,
+                        "ask": ask,
+                        "last_price": None,
+                        "expiry": expiry,
+                    }
+                )
+        if not rows:
+            return None
+        return options.ChainView(underlying, expiry, pd.DataFrame(rows), spot, True, day)
+
+    def surface(self, underlying: str, day: date) -> option_surface.DaySurface | None:
+        key = (underlying, day)
+        if key not in self._surfaces:
+            chain, spot = self.chain(underlying, day), self.spot(underlying, day)
+            self._surfaces[key] = (
+                option_surface.build_surface(underlying, chain, spot, day) if chain is not None and spot else None
+            )
+        return self._surfaces[key]
+
+    def _price(self, key: str, day: date) -> tuple[float | None, float | None, float | None]:
+        bid, ask, mid = super().quote(key, day)
+        if mid is not None:
+            return bid, ask, mid
+        c = options.parse_occ(key)
+        surface = self.surface(c.underlying, day)
+        return surface.quote(c.right, c.strike, c.expiry) if surface is not None else (None, None, None)
+
+    def quote(self, key: str, day: date) -> tuple[float | None, float | None, float | None]:
+        recorded = super().quote(key, day)
+        if recorded[2] is not None:
+            self.recorded += 1
+            return recorded
+        quote = self._price(key, day)
+        if quote[2] is not None:
+            self.modelled += 1
+        return quote
+
+
+CHAIN_BAND = 0.35  # listed strikes within +/- 35% of spot, as the synthetic chain
+MIN_QUOTE = 0.01  # a contract is listed with a market down to a penny mid
+STRIKE_STEPS = {"SPY": 1.0, "QQQ": 1.0}
+
+
+def strike_step(underlying: str, spot: float) -> float:
+    """The listed strike spacing near the money: $1 for the index ETFs, $2.50 / $5 for single names."""
+    return STRIKE_STEPS.get(underlying, 2.5 if spot < 250 else 5.0)
+
+
+def live_expiry(day: date, target_dte: int) -> date:
+    """The first Friday at least target_dte days out (the Thursday when that Friday is a holiday)."""
+    first = day + timedelta(days=target_dte)
+    friday = first + timedelta(days=(4 - first.weekday()) % 7)
+    return friday if market_calendar.is_session(friday) else friday - timedelta(days=1)
 
 
 @dataclass

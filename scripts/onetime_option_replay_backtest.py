@@ -45,7 +45,7 @@ from tradingbot import (
     option_mispricingscanbot,
 )
 from tradingbot.utils import option_strategies as st
-from tradingbot.utils.option_replay import PriceHistory, ReplayMarket, run_strategy
+from tradingbot.utils.option_replay import PriceHistory, ReplayMarket, SurfaceReplayMarket, run_strategy
 from tradingbot.utils.vol_indices import VIX, VIX3M, VVIX
 
 MIN_DAYS = 40  # below this an alpha t-stat is meaningless
@@ -94,10 +94,23 @@ def main() -> None:
     ap.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
     ap.add_argument("--start", default="2000-01-01")
     ap.add_argument("--end", default=str(date.today()))
+    ap.add_argument(
+        "--surface",
+        action="store_true",
+        help="quote contracts a day did not record off its interpolated surface (sampled histories: DoltHub)",
+    )
+    ap.add_argument(
+        "--live-expiries",
+        action="store_true",
+        help="with --surface: enter the expiry the live bot would pick, its chain quoted off the surface",
+    )
     args = ap.parse_args()
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
     decide, underlyings = STRATEGIES[args.strategy]
-    market = ReplayMarket(start, end, underlyings)
+    if args.surface or args.live_expiries:
+        market = SurfaceReplayMarket(start, end, underlyings, live_expiries=args.live_expiries)
+    else:
+        market = ReplayMarket(start, end, underlyings)
     days = market.days
     print(f"option_quotes: {len(days)} days of chains ({days[0] if days else '-'} -> {days[-1] if days else '-'})")
     if len(days) < MIN_DAYS:
@@ -106,6 +119,9 @@ def main() -> None:
     symbols = set(market.frame["underlying"]) | {"QQQ", VIX, VIX3M, VVIX}
     prices = PriceHistory.download(symbols, days[0])
     curve, book = run_strategy(market, decide, prices)
+    if isinstance(market, SurfaceReplayMarket):
+        total = max(market.recorded + market.modelled, 1)
+        print(f"quotes: {market.recorded} recorded, {market.modelled} off the surface ({market.modelled / total:.0%})")
     split = curve.index[len(curve) // 2]
     qqq = prices.upto("QQQ", days[-1])["close"]
     print(HEADER)
