@@ -38,6 +38,10 @@ EARNINGS_LIMIT = 40  # ~10 years of quarterly reports: enough for a historical R
 DIVIDEND_YEARS = 10
 MAX_STALE_DAYS = 3  # a Friday refresh still covers Monday's runs
 SCHEDULE_HORIZON_DAYS = 366  # companies schedule reports at most a few quarters ahead
+# yfinance lists some non-reports (NVDA's 2025-06-26 shareholder meeting, placeholder
+# dates it later moved); they never get an actual EPS. The daily upsert fills actuals
+# within a day or two of a real report, so a date this far past without one is dropped.
+UNREPORTED_GRACE_DAYS = 7
 SYMBOL_DELAY_SECONDS = 0.3
 
 
@@ -345,7 +349,7 @@ def stored_events(symbol: str, today: date | None = None, max_stale_days: int = 
                 return None
             refreshed_at = ref.refreshed_at
             earnings_rows = (
-                session.query(StockEarnings.report_date, StockEarnings.after_close)
+                session.query(StockEarnings.report_date, StockEarnings.after_close, StockEarnings.reported_eps)
                 .filter(StockEarnings.symbol == symbol)
                 .all()
             )
@@ -356,8 +360,11 @@ def stored_events(symbol: str, today: date | None = None, max_stale_days: int = 
         logger.warning("Stored corporate events for %s unreadable: %s", symbol, e)
         return None
     earnings: dict[date, bool | None] = {}
-    for ts, after in earnings_rows:
+    reported_by = refreshed_at.date() - timedelta(days=UNREPORTED_GRACE_DAYS)
+    for ts, after, reported_eps in earnings_rows:
         day = report_session_date(ts)
+        if reported_eps is None and day < reported_by:
+            continue  # the date passed with no actual EPS: a meeting or a moved placeholder, not a report
         timing = after if after is not None else report_after_close(ts)
         if earnings.get(day) is None:
             earnings[day] = timing

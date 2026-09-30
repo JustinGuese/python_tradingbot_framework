@@ -119,6 +119,43 @@ across the H1 top 10.
   - LeapCall is 1.91, and remains mostly AAPL picked with hindsight.
   - Mispricing is the only near-zero-beta result, at 1.62.
 
+## How close is the calibrated model, day by day?
+
+The calibration gets the *median* right. This checks the spread of errors
+around it, over the same 2,556 real AAPL day-expiries and 36k real quotes.
+
+| Check | Result |
+|---|---|
+| ATM IV, model − real | median 0.0, MAE 3 vol points; 10%/90% at −5 / +6; 48% of day-expiries off by > 3 points |
+| Worst years | 2026 +3.9 points (model too rich), 2020 MAE 4.8 |
+| Level / weekly-change correlation | 0.86 / 0.80 |
+| IV/HV ≥ 1.1 gate | fires on 39% of days on the model and 38% on real IV, but they **agree on 83% of days only** |
+| Half-spread, real / model | 1.8× at 10–20Δ, 1.5× at 20–35Δ, ~1.1× near the money; 1.8–1.9× in 2020 and 2026 |
+
+The model is unbiased on average but not exact. Two consequences:
+
+- **Signal bots fire on partly wrong days.** One gate decision in six differs
+  from what real IV would have said.
+- **The harness fills too kindly on the wings**, which are the strikes that
+  condors, spreads and covered calls sell.
+
+Rerun at `OPTION_COST_SCALE=1.6`, roughly the real spreads on those wings:
+
+| Bot | H2 t at 1.0 → 1.6 | Full t at 1.0 → 1.6 |
+|---|---|---|
+| Wheel (shipped) | 1.50 → 1.44 | 1.66 → 1.57 |
+| Mispricing | 1.62 → **0.99** | 2.79 → **1.77** |
+| PMCC | 1.33 → 1.10 | 2.51 → 2.06 |
+| LeapCall | 1.91 → 1.77 | |
+| IronCondor | −0.59 → −0.65 | |
+
+The wheel re-tune survives because it trades rarely. Mispricing does not: it
+trades 130 four-legged structures plus hedges, and at real spreads its
+out-of-sample t falls below 1. The synthetic results are an upper bound. The
+test that needs no model is a replay on real quotes
+(`onetime_option_replay_backtest.py`), which the 50-name DoltHub backfill of
+2026-09-30 makes possible for the round-3 bots.
+
 ## Reproduce
 
 ```bash

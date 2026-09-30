@@ -110,6 +110,22 @@ def test_refresh_then_readers_answer_from_the_db(sqlite_db, db_session, aapl_yf,
     no_yf.assert_not_called()
 
 
+def test_a_past_date_that_never_got_an_actual_eps_is_not_a_report(sqlite_db, db_session):
+    today = datetime.now(UTC).date()
+    real, meeting, just_reported, scheduled = (today + timedelta(days=n) for n in (-130, -95, -3, 50))
+
+    def row(day, reported):
+        return StockEarnings(
+            symbol="NVDA", report_date=ce._naive_utc(_ny(day, 16, 20)), eps_estimate=1.0, reported_eps=reported
+        )
+
+    db_session.add_all([row(real, 1.1), row(meeting, None), row(just_reported, None), row(scheduled, None)])
+    db_session.add(CorporateEventRefresh(symbol="NVDA", refreshed_at=datetime.now(UTC).replace(tzinfo=None)))
+    db_session.commit()
+    days = [d for d, _ in ce.stored_events("NVDA", today=today).earnings]
+    assert days == [real, just_reported, scheduled]  # the meeting went; a fresh report waits for its actual
+
+
 def test_a_stale_refresh_falls_back_to_yfinance(sqlite_db, db_session, aapl_yf, mocker):
     ce.refresh_corporate_events(["AAPL"], today=TODAY, delay=0)
     ref = db_session.get(CorporateEventRefresh, "AAPL")

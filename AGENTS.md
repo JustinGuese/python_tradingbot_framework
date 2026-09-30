@@ -749,6 +749,10 @@ Other helpers:
     reproduces the older docs.
   - **Selling bots weaken** (out-of-sample t): IronCondor −0.59, with no variant
     surviving; Wheel 0.85; PMCC 1.33. Mispricing rises to 1.62.
+  - **Still optimistic:** the model is unbiased on average but off by ~3 vol
+    points on a typical day. Its wing spreads are 1.5–1.8× tighter than real
+    ones. At real spreads (`OPTION_COST_SCALE=1.6`), Mispricing falls to H2 t
+    0.99; the wheel holds (1.44). Treat synthetic t as an upper bound.
   - **The re-tune:** the wheel consensus (40Δ put, 20Δ call, puts only at
     IV/HV ≥ 1.1) beats its defaults in both halves. **Shipped** in
     `OptionWheelBot.RULES`.
