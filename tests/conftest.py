@@ -42,6 +42,7 @@ _SESSION_CONSUMERS = (
     "tradingbot.utils.corporate_events",
     "tradingbot.utils.prediction_market_repository",
     "tradingbot.utils.prediction_market_features",
+    "tradingbot.utils.splits",
 )
 
 

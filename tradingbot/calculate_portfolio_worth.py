@@ -7,6 +7,7 @@ from tradingbot.utils.data_service import DataService
 from tradingbot.utils.db import Bot as BotModel
 from tradingbot.utils.db import PortfolioWorth, get_db_session
 from tradingbot.utils.portfolio_utils import calculate_portfolio_worth
+from tradingbot.utils.splits import apply_splits_all_bots
 from tradingbot.utils.stock_fundamentals_loader import (
     get_portfolio_symbols,
     load_stock_news_earnings_insider,
@@ -22,6 +23,12 @@ def main():
 
     # Get today's date at midnight UTC
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Before valuing anything: a bot that did not run since a split would
+    # otherwise be booked at 1/ratio of its position (utils/splits.py).
+    _, failed = apply_splits_all_bots()
+    for name, error in failed.items():
+        logger.error(f"  Splits not applied to {name}, its worth will be wrong: {error}")
 
     with get_db_session() as session:
         # Get all bots

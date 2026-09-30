@@ -91,6 +91,11 @@ def parse_occ(symbol: str) -> OptionContract:
     return OptionContract(underlying=root, expiry=expiry, right=right, strike=int(strike) / 1000)
 
 
+def occ_symbol(contract: OptionContract) -> str:
+    """The inverse of parse_occ."""
+    return f"{contract.underlying}{contract.expiry:%y%m%d}{contract.right}{round(contract.strike * 1000):08d}"
+
+
 def normalize_right(option: bool | str | None) -> str | None:
     """Map a bot's `option=` argument to "C" / "P", or None for "not an option"."""
     if option is None or option is False:

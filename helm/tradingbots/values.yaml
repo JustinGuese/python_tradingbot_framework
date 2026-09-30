@@ -422,6 +422,16 @@ bots:
   # earnings (utils/corporate_events.py).
   schedule: "0 12 * * 1-5" # Daily 12:00 PM UTC Mon-Fri
 
+- name: splitsnapshot
+  # Not a bot: detects stock splits for every held symbol and every symbol with
+  # recently cached bars (one batched yfinance call), rescales historic_data
+  # rows written before the split, and scales every bot's share count by the
+  # ratio (option contracts re-keyed to adjusted strikes). Bot.run, the
+  # portfolio-worth job and the live copier also apply stored splits before
+  # reading a book. Exits 1 on a yfinance outage or a book it could not adjust
+  # (utils/splits.py).
+  schedule: "20 11-21 * * 1-5" # Hourly at :20, 11:20-21:20 UTC Mon-Fri
+
 - name: optionchainsnapshot
   # Not a bot: stores one live option-chain snapshot a day into option_quotes
   # for SPY, QQQ and the 50 largest S&P 100 names (~9 expiries, strikes near

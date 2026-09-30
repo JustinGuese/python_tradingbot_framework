@@ -114,6 +114,10 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ corporate_event_refresh │ When each symbol's earnings/dividends were last refreshed; readers trust the tables only within 3 days │ utils/corporate_events.py │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ split_events │ Stock splits (ratio, ex-date, pre-split close), hourly splitsnapshot scan of held + cached symbols │ utils/splits.py │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ applied_splits │ One row per (bot, symbol, ex-date) once a split was applied to a book: never twice │ utils/splits.py │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ bot_alpha_report │ Weekly alpha / t / beta / corr / max DD vs Benchmark_QQQ per live bot, with a verdict │ review (alphareport CronJob, utils/alpha_report.py) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ prediction_market_snapshots │ Daily Kalshi / Polymarket prices of curated macro contracts (Fed path + decisions, CPI, payrolls, U3, GDP, recession, shutdown), Kalshi from 2021-07 │ PredictionMarketOverlayBot, not scheduled (utils/prediction_market_features.py) │
@@ -895,6 +899,37 @@ Other helpers:
     - `PortfolioManager` locks the row inside each transaction and reads
       dicts otherwise.
     - This removed a latent `DetachedInstanceError` on partial option sells.
+
+### Stock splits
+
+Portfolios store share **counts**, so a split must rescale them or the book
+drops (or, for a reverse split, jumps) by the ratio on the ex-date. Until
+2026-09-30 nothing did: VGT's 8:1 split on 2026-04-21 wiped 7/8 of the VGT
+position from EarningsInsiderTiltBot (−$142) and RegimeAdaptiveBot (−$72),
+and both then re-bought target weight. Refunded in cash on 2026-09-30, with
+their `portfolio_worth` rows from the ex-date restated
+(`scripts/onetime_repair_split.py`). Everything lives in `utils/splits.py`:
+
+- **Detection:** the `splitsnapshot` CronJob (hourly at :20, 11–21 UTC, weekdays)
+  scans every held symbol and every symbol with cached bars from the last 30
+  days in one batched yfinance call and writes `split_events`.
+- **Books:** `apply_splits(bot)` runs first thing in `Bot.run`, in the
+  portfolio-worth job before valuing, and in the live copier before it reads
+  a bot. It scales the quantity **held at the ex-date**, reconstructed as the
+  current count minus trades since, so a late application is exact: a bot that
+  "bought the dip" keeps what it bought and gets its missing shares back.
+  `applied_splits` stops a second application. Only splits within 14 days are
+  applied automatically; an older miss needs a deliberate repair.
+- **Options:** a whole-number split re-keys held contracts to strike / ratio
+  and ratio x the quantity, as OCC does. Any other ratio raises `SplitError`
+  (a non-standard deliverable the book cannot hold), failing the run loudly.
+- **`historic_data`:** yfinance serves split-adjusted bars but the cache only
+  appends, so bars written before a split stay at the old scale (VGT read
+  809 -> 101). `adjust_history` finds the prefix of old-scale bars by the jump
+  that matches the ratio, usually but not always at the ex-date, and divides
+  it. It is idempotent.
+- **Not handled:** dividend adjustments. They drift cached bars slightly but
+  touch no share counts.
 
 ### Reading another bot's state
 

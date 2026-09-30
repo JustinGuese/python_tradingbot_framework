@@ -107,6 +107,13 @@ class BotRepository:
             return bot
 
     @staticmethod
+    def apply_splits(name: str) -> None:
+        """Apply any recent stock split to the bot's book before reading it (utils/splits.py)."""
+        from .splits import apply_splits  # splits imports this module
+
+        apply_splits(name)
+
+    @staticmethod
     def get_bot_locked(session: Session, name: str) -> BotModel:
         """
         Get a bot by name with a row-level lock (FOR UPDATE).

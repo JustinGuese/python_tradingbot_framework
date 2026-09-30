@@ -356,6 +356,52 @@ class CorporateEventRefresh(Base):
     n_dividends: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class SplitEvent(Base):
+    """
+    A stock split, as yfinance reports it on its ex-date (utils/splits.py).
+
+    ratio is new shares per old share: 8.0 for an 8:1 split, 0.2 for a 1:5
+    reverse split. pre_split_close is the last close before the ex-date in
+    pre-split units; it tells ex-date trades made at old prices from ones made
+    at new prices. history_adjusted_at is set once historic_data rows written
+    before the split were rescaled (or found not to need it).
+    """
+
+    __tablename__ = "split_events"
+
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    ex_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    pre_split_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    detected_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+    history_adjusted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AppliedSplit(Base):
+    """
+    One split applied to one bot's book. The primary key is what stops a split
+    being applied twice. A row with qty_at_ex == 0 records that the bot did not
+    hold the symbol, so it is not checked again.
+
+    qty_added is the share count added (negative for a reverse split).
+    cash_credit is set only by a late repair that refunded the lost value in
+    cash instead of shares (scripts/onetime_repair_split.py). note lists any
+    option contracts converted.
+    """
+
+    __tablename__ = "applied_splits"
+
+    bot_name: Mapped[str] = mapped_column(String, ForeignKey("bots.name"), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    ex_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    qty_at_ex: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    qty_added: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    cash_credit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class StockInsiderTrade(Base):
     """
     Stock insider trade model for storing insider transactions from yfinance.

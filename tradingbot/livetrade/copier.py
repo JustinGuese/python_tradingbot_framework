@@ -172,6 +172,9 @@ class LiveTradeCopier:
             if user_weight <= 0:
                 continue
 
+            # An unapplied split shrinks the bot's weight in the symbol by the
+            # ratio, and the copier would sell real shares to match.
+            self.bot_repo.apply_splits(bot_name)
             # read_portfolio, never create_or_get_bot: a missing name must not
             # materialise a fresh all-cash row and get copied as a signal.
             portfolio = self.bot_repo.read_portfolio(bot_name)

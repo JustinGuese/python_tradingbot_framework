@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 
 import pandas as pd
 
-from . import options
+from . import options, splits
 from .bot_repository import BotRepository
 from .config import setup_logging
 from .data_service import DataService
@@ -832,6 +832,9 @@ class Bot:
         bot_name = self.bot_name
         decision = -2
         try:
+            # First of all: a split not yet applied makes the book look 1/ratio
+            # its size, and the strategy would "buy the dip" (utils/splits.py).
+            splits.apply_splits(bot_name)
             if options.option_legs(self.dbBot.portfolio):
                 # Before the strategy runs, so it sees a book with no dead contracts.
                 self._portfolio_manager.roll_and_settle_options(

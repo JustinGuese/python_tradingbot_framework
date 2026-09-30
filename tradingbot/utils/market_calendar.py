@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 NEW_YORK = ZoneInfo("America/New_York")
+REGULAR_OPEN = time(9, 30)
 REGULAR_CLOSE = time(16, 0)
 CALENDAR_START = "1995-01-01"
 FORWARD_YEARS = 2
@@ -72,6 +73,15 @@ def next_session(day: date) -> date:
 def is_early_close(day: date) -> bool:
     """True on a session that closes early (13:00 New York)."""
     return day in _early_closes()
+
+
+def session_open_utc(day: date) -> datetime | None:
+    """When `day`'s session opens, as an aware UTC datetime; None if it is not a session."""
+    if not is_session(day):
+        return None
+    if _in_window(day):
+        return _calendar().session_open(pd.Timestamp(day)).to_pydatetime().astimezone(UTC)
+    return datetime.combine(day, REGULAR_OPEN, tzinfo=NEW_YORK).astimezone(UTC)
 
 
 def session_close_utc(day: date) -> datetime | None:
