@@ -118,8 +118,74 @@ sells, not on when it sells.
   real is the level, skew and term structure of SPY's vols each day.
 - **Fewer days before mid-2024.** The replay steps only on sampled days
   (Mon/Wed/Fri until mid-2024), so exits can be a day or two late.
-- **Seven years of history.** The synthetic covers 2000–2026. Rerunning that
-  full window with skews calibrated on this surface is the obvious next check.
+- **Seven years of history.** The recalibration below extends the test to
+  2000–2026.
+
+## Recalibration: the synthetic model fitted to the real chains
+
+A per-day, per-expiry (28–66 DTE) fit of the synthetic model's own smile, `iv = ATM × (1 − skew × z)` with `z = ln(K/S)/(ATM·√T)`, on
+2,384 real SPY day-expiries:
+
+| Parameter | One-day fit (2026-09-25) | Real median, 2019–26 | By VIX level |
+|---|---|---|---|
+| ATM IV / VIX | 0.85 | 0.87 | flat: 0.855–0.91 |
+| Put skew | 0.25 | 0.28 | flat: 0.24–0.29 |
+| **Call skew** | **0.08** | **0.23** | **0.11 at VIX < 13; 0.29 at VIX 20–30; 0.40 at VIX > 40** |
+
+The call skew rises with the vol level. It is fitted as
+`0.284 + 0.246 · ln(ATM / 0.20)`, capped at 0.40, with the same form in both
+halves of the sample. The bot sells when IV is rich, usually at VIX 20–35.
+There, real call wings are priced at about 4× the skew the model assumed.
+
+### Which model reproduces the real replay (2019-05 → 2026-09, live rules)
+
+| Model | t | Win rate | Net P&L | Short call OTM | Short put OTM |
+|---|---|---|---|---|---|
+| M0: one-day fit (0.85 / 0.25 / 0.08) | 3.23 | 100% | +$22.5k | 9.0% | 11.6% |
+| M1: real medians, constant (0.87 / 0.28 / 0.23) | 1.07 | 91% | +$8.3k | 7.7% | 12.5% |
+| **M2: call skew rising with vol** | **1.24** | **88%** | **+$7.7k** | **6.8%** | **12.3%** |
+| Real surface replay | 0.45 | 88% | +$4.6k | 7.1% | 11.3% |
+
+**M2 is the synthetic default for SPY now** (`UNDERLYINGS` in
+`onetime_index_vol_backtest.py`; `--calibration original` reproduces the old
+numbers). It still flatters the strategy a little against real prices: puts
+1 point further out, t 1.24 against 0.45.
+
+### 2000–2026 on the calibrated model
+
+**Live rules, 2007–2026** (`--decide`; the VIX/VIX3M gate needs ^VIX3M, which
+starts in 2006):
+
+| Model / path | t (full) | H1 | H2 | Max DD | Trades |
+|---|---|---|---|---|---|
+| Original model, decide path | 4.13 | 2.66 | 3.26 | −2.4% | 59 |
+| Calibrated model, decide path | 0.99 | 0.23 | 1.29 | −9.5% | 65 |
+| Calibrated model, fast simulator | 0.32 | −0.03 | 0.60 | −7.7% | 59 |
+
+**Walk-forward re-tune on the calibrated model, 2000–2026, split 2013-06-19.**
+The grid has 1,296 parameter sets, including 5-delta short calls, which were
+added before this run because of the call-skew finding.
+
+| Rules | 2000–2013 t | 2013–2026 t | 2013–2026 max DD |
+|---|---|---|---|
+| Textbook defaults (16-delta, 45 DTE) | −0.25 | **−2.10** | −52.7% |
+| #1 of 2000–2013 | 2.46 | 0.22 | −19.2% |
+| Top-10 consensus (60 DTE, 10% wings, 3-pt gap, no stop) | 2.01 | 0.05 | −19.8% |
+| Mean of the top 10 | | −0.17 | |
+| Share of the grid positive in 2013–2026 | | 17% | |
+
+**Nothing survives out of sample.** No 2000–2013 leader moved the short call
+out to 5 delta, so pushing the call side further away does not rescue it. The
+textbook condor is significantly negative in 2013–2026.
+
+## Conclusion
+
+The SPY variance premium is real: implied vol exceeds the vol realized over the
+next 21 days in 66–75% of months. But a 10-delta iron condor that sells it at
+realistic skew gives it back in rallies and crashes. The earlier evidence for
+`option_IndexVolBot` (t 4.13) came from a pricing model that made upside wings
+too rich. Real prices over 2019–2026, the recalibrated synthetic over
+2007–2026, and a walk-forward over 2000–2026 all put it at about zero.
 
 ## Reproduce
 
@@ -127,4 +193,7 @@ sells, not on when it sells.
 kubectl port-forward -n tradingbots-2025 svc/psql-service 5432:5432 &
 POSTGRES_URI=... uv run python scripts/onetime_option_replay_backtest.py --strategy indexvol --end 2026-09-25 --live-expiries
 POSTGRES_URI=... uv run python scripts/onetime_option_replay_backtest.py --strategy indexvol --end 2026-09-25 --surface
+uv run python scripts/onetime_index_vol_backtest.py --decide                          # calibrated model, live rules 2007+
+uv run python scripts/onetime_index_vol_backtest.py --decide --calibration original   # the old numbers
+uv run python scripts/onetime_index_vol_backtest.py --tune                            # walk-forward, calibrated
 ```

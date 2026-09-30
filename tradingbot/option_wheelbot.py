@@ -8,21 +8,31 @@ often than they lose — and AAPL's put skew makes the puts the richer side.
 The cost is the tail: an assigned put in a crash holds the stock all the way
 down, with the call premium as the only cushion.
 
-Rules (utils/option_rules.WheelRules):
-  * No shares: sell a 0.30-delta put on the first expiry >= 35 days out,
-    cash-secured — as many contracts as free cash covers at the strike.
-  * 100+ shares (assigned): sell 0.30-delta covered calls, one per 100
+Rules (utils/option_rules.WheelRules, re-tuned 2026-09-30 in RULES below):
+  * No shares: while ATM IV / 20-day realized vol >= 1.1, sell a 0.40-delta
+    put on the first expiry >= 35 days out, cash-secured — as many contracts
+    as free cash covers at the strike.
+  * 100+ shares (assigned): sell 0.20-delta covered calls, one per 100
     shares, never struck below the shares' cost (the assignment strike).
   * Buy the short back at 50% of its credit and sell the next one on the
     following run; otherwise it expires. OPTION_SETTLEMENT = "physical": an
     ITM put at expiry assigns 100 shares per contract at the strike, an ITM
     covered call delivers them.
 
-Synthetic backtest: +18.4%/yr with beta 0.77 and alpha t 0.86. That is AAPL at
-a lower beta, not an edge (alpha -2.9%/yr in 2012-2019, +8.5% in 2019-2026,
-the half where AAPL itself had +9.7%). The walk-forward winner lost to these
-defaults out of sample, so they stay. See
-docs/backtests/option-bots-round2-2026-09.md. Paper only.
+Re-tune on real AAPL pricing (docs/backtests/option-aapl-real-calibration-2026-09.md).
+Real AAPL options cost ~17% less than the old VXN proxy said, so implied vol
+is usually NOT rich (median IV/HV20 1.02), and real call wings sit below ATM
+vol. The walk-forward (picked on 2012-19, judged on 2019-26) consensus beats
+the 0.30/0.30 defaults in both halves:
+  * defaults: H1 t -0.70, H2 t 0.85, H2 beta 0.73;
+  * shipped:  H1 t 0.71,  H2 t 1.50, H2 beta 0.60.
+The logic: sell puts only when the premium is really there, and keep calls
+further out, where a cheap wing no longer pays for capping AAPL's upside.
+It is still AAPL at a lower beta, not a proven edge (t < 2).
+
+Live IV is the ~35-day expiry's real ATM IV, earnings bump included; the
+backtest's gate IV has no bump. Live therefore clears the 1.1 gate a little
+more often in the weeks before a report. Paper only.
 
 Schedule: 25 15 * * 1-5.
 """
@@ -52,7 +62,7 @@ class OptionWheelBot(Bot):
     INITIAL_CAPITAL: ClassVar[float] = 100_000.0
     OPTION_ROLL_DTE: ClassVar[int | None] = None
     OPTION_SETTLEMENT: ClassVar[str] = "physical"
-    RULES: ClassVar[WheelRules] = WheelRules()
+    RULES: ClassVar[WheelRules] = WheelRules(put_delta=0.40, call_delta=0.20, min_iv_hv=1.1)
 
     def __init__(self, **kwargs):
         super().__init__("option_WheelBot", symbol=UNDERLYING, interval="1d", period="2y", **kwargs)

@@ -735,6 +735,21 @@ Other helpers:
     (`suspend: true`) on 2026-09-26.
   - **Catalyst:** untuned (10 trades).
   - Details are in `docs/backtests/option-bots-2026-09.md`.
+- **Re-priced on real AAPL chains, 2026-09-30**
+  (`docs/backtests/option-aapl-real-calibration-2026-09.md`):
+  - **Level:** the VXN proxy priced AAPL options ~17% too rich. Real IV / proxy
+    is 0.825; the median IV/HV20 is 1.02, not 1.24.
+  - **Shape:** calls sit slightly below ATM vol (they had been flat). Expiries
+    that span a report carry a ~4.3% jump.
+  - **Defaults:** `--calibration real` is now the default; `original`
+    reproduces the older docs.
+  - **Selling bots weaken** (out-of-sample t): IronCondor −0.59, with no variant
+    surviving; Wheel 0.85; PMCC 1.33. Mispricing rises to 1.62.
+  - **The re-tune:** the wheel consensus (40Δ put, 20Δ call, puts only at
+    IV/HV ≥ 1.1) beats its defaults in both halves. **Shipped** in
+    `OptionWheelBot.RULES`.
+  - **Data fix:** pre-split AAPL rows in `option_quotes` had split-adjusted
+    spots beside unadjusted strikes (fixed in place).
 - Round 2, walk-forward on 2026-09-26 (`docs/backtests/option-bots-round2-2026-09.md`):
   - **Mispricing:** trades IV minus HAR fair vol, after explaining the gap
     (earnings, market-wide vs AAPL-specific, pending news, VIX).
@@ -745,7 +760,8 @@ Other helpers:
   - **PMCC:** re-tuned to a 0.70Δ LEAP; out-of-sample t 2.37 vs the LEAP bot's
     2.10, with a lower drawdown. Still long AAPL.
   - **Wheel and collar:** defaults kept. Both are AAPL at a lower beta, not
-    alpha.
+    alpha. (The wheel was re-tuned on 2026-09-30 on real AAPL pricing; see
+    below.)
   - **Earnings calendar:** live-only, because nothing can price historical
     earnings IV.
   - **Not built, with reasons given in the doc:** 0DTE SPX, box spreads,
@@ -772,6 +788,12 @@ Other helpers:
     - The test is `onetime_option_replay_backtest.py --live-expiries` over the
       DoltHub backfill. `utils/option_surface.py` prices the legs a day did not
       record off that day's surface.
+    - Recalibrated on those chains, the synthetic SPY model's call skew rises
+      with vol: 0.284 + 0.246 ln(ATM/0.20), not a constant 0.08. It is now the
+      default (`--calibration original` reproduces the old numbers).
+    - On it, the live rules give t 0.99 over 2007–2026. The 2000–2026
+      walk-forward finds no variant that survives (consensus t 0.05; defaults
+      −2.10).
 - Round 3, 2026-09-28 (`docs/backtests/option-round3-2026-09.md`):
   - **Data:**
     - `utils/vol_indices.py`: the VIX family and the term ratio.

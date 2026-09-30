@@ -46,6 +46,7 @@ import math
 import os
 import pickle
 import warnings
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
@@ -78,6 +79,41 @@ UNDERLYING = "AAPL"
 CACHE = os.environ.get("RESEARCH_CACHE", "/tmp")
 COST_SCALE = float(os.environ.get("OPTION_COST_SCALE", "1.0"))  # sensitivity: 0 = fills at mid
 STOCK_COST = 0.0005  # per side, the live ExecutionConfig default
+
+# Pricing calibrations (--calibration). "real" is fitted on 2,556 real AAPL
+# day-expiries, 2019-05 -> 2026-09 (the DoltHub backfill), with the same smile
+# form: see docs/backtests/option-aapl-real-calibration-2026-09.md.
+#   iv_scale       real ATM IV / the VXN proxy, expiries with no report inside: 0.825
+#                  (the proxy prices every AAPL option ~17% too rich)
+#   skew           put skew 0.16
+#   call_skew*     0.0097 + 0.127 ln(ATM / 0.20), clipped to [0, 0.12]: a 25-delta
+#                  call at ~0.93x ATM vol, not flat
+#   earnings_move  a 4.3% one-sd jump in any expiry spanning a report
+# "original" is the one-day 2026-09-25 fit every doc before 2026-09-30 used.
+CALIBRATIONS = {
+    "real": {
+        "iv_scale": 0.825,
+        "skew": 0.16,
+        "call_skew": 0.0097,
+        "call_skew_elasticity": 0.127,
+        "call_skew_cap": 0.12,
+        "earnings_move": 0.043,
+    },
+    "original": {"iv_scale": 1.0, "skew": 0.15},
+}
+
+
+def calibrated(name: str, m: pd.DataFrame, earnings: list[date], skew: float | None = None):
+    """(market frame with the calibrated IV level, Model) for one calibration."""
+    c = dict(CALIBRATIONS[name])
+    m = m.copy()
+    m["iv"] = m["iv"] * c.pop("iv_scale")
+    if skew is not None:
+        c["skew"] = skew
+    if c.get("earnings_move"):
+        c["earnings"] = tuple(sorted(earnings))
+    return m, Model(**c)
+
 
 # The rules the live bots run, read from the bots themselves so they cannot drift.
 LIVE = {
@@ -212,14 +248,41 @@ def fair_vol_series(m: pd.DataFrame, earnings: list[date], expiries: list[date],
 class Model:
     skew: float = 0.15
     call_skew: float = 0.0  # index calls sit below ATM vol; 0 = flat above the money (AAPL)
+    # Call skew grows with the vol level: call_skew + elasticity * ln(atm / 0.20),
+    # clipped to [0, call_skew_cap]. 0 keeps it constant. SPY 2019-26 fitted
+    # 0.284 + 0.246 ln(atm / 0.20) (docs/backtests/index-vol-real-surface-2026-09.md).
+    call_skew_elasticity: float = 0.0
+    call_skew_cap: float = 1.0
+    # Earnings: an expiry that spans a report carries its jump as extra total
+    # variance, atm_T^2 T = atm^2 T + earnings_move^2. AAPL 2019-26 prices a
+    # ~4.3% one-sd move (real chains; docs/backtests/option-aapl-real-calibration-2026-09.md).
+    # 0 = no earnings in the price, as the VXN proxy has none.
+    earnings_move: float = 0.0
+    earnings: tuple[date, ...] = ()  # report dates, sorted
+
+    def atm_for(self, atm: float, day: date, expiry: date) -> float:
+        """ATM vol of `expiry` seen on `day`: the proxy plus any report in between."""
+        if not self.earnings_move or expiry <= day:
+            return atm
+        i = bisect.bisect_left(self.earnings, day)
+        if i == len(self.earnings) or self.earnings[i] >= expiry:
+            return atm
+        T = om.year_fraction(expiry, day)
+        return math.sqrt(atm * atm + self.earnings_move**2 / T)
+
+    def call_skew_at(self, atm: float) -> float:
+        if not self.call_skew_elasticity:
+            return self.call_skew
+        return min(max(self.call_skew + self.call_skew_elasticity * math.log(atm / 0.20), 0.0), self.call_skew_cap)
 
     def vol(self, atm: float, S: float, K: float, T: float) -> float:
         if T <= 0:
             return atm
         if K >= S:
-            if self.call_skew <= 0:
+            call_skew = self.call_skew_at(atm)
+            if call_skew <= 0:
                 return atm
-            return atm * max(1.0 - self.call_skew * math.log(K / S) / (atm * math.sqrt(T)), 0.5)
+            return atm * max(1.0 - call_skew * math.log(K / S) / (atm * math.sqrt(T)), 0.5)
         if self.skew <= 0:
             return atm
         z = math.log(K / S) / (atm * math.sqrt(T))
@@ -227,22 +290,26 @@ class Model:
 
     def price(self, right: str, K: float, expiry: date, day: date, row) -> float:
         T = om.year_fraction(expiry, day)
-        return om.bs_price(row.S, K, T, row.r, self.vol(row.iv, row.S, K, T), right)
+        atm = self.atm_for(row.iv, day, expiry)
+        return om.bs_price(row.S, K, T, row.r, self.vol(atm, row.S, K, T), right)
 
     def delta(self, right: str, K: float, expiry: date, day: date, row) -> float:
         T = om.year_fraction(expiry, day)
-        return om.delta(row.S, K, T, row.r, self.vol(row.iv, row.S, K, T), right)
+        atm = self.atm_for(row.iv, day, expiry)
+        return om.delta(row.S, K, T, row.r, self.vol(atm, row.S, K, T), right)
 
     def gamma(self, K: float, expiry: date, day: date, row) -> float:
         T = om.year_fraction(expiry, day)
-        return om.gamma(row.S, K, T, row.r, self.vol(row.iv, row.S, K, T))
+        atm = self.atm_for(row.iv, day, expiry)
+        return om.gamma(row.S, K, T, row.r, self.vol(atm, row.S, K, T))
 
     def strike_for_delta(self, right: str, target: float, expiry: date, day: date, row) -> float:
         """Delta-targeted strike under the skewed smile (two fixed-point passes), snapped."""
         T = om.year_fraction(expiry, day)
-        k = om.strike_for_delta(row.S, T, row.r, row.iv, target, right)
+        atm = self.atm_for(row.iv, day, expiry)
+        k = om.strike_for_delta(row.S, T, row.r, atm, target, right)
         for _ in range(2):
-            k = om.strike_for_delta(row.S, T, row.r, self.vol(row.iv, row.S, k, T), target, right)
+            k = om.strike_for_delta(row.S, T, row.r, self.vol(atm, row.S, k, T), target, right)
         return snap(k, row.S)
 
 
@@ -777,9 +844,28 @@ def tune(m, expiries, earnings, model, split, bots: list[str]) -> None:
         print(HEADER)
         print(_row("original rules", "H1", live["H1"], live["trades"]))
         print(_row("original rules", "H2", live["H2"]))
+        if LIVE[name] != ORIGINAL[name]:
+            shipped = evaluate(name, LIVE[name], m, expiries, earnings, model, split)
+            print(_row(f"shipped rules: {_diff(LIVE[name], ORIGINAL[name])}", "H1", shipped["H1"], shipped["trades"]))
+            print(_row("shipped rules", "H2", shipped["H2"]))
         for i, x in enumerate(ranked[:5], 1):
             print(_row(f"#{i} {_diff(x['rules'], ORIGINAL[name])}", "H1", x["H1"], x["trades"]))
             print(_row(f"#{i}", "H2", x["H2"]))
+        # The single H1 winner is one noisy draw; the modal value of each field
+        # across the H1 top 10 is the plateau (as the index-vol re-tune does).
+        top = [vars(x["rules"]) for x in ranked[:10]]
+        modal = {k: Counter(t[k] for t in top).most_common(1)[0][0] for k in top[0]}
+        consensus_rules = replace(ORIGINAL[name], **modal)
+        consensus = evaluate(name, consensus_rules, m, expiries, earnings, model, split)
+        print(
+            _row(
+                f"H1 top-10 consensus: {_diff(consensus_rules, ORIGINAL[name])}",
+                "H1",
+                consensus["H1"],
+                consensus["trades"],
+            )
+        )
+        print(_row("H1 top-10 consensus", "H2", consensus["H2"]))
 
 
 def hedge_compare(m, expiries, earnings, model, split) -> None:
@@ -807,7 +893,8 @@ def hedge_compare(m, expiries, earnings, model, split) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skew", type=float, default=0.15)
+    ap.add_argument("--calibration", choices=sorted(CALIBRATIONS), default="real")
+    ap.add_argument("--skew", type=float, default=None, help="override the calibration's put skew")
     ap.add_argument("--tune", action="store_true")
     ap.add_argument("--hedge", action="store_true", help="fixed vs Whalley-Wilmott straddle hedge")
     ap.add_argument("--bots", default="option_LeapCallBot,option_CreditSpreadBot,option_IronCondorBot")
@@ -815,12 +902,14 @@ def main() -> None:
     args = ap.parse_args()
 
     m, earnings = load_inputs()
+    m, model = calibrated(args.calibration, m, earnings, args.skew)
     expiries = monthly_expiries(m.index[0].date(), m.index[-1].date())
     for dte in sorted({35, OptionMispricingBot.RULES.target_dte}):
         m[f"fair_{dte}"] = fair_vol_series(m, earnings, expiries, dte)
     split = m.index[len(m) // 2]
-    model = Model(skew=args.skew)
-    print(f"Window {m.index[0].date()} -> {m.index[-1].date()}, split {split.date()}, skew {args.skew}")
+    print(
+        f"Window {m.index[0].date()} -> {m.index[-1].date()}, split {split.date()}, calibration {args.calibration}: {CALIBRATIONS[args.calibration]}"
+    )
     print(f"IV proxy mean {m['iv'].mean():.3f}; median IV/HV20 {(m['iv'] / m['hv20']).median():.2f}")
     gap = m["iv"] - m["fair_35"]
     print(

@@ -73,8 +73,13 @@ def _save_checkpoint(checkpoint: dict[str, str]) -> None:
 
 def _unadjusted_daily_closes(symbol: str, start: date, end: date) -> dict[date, float]:
     """Trading day -> unadjusted close. DoltHub strikes are pre-split, so the
-    moneyness match needs the unadjusted price series, not yfinance's default
-    dividend/split-adjusted Close."""
+    moneyness match needs the price as it traded that day.
+
+    auto_adjust=False drops the dividend adjustment but NOT the split one:
+    yfinance's Close is always split-adjusted. Until 2026-09-30 this stored
+    pre-2020-08-31 AAPL spots at a quarter of the traded price beside
+    unadjusted strikes (12,534 rows, corrected in place). Every split after the
+    day is multiplied back in here."""
     raw = yf.download(
         symbol,
         start=start.isoformat(),
@@ -86,7 +91,18 @@ def _unadjusted_daily_closes(symbol: str, start: date, end: date) -> dict[date, 
         raise RuntimeError(f"No yfinance daily data for {symbol} {start}..{end}")
     if hasattr(raw.columns, "get_level_values"):
         raw.columns = raw.columns.get_level_values(0)
-    return {ts.date(): float(v) for ts, v in raw["Close"].items()}
+    splits = yf.Ticker(symbol).splits
+    split_days = [(ts.date(), float(ratio)) for ts, ratio in splits.items() if ratio and ratio > 0]
+    return {ts.date(): float(v) * split_factor(ts.date(), split_days) for ts, v in raw["Close"].items()}
+
+
+def split_factor(day: date, splits: list[tuple[date, float]]) -> float:
+    """Product of the split ratios that took effect after `day` (a 4:1 split is 4.0)."""
+    factor = 1.0
+    for when, ratio in splits:
+        if when > day:
+            factor *= ratio
+    return factor
 
 
 def backfill_symbol(

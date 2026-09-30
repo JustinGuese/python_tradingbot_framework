@@ -100,11 +100,33 @@ class Underlying:
     atm_ratio: float
     put_skew: float
     call_skew: float
+    call_skew_elasticity: float = 0.0  # see Model.call_skew_at
+    call_skew_cap: float = 1.0
+
+    def model(self) -> Model:
+        return Model(
+            skew=self.put_skew,
+            call_skew=self.call_skew,
+            call_skew_elasticity=self.call_skew_elasticity,
+            call_skew_cap=self.call_skew_cap,
+        )
 
 
+# SPY is calibrated on the real SPY chains of 2019-05 -> 2026-09 (the DoltHub
+# backfill; docs/backtests/index-vol-real-surface-2026-09.md): ATM = 0.87 x VIX,
+# put skew 0.28, and a call skew that rises with the vol level, 0.284 + 0.246
+# ln(ATM / 0.20) capped at 0.40. The original one-day calibration (2026-09-25:
+# 0.85 / 0.25 / a constant 0.08) priced upside wings too rich, placed 10-delta
+# short calls 9% out of the money where the real market put them at 7%, and
+# made the strategy look like t 3.2 over 2019-26 where real prices give 0.45.
+# QQQ has no real chain history yet and keeps its one-day calibration.
 UNDERLYINGS = {
-    "SPY": Underlying("SPY", "^VIX", 0.85, 0.25, 0.08),
+    "SPY": Underlying("SPY", "^VIX", 0.87, 0.28, 0.284, 0.246, 0.40),
     "QQQ": Underlying("QQQ", "^VXN", 0.90, 0.21, 0.07),
+}
+ORIGINAL_CALIBRATION = {
+    "SPY": Underlying("SPY", "^VIX", 0.85, 0.25, 0.08),  # --calibration original: the 2026-09 docs' numbers
+    "QQQ": UNDERLYINGS["QQQ"],
 }
 DTES = (35, 45, 60)
 ORIGINAL = rl.IndexVolRules()
@@ -142,7 +164,9 @@ def load_inputs(u: Underlying) -> tuple[pd.DataFrame, list[date]]:
     path = os.path.join(CACHE, f"index_vol_inputs_{u.symbol}_{date.today():%Y%m%d}.pkl")
     if os.path.exists(path):
         with open(path, "rb") as f:
-            return pickle.load(f)
+            m, expiries = pickle.load(f)
+        m["iv"] = m["vol_index"] / 100 * u.atm_ratio  # the cache is per symbol, the ratio per calibration
+        return m, expiries
     raw = _download(u.symbol)
     m = pd.DataFrame(index=raw.index)
     m["S"] = raw["Close"]
@@ -325,7 +349,10 @@ def grid() -> list[rl.IndexVolRules]:
     axes = {
         "target_dte": [35, 60],
         "put_delta": [0.10, 0.16, 0.20],
-        "call_delta": [0.10, 0.16],
+        # 0.05 added 2026-09-29, before it was run: on real chains the call
+        # wing is cheap (call skew ~0.3 at VIX 20-30), so a 10-delta short call
+        # sits ~7% out of the money and the post-selloff rallies run through it.
+        "call_delta": [0.05, 0.10, 0.16],
         "width_pct": [0.03, 0.05, 0.10],
         "take_profit": [0.5, 0.75],
         "stop_loss": [2.0, 99.0],
@@ -598,32 +625,52 @@ def main() -> None:
     ap.add_argument("--tune", action="store_true")
     ap.add_argument("--gates", action="store_true", help="round-3 walk-forward of the new gates")
     ap.add_argument("--decide", action="store_true", help="the live decide path vs the fast simulator")
+    ap.add_argument(
+        "--calibration",
+        choices=("real", "original"),
+        default="real",
+        help="real: fitted on the 2019-26 SPY chains (default); original: the one-day 2026-09-25 fit",
+    )
     args = ap.parse_args()
 
-    u = UNDERLYINGS[args.underlying]
+    u = (UNDERLYINGS if args.calibration == "real" else ORIGINAL_CALIBRATION)[args.underlying]
     if args.decide:
-        decide_check(u, Model(skew=u.put_skew, call_skew=u.call_skew))
+        decide_check(u, u.model())
         return
     if args.gates:
-        gates(u, Model(skew=u.put_skew, call_skew=u.call_skew))
+        gates(u, u.model())
         return
     m, expiries = load_inputs(u)
     split = m.index[len(m) // 2]
-    model = Model(skew=u.put_skew, call_skew=u.call_skew)
+    model = u.model()
     print(
         f"{u.symbol}: window {m.index[0].date()} -> {m.index[-1].date()}, split {split.date()}, "
         f"ATM = {u.atm_ratio} x {u.vol_index}, skew put {u.put_skew} / call {u.call_skew}"
+        f" + {u.call_skew_elasticity} ln(ATM/0.20) (cap {u.call_skew_cap})"
     )
     signal_table(m)
     if args.tune:
         tune(m, expiries, model, split)
         return
     print("\n" + HEADER)
-    rows = [("defaults", ORIGINAL)] if LIVE == ORIGINAL else [("live rules", LIVE), ("defaults", ORIGINAL)]
-    for label_rules, rules in rows:
-        x = evaluate(rules, m, expiries, model, split)
-        for label in ("full", "H1", "H2"):
-            print(_row(f"option_IndexVolBot ({label_rules})", label, x[label], x["trades"] if label == "full" else ""))
+    x = evaluate(ORIGINAL, m, expiries, model, split)
+    for label in ("full", "H1", "H2"):
+        print(_row("option_IndexVolBot (defaults)", label, x[label], x["trades"] if label == "full" else ""))
+    # The live rules gate on ^VIX / ^VIX3M, which starts in 2006: on the 2000+
+    # frame (no vix3m column) the gate fails closed and nothing ever trades.
+    r3, r3_expiries, _ = load_round3(u)
+    r3 = r3.loc[r3[["vix3m"]].dropna().index[0] :]
+    r3_split = r3.index[len(r3) // 2]
+    x = evaluate(LIVE, r3, r3_expiries, model, r3_split)
+    for label in ("full", "H1", "H2"):
+        print(
+            _row(
+                f"option_IndexVolBot (live rules, {r3.index[0].year}+, split {r3_split.date()})",
+                label,
+                x[label],
+                x["trades"] if label == "full" else "",
+            )
+        )
     bh = m["S"] / m["S"].iloc[0] * CAPITAL
     for label, part in (("full", bh), ("H1", bh.loc[:split]), ("H2", bh.loc[split:])):
         print(_row(f"{u.symbol} buy & hold", label, metrics(part, m["qqq"]), "-" if label == "full" else ""))
