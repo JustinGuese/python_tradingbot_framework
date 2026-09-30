@@ -54,6 +54,7 @@ import json
 import math
 import os
 import sys
+import threading
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -75,11 +76,16 @@ BAND_SIGMA = 3.0  # only ranges whose midpoint is within this many sigmas of spo
 def _cached(name: str, fetch):
     path = os.path.join(CACHE, name)
     if os.path.exists(path):
-        with open(path) as fh:
-            return json.load(fh)
+        try:
+            with open(path) as fh:
+                return json.load(fh)
+        except json.JSONDecodeError:  # a run killed mid-write; fetch again
+            pass
     value = fetch()
-    with open(path, "w") as fh:
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    with open(tmp, "w") as fh:
         json.dump(value, fh)
+    os.replace(tmp, path)  # atomic: a killed run never leaves a half-written file
     return value
 
 

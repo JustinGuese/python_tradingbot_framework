@@ -298,6 +298,140 @@ by event, keeping the more conservative of the two.
 - **No new capture.** Links are hard-coded in the study, and nothing new was
   added to the daily capture registry. A bot would need it; a monitor doesn't.
 
+## Round 3 (2026-09-29): where the money is, if anywhere
+
+The trading ideas from round 2 all failed. Round 3 tests the three ways people
+actually make money on these venues:
+- being faster when an outcome becomes certain;
+- being better informed in a niche;
+- quoting (#1, which only the external module can measure).
+
+### #2 Late-day S&P ranges
+
+`scripts/onetime_prediction_late_day_spx.py`.
+
+**Idea.** On the settlement day the S&P range contracts collapse toward 0/1
+by the hour, and fees are smallest near the ends. If Kalshi's quotes lag the
+index, the edge would sit in the last hour.
+
+**Data.** 24,192 quotes on 692 days (2023-12 to 2026-09), split 2025-05-07.
+- Entries at 10:30, 12:30, 14:30 and 15:30 ET, from Kalshi 1-minute candles
+  (the quote no more than 15 minutes old).
+- Fair value: the S&P and VIX1D at that minute, lognormal over the time left
+  to 16:00, with the VIX1D scale fitted on H1 (0.7–0.8).
+
+**Quotes.**
+- Only 45–64% of in-band contracts have a two-sided quote. The median spread
+  is 3¢.
+- The out-of-sample Brier scores are level. Kalshi's mid ties the model at
+  10:30 (0.1051 vs 0.1051) and is slightly *better* from 12:30 on (15:30:
+  0.1326 vs 0.1341).
+
+| Entry | Margin | H1 ¢/trade | H1 t | H2 ¢/trade | H2 t | H2 trades |
+|---|---|---|---|---|---|---|
+| 10:30 | 2¢ | +3.3 | 1.04 | +0.6 | 0.22 | 289 |
+| 12:30 | 2¢ | −0.6 | −0.19 | −4.1 | −1.80 | 409 |
+| 14:30 | 5¢ | +2.7 | 0.65 | +1.8 | 0.60 | 277 |
+| 15:30 | 5¢ | +11.6 | **2.47** | +1.7 | 0.53 | 251 |
+| 15:30 | 10¢ | +13.1 | 1.22 | +5.0 | 1.01 | 85 |
+
+**Verdict: does not pass.**
+- Kalshi keeps up with the index at this resolution. The H1 15:30 result
+  decays out of sample, the pattern of a lucky half rather than a lag.
+- **What remains untested:** the last minutes before 16:00 at second-level
+  resolution. It needs tick data and the long-running module.
+
+### #3 Release sniping
+
+`scripts/onetime_prediction_release_snipe.py`.
+
+**Kalshi: impossible by design.** The API's `close_time` shows every
+release market stops trading before its number is out:
+- KXCPI at 08:25 ET;
+- KXPAYROLLS / KXU3 at 08:29 ET;
+- KXFEDDECISION at 13:59 ET.
+
+**Polymarket: possible, and small.** Fed-decision markets stay open until the
+resolver closes them, about two hours after the 14:00 ET statement. They trade
+$60–660M per meeting, with fees disabled. The study took every taker trade
+within an hour after the statement at 17 meetings (Sep 2024 → Sep 2026) and
+summed what takers gained against the final outcome: the stale orders someone
+picked off.
+
+| Meeting | Winner's price at 13:50–14:00 | Picked off after 14:00 | Of which in 2–60 s |
+|---|---|---|---|
+| 2024-09-18 (50 bp cut) | 0.43 | $19.5k | $4.1k |
+| 2026-07-29 (hold) | 0.81 | $34.6k | $34.6k |
+| 2026-09-16 (25 bp hike) | 0.87 | $6.0k | $6.0k |
+| 14 expected meetings | 0.928–0.997 | $0.3k–8.2k each | most of it |
+| **All 17** | | **$90k** | $71k |
+
+Takers who traded the *wrong* way after the news lost a further $32k.
+
+**Verdict: real, but a small prize.**
+- **Size.** About $45k a year is available across all of Polymarket's Fed
+  markets, and fast bots already compete for it. Two-thirds came from the
+  three meetings the market had not fully priced.
+- **Timing.** Almost nothing trades inside 2 seconds (Polygon timestamps lag
+  the match). The money goes in 2–60 s, so a sniper needs the Fed's release
+  feed parsed within a second and a warm order connection.
+- **Worth it only as an add-on** to the external module if it already quotes
+  Polymarket. It is not a reason to build one.
+- **CPI and jobs markets on Polymarket are too thin** (< $0.5M per release) to
+  matter.
+
+### #4 Weather: a public model vs the crowd
+
+`scripts/onetime_prediction_weather_edge.py`.
+
+**Markets.** Kalshi's daily-high brackets settle on one NWS station's climate
+report. The study covered NYC (Central Park) and Chicago (Midway) from 2021,
+and Miami from 2023: 48,037 priced quotes, split 2024-05-12.
+
+**Model.** GFS forecasts from the Open-Meteo previous-runs archive, plus ECMWF
+IFS from 2024.
+- The "eve" entry (22:00 ET the day before) uses runs at least 48 hours old.
+- The "morning" entry (10:00 ET on the day) uses runs at least 24 hours old.
+- Bias and spread are fitted by censored maximum likelihood on the trailing
+  year, refitted monthly. Forecast errors are plausible: bias +0.2 to +2.3°F,
+  sd 2.0–3.5°F.
+
+| Entry | Half | Brier: model | Brier: Kalshi mid | Net ¢/trade (5¢ margin) | t |
+|---|---|---|---|---|---|
+| eve | H1 | 0.223 | **0.168** | −2.5 | −4.5 |
+| eve | H2 | 0.153 | **0.126** | −3.4 | −8.6 |
+| morning | H1 | 0.244 | **0.175** | −2.6 | −5.1 |
+| morning | H2 | 0.176 | **0.140** | −2.5 | −6.4 |
+
+**Verdict: the crowd wins, clearly.**
+- Every city, entry and margin loses: NY t −6.4, Chicago −3.6, Miami −4.6.
+- Kalshi is sharper as well as better calibrated. It puts a median 0.46–0.53
+  on the favourite bracket, against the model's 0.37.
+- Traders use fresher information than a day-old run: the latest runs, the NWS
+  point forecast and the morning's observations.
+- **What wasn't tested.** Beating the crowd would take the *freshest* forecast
+  (NBM / HRRR from the most recent run), which free archives don't keep.
+  NOAA's NBM archive on AWS would allow it, at the cost of GRIB processing.
+  Whether that edge beats the forecast-following bots already in these
+  markets is doubtful.
+- Austin, Denver, Philadelphia and LA were not run. With every rule at t −3 to
+  −10 on three cities, four more would not change the verdict.
+
+### Round 3 verdict
+
+| Idea | Result |
+|---|---|
+| #2 Late-day S&P ranges | Kalshi keeps up with the index; no edge out of sample |
+| #3 Release sniping | Impossible on Kalshi (markets close first); ~$45k/yr total on Polymarket Fed markets, competed for |
+| #4 Weather vs public models | The crowd beats day-old forecasts decisively |
+
+Nothing here makes money from a CronJob framework. What is left is the
+external module's own ground:
+- quoting for Polymarket's liquidity rewards and maker rebates;
+- sub-second sniping on Polymarket Fed decisions, as a small add-on;
+- the freshest-forecast weather test, if anyone wants to pay for the GRIB
+  pipeline.
+
 ## The external execution module
 
 These are the integration points for the separate venue-trading module:
