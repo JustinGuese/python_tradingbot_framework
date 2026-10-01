@@ -245,9 +245,11 @@ bots:
 - name: aihedgefundbot
   # Runs after the execution of helm/tradingbots/templates/cronjob-ai-hedge-fund.yaml
   schedule: "10 22 * * 3" # Weekly on Wednesday at 10:10 PM
-  # PAUSED 2026-09-21: beta 0.76 with alpha -13%/yr (t -0.36), max DD -15%. That is worse
-  # than holding QQQ, and it runs on paid LLM calls. aiHedgeFund.suspend pauses its feeder.
-  suspend: true
+  # Paused 2026-09-21 (beta 0.76, alpha -13%/yr, t -0.36, max DD -15%); RE-ENABLED
+  # 2026-10-01 on the owner's instruction. Its LLM calls now go through df-ai-router
+  # (free tiers first). Still judge it by alpha vs QQQ, not return: +$8.7k vs QQQ on a
+  # $100k notional Jan-Sep 2026 was beta, not edge. aiHedgeFund.suspend pauses its feeder.
+  suspend: false
 
 - name: aideepseektoolbot
   schedule: "18 18 * * 4" #  at 6:18 PM, Thursday

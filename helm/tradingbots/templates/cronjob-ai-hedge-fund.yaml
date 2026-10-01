@@ -28,11 +28,11 @@ spec:
           - name: ai-hedge-fund
             image: guestros/ai-hedge-fund:latest
             imagePullPolicy: {{ $.Values.image.pullPolicy }}
-            command: ["python", "src/main.py"]
+            command: ["aihf"]
             args:
-            - "--ticker"
-            - "AAPL,MSFT,NVDA,AAPL,GOOGL,MSFT,NVDA,TSLA"
-            - "--analysts-all"
+            - "/app/deploy/mandate.yaml"
+            - "--tickers"
+            - "AAPL,MSFT,NVDA,GOOGL,TSLA"
             - "--model"
             - "auto"
             resources:
@@ -43,6 +43,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secretName }}
                   key: POSTGRES_URI_AI_HEDGE_FUND
+            # Fundamentals/prices come from financialdatasets.ai; without a key every
+            # fetch returns 401 and all analysts decide blind (every ticker HOLD).
+            - name: FINANCIAL_DATASETS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: FINANCIAL_DATASETS_API_KEY
             # LLM calls go through the in-house df-ai-router (OpenAI-compatible).
             - name: OPENAI_API_BASE
               value: "http://df-ai-router-service.df-ai-router.svc.cluster.local:8000/v1"
