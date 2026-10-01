@@ -103,9 +103,15 @@ def index_proxy_history(underlying: str, close: pd.Series, lookback: int = 252) 
     return pd.Series(out, dtype=float)
 
 
-def vrp_history(underlying: str, close: pd.Series | None = None, as_of: date | None = None) -> pd.Series:
-    """The name's own vrp_30 history, or for SPY/QQQ the longer of it and the index proxy."""
-    own = vs.surface_history(underlying, "vrp_30", 400, as_of)
+def vrp_history(
+    underlying: str, close: pd.Series | None = None, as_of: date | None = None, own: pd.Series | None = None
+) -> pd.Series:
+    """
+    The name's own vrp_30 history, or for SPY/QQQ the longer of it and the index
+    proxy. `own` skips the vol_surface read (a replay passes its cached copy).
+    """
+    if own is None:
+        own = vs.surface_history(underlying, "vrp_30", 400, as_of)
     if underlying in INDEX_PROXIES and close is not None and len(own) < 252:
         try:
             proxy = index_proxy_history(underlying, close)
@@ -147,11 +153,12 @@ def name_vol_from_view(
     min_obs: int = 60,
     events: list | None = None,
     next_earnings: date | bool | None = False,
+    history: pd.Series | None = None,
 ) -> NameVol:
     """
     live_name_vol on a chain already in hand (live, replayed or synthetic).
-    `events` / `next_earnings` default to the options.* readers; pass them to
-    read from elsewhere (False means "look it up").
+    `events` / `next_earnings` / `history` (the vrp_30 history) default to the
+    DB readers; pass them to read from elsewhere (False means "look it up").
     """
     underlying = view.underlying
     iv = options.atm_iv(view)
@@ -162,7 +169,7 @@ def name_vol_from_view(
         horizon = max(business_days(today, view.expiry), 1)
         fair = yz_fair_vol(ohlc, horizon, exclude=reactions.index)
         current = surface_style_vrp(iv, ohlc["close"])
-        history = vrp_history(underlying, ohlc["close"], today)
+        history = vrp_history(underlying, ohlc["close"], today) if history is None else history
         if current is not None:
             z = ve.vrp_zscore(history.to_numpy(), current, min_obs=min_obs)
     if next_earnings is False:

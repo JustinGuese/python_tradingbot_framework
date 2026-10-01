@@ -37,7 +37,7 @@ import pandas as pd
 from tradingbot.utils import corporate_events, macro_calendar, market_calendar, option_surface, options
 from tradingbot.utils import option_math as om
 from tradingbot.utils.config import EXECUTION_CONFIG
-from tradingbot.utils.db import OptionQuote, get_db_session
+from tradingbot.utils.db import ImpliedCorrelation, MispricingScanRow, OptionQuote, VolSurfaceSnapshot, get_db_session
 from tradingbot.utils.option_decide import Action, Close, Hedge, Holdings, Market, Open
 from tradingbot.utils.option_rules import delta_hedge_shares
 
@@ -47,6 +47,47 @@ FALLBACK_SLIPPAGE = 0.02  # fills when a leg has no two-sided quote: mid ± 2%, 
 EARNINGS_EVENTS = 40  # options.earnings_events' default window
 
 
+def _load_quotes(start: date, end: date, underlyings: Iterable[str] | None) -> pd.DataFrame:
+    """
+    option_quotes rows in [start, end], one query per underlying, columns only.
+    A single query for millions of rows as ORM objects stalled a kubectl
+    port-forward mid-transfer (2026-10-01: 47 MB in, then a silent hang).
+    """
+    lo = datetime.combine(start, datetime.min.time())
+    hi = datetime.combine(end + timedelta(days=1), datetime.min.time())
+    cols = list(OptionQuote.__table__.columns)
+    in_range = (OptionQuote.snapshot_at >= lo, OptionQuote.snapshot_at < hi)
+    with get_db_session() as session:
+        if underlyings is None:
+            underlyings = [u for (u,) in session.query(OptionQuote.underlying).filter(*in_range).distinct()]
+        parts = []
+        for u in sorted(set(underlyings)):
+            rows = session.query(*cols).filter(OptionQuote.underlying == u, *in_range).all()
+            if rows:
+                parts.append(pd.DataFrame(rows, columns=[c.name for c in cols]))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
+def _read_derived(table: str) -> dict[str, pd.Series]:
+    """One derived table as {key: value by date, oldest first}, NaNs dropped."""
+    if table == "vrp":
+        cols = (VolSurfaceSnapshot.underlying, VolSurfaceSnapshot.snapshot_date, VolSurfaceSnapshot.vrp_30)
+        where: tuple = ()
+    elif table == "scan":
+        cols = (MispricingScanRow.underlying, MispricingScanRow.scan_date, MispricingScanRow.z)
+        where = (MispricingScanRow.kind == "vrp",)
+    elif table == "corr":
+        cols = (ImpliedCorrelation.index_symbol, ImpliedCorrelation.snapshot_date, ImpliedCorrelation.value)
+        where = ()
+    else:
+        raise ValueError(f"Unknown derived table {table!r}")
+    with get_db_session() as session:
+        rows = session.query(*cols).filter(*where).all()
+    frame = pd.DataFrame(rows, columns=["key", "day", "value"]).dropna()
+    frame["value"] = frame["value"].astype(float)
+    return {k: g.set_index("day")["value"].sort_index() for k, g in frame.groupby("key")}
+
+
 class ReplayMarket:
     """The latest snapshot of each contract per underlying per day, loaded once."""
 
@@ -54,16 +95,8 @@ class ReplayMarket:
         # Event tables, read once per run: a query per replayed day costs hours over a port-forward.
         self._events: dict[str, corporate_events.StoredEvents | None] = {}
         self._macro: pd.DataFrame | None = None
-        with get_db_session() as session:
-            query = session.query(OptionQuote).filter(
-                OptionQuote.snapshot_at >= datetime.combine(start, datetime.min.time()),
-                OptionQuote.snapshot_at < datetime.combine(end + timedelta(days=1), datetime.min.time()),
-            )
-            if underlyings is not None:
-                query = query.filter(OptionQuote.underlying.in_(list(underlyings)))
-            cols = [c.name for c in OptionQuote.__table__.columns]
-            rows = [{c: getattr(q, c) for c in cols} for q in query.all()]
-        frame = pd.DataFrame(rows)
+        self._derived: dict[str, dict[str, pd.Series]] = {}
+        frame = _load_quotes(start, end, underlyings)
         self._spots: dict[str, pd.Series] = {}
         if frame.empty:
             self.frame = frame
@@ -114,6 +147,24 @@ class ReplayMarket:
         if underlying not in self._events:
             self._events[underlying] = corporate_events.stored_events(underlying)
         return self._events[underlying]
+
+    def derived(self, table: str, key: str, day: date, lookback_days: int) -> pd.Series:
+        """
+        A derived table's series for `key` over the lookback ending the day
+        before `day`, read once per run: "vrp" (vol_surface.vrp_30 by name),
+        "scan" (the vrp scan z by name) or "corr" (implied correlation by index).
+        """
+        if table not in self._derived:
+            self._derived[table] = _read_derived(table)
+        series = self._derived[table].get(key)
+        if series is None:
+            return pd.Series(dtype=float)
+        return series[(series.index < day) & (series.index >= day - timedelta(days=lookback_days))]
+
+    def scanned_names(self) -> list[str]:
+        if "scan" not in self._derived:
+            self._derived["scan"] = _read_derived("scan")
+        return sorted(self._derived["scan"])
 
     def macro_events(self) -> pd.DataFrame:
         if self._macro is None:
@@ -521,6 +572,26 @@ class ReplayDayMarket(Market):
 
     def next_macro_event(self) -> tuple[tuple[str, date] | None, int | None]:
         return macro_calendar.next_event_in(self._market.macro_events(), self.today)
+
+    # The derived tables, also cached: a live run before the close sees
+    # yesterday's rows at the latest, so a replayed day reads strictly before it.
+
+    def vrp_history(self, underlying: str, close: pd.Series) -> pd.Series:
+        from tradingbot.utils import mispricing_scan as ms
+
+        own = self._market.derived("vrp", underlying, self.today, 400)
+        return ms.vrp_history(underlying, close, self.today, own=own)
+
+    def scan_scores(self) -> dict[str, float]:
+        scores = {}
+        for u in self._market.scanned_names():
+            z = self._market.derived("scan", u, self.today, 5)
+            if len(z):
+                scores[u] = abs(float(z.iloc[-1]))
+        return scores
+
+    def implied_correlation_history(self, index: str) -> pd.Series:
+        return self._market.derived("corr", index, self.today, 400)
 
 
 class ReplayHoldings(Holdings):

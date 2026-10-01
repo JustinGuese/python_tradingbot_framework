@@ -187,6 +187,7 @@ class Market(ABC):
             view = None
         if view is None:
             return NameVol(underlying, None, None, False), None
+        history = self.vrp_history(underlying, ohlc["close"]) if ohlc is not None and len(ohlc) >= 60 else None
         return ms.name_vol_from_view(
             view,
             ohlc,
@@ -194,7 +195,14 @@ class Market(ABC):
             min_obs,
             events=self.earnings_events(underlying),
             next_earnings=self.next_earnings_date(underlying),
+            history=history,
         ), view
+
+    def vrp_history(self, underlying: str, close: pd.Series) -> pd.Series:
+        """The name's stored vrp_30 history as of today (the z-score's baseline)."""
+        from . import mispricing_scan as ms
+
+        return ms.vrp_history(underlying, close, self.today)
 
 
 class Holdings(ABC):

@@ -14,7 +14,10 @@
       "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tradingbot",
       "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tests",
       "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/helm/tradingbots",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/docs/architecture"
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/docs/architecture",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/docs/backtests",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/tradingbot/utils",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/scripts"
     ]
   }
 }

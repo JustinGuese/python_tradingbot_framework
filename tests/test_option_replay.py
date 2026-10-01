@@ -99,5 +99,27 @@ def test_close_sells_at_the_bid(stored):
     assert got == pytest.approx(received - paid)
 
 
+def test_derived_tables_are_read_once_and_only_before_the_replayed_day(stored, db_session, mocker):
+    """A live run before the close sees yesterday's surface and scan at the latest."""
+    from tradingbot.utils import option_replay
+    from tradingbot.utils.db import ImpliedCorrelation, MispricingScanRow, VolSurfaceSnapshot
+    from tradingbot.utils.option_replay import PriceHistory, ReplayDayMarket
+
+    for i, day in enumerate(DAYS):
+        db_session.add(VolSurfaceSnapshot(underlying="AAPL", snapshot_date=day, vrp_30=0.01 * (i + 1)))
+        db_session.add(MispricingScanRow(scan_date=day, underlying="AAPL", kind="vrp", z=-(i + 1.0)))
+        db_session.add(ImpliedCorrelation(index_symbol="SPY", snapshot_date=day, value=0.1 * (i + 1), n_names=10))
+    db_session.commit()
+    m = ReplayMarket(DAYS[0], DAYS[-1])
+    day_market = ReplayDayMarket(m, DAYS[2], PriceHistory({}))
+    reads = mocker.spy(option_replay, "_read_derived")
+
+    assert day_market.vrp_history("AAPL", None).tolist() == pytest.approx([0.01, 0.02])
+    assert day_market.scan_scores() == {"AAPL": pytest.approx(2.0)}  # |z| of the day before
+    assert day_market.implied_correlation_history("SPY").tolist() == pytest.approx([0.1, 0.2])
+    ReplayDayMarket(m, DAYS[3], PriceHistory({})).vrp_history("AAPL", None)
+    assert reads.call_count == 3  # one read per table for the whole run
+
+
 def test_empty_table_has_no_days(sqlite_db):
     assert ReplayMarket(D0, DAYS[-1]).days == []
