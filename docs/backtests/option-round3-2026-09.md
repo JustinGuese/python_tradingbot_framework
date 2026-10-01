@@ -260,6 +260,34 @@ The kill rule was fixed before the result: t < −2 on listed expiries kills it,
   - The 25 names were picked by today's size. Survivorship flatters short vol, so the real result is, if anything, worse.
   - The replays solved IV with today's T-bill rate. That is close to the 2025–26 rate.
 
+### Where the loss comes from: the signal or the spread? (2026-10-01)
+
+The same replays were rerun twice, once filling every option leg at mid and
+once at the recorded bid/ask (`--fill mid`), with a per-trade log
+(`--trades-csv`). Each replayed day is now priced at its own T-bill rate.
+
+| | CrossVol (25 names, 2025–26, listed) | IndexVol (SPY 2019–26, live expiries) |
+|---|---|---|
+| t at bid/ask | −3.59 (34 trades) | −0.71 (36 trades) |
+| t at mid | −0.80 (53 trades) | −0.58 (36 trades) |
+| Spread paid / total loss | $14,617 / $13,659 | $1,220 / $6,340 |
+| IV − realized vol, mean | +1.1 pts | +2.5 pts (median +4.4), 81% of trades win |
+| Fair (HAR) − realized, mean | **−6.3 pts** | −1.5 pts |
+| Trades with a report inside the hold | 0 | – |
+
+**CrossVol: the spread costs about the whole loss, and nothing is left under it.**
+- Before the spread, the 34 trades made +$302 in total.
+- The "IV ≥ forecast + 5 pts" gap mostly marks a forecast that runs low. On the names it selects, the HAR forecast came in 6 points under the vol the stock then realized, while IV was only 1 point over it.
+- The earnings filter worked: no trade held a report.
+- A round trip cost about $430 per condor, roughly 10% of the $4k at risk.
+
+**IndexVol: the premium is real, but the condor gives it back in the tails.**
+- Three of 36 trades lose more than the other 33 make: 2020-05-06 (−$6.5k), 2025-03-24 (−$4.6k) and 2022-03-14 (−$2.9k).
+- In two of those three, realized vol was *below* IV. The rallies ran through the short call, which is the call-skew problem in
+  [index-vol-real-surface-2026-09.md](index-vol-real-surface-2026-09.md).
+
+**Verdict:** better execution (limit orders at mid) would not rescue either strategy. Selling single-name or SPY vol through these structures has no edge on real prices.
+
 ## What still limits all of this
 
 - **No per-name option history**, until the capture accumulates or history
