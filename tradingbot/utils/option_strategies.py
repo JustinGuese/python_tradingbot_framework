@@ -124,7 +124,7 @@ def decide_indexvol(market: Market, holdings: Holdings, rules: IndexVolRules, un
     except ValueError as exc:
         logger.warning("%s: no condor (%s)", underlying, exc)
         return []
-    return [Open(pick, risk, reason=f"IV {iv:.1%} vs fair {fair:.1%}")]
+    return [Open(pick, risk, reason=f"IV {iv:.1%} vs fair {fair:.1%}", meta={"iv": iv, "fair": fair})]
 
 
 # ------------------------------------------------------------------
@@ -193,7 +193,8 @@ def decide_crossvol(market: Market, holdings: Holdings, rules: CrossVolRules, un
         except ValueError as exc:  # one broken chain must not stop the other names
             logger.warning("%s: no condor (%s)", nv.underlying, exc)
             continue
-        actions.append(Open(pick, budget, reason=f"gap {nv.gap * 100:+.1f} pts"))
+        meta = {"iv": nv.iv, "fair": nv.fair, "z": nv.z}
+        actions.append(Open(pick, budget, reason=f"gap {nv.gap * 100:+.1f} pts", meta=meta))
     return actions
 
 
@@ -282,7 +283,8 @@ def _earnings_crush_entry(market, rules, u, report, after_close, reaction, ohlc,
     if not ok:
         return None
     width = rules.wing_moves * implied * front.spot
-    return Open(options.select_iron_butterfly(front, width), budget, reason=f"wings {width:.2f} away")
+    meta = {"implied_move": implied, "hist_move": hist}
+    return Open(options.select_iron_butterfly(front, width), budget, reason=f"wings {width:.2f} away", meta=meta)
 
 
 # ------------------------------------------------------------------
@@ -326,7 +328,7 @@ def decide_mispricingscan(
             if side == "rich" and term is not None and term > rules.unwind_term_ratio:
                 logger.info("%s: rich, but VIX/VIX3M %.2f is inverted: no new short vol", u, term)
                 continue
-            ranked.append((abs(nv.z), u, side, view))
+            ranked.append((abs(nv.z), u, side, view, nv))
     if not ranked:
         return actions
 
@@ -341,10 +343,10 @@ def decide_mispricingscan(
         book_vega += abs(book.greeks.vega)
         book_crash += om.worst_stress(options.stress_legs(book), book.spot, r)
     opened = 0
-    for _, u, side, view in sorted(ranked, key=lambda x: -x[0]):
+    for _, u, side, view, nv in sorted(ranked, key=lambda x: -x[0]):
         if len(held) + opened >= rules.max_positions:
             break
-        proposal = _scan_open(u, side, view, rules, equity, book_vega, book_crash, r)
+        proposal = _scan_open(u, side, view, rules, equity, book_vega, book_crash, r, nv)
         if proposal is None:
             continue
         open_action, vega, crash = proposal
@@ -368,7 +370,7 @@ def _scan_pick(u: str, side: str, view: options.ChainView, rules: MispricingScan
     return options.select_iron_condor(u, rules.short_delta, rules.width_pct * view.spot, rules.target_dte, view=view)
 
 
-def _scan_open(u, side, view, rules, equity, book_vega, book_crash, r) -> tuple[Open, float, float] | None:
+def _scan_open(u, side, view, rules, equity, book_vega, book_crash, r, nv=None) -> tuple[Open, float, float] | None:
     """(the Open, its vega, its crash P&L), sized so the book stays in the vega and crash caps; None if nothing fits."""
     try:
         pick = _scan_pick(u, side, view, rules)
@@ -399,7 +401,8 @@ def _scan_open(u, side, view, rules, equity, book_vega, book_crash, r) -> tuple[
         return None
     risk = units * (m.max_loss if side == "rich" else m.price) * 1.05
     logger.info("%s: %d x %s (%s), vega %+.0f/pt", u, units, side, pick.legs, units * m.vega)
-    return Open(pick, risk, reason=f"{side} z"), units * unit_vega, crash
+    meta = {"iv": nv.iv, "fair": nv.fair, "z": nv.z} if nv is not None else None
+    return Open(pick, risk, reason=f"{side} z", meta=meta), units * unit_vega, crash
 
 
 def _scan_manage(market: Market, holdings: Holdings, rules: MispricingScanRules, term) -> list[Action]:
@@ -469,10 +472,10 @@ def decide_dispersion(
         return [Close(u, reason=reason) for u in sorted(held)]
     if signal != "enter":
         return []
-    return _dispersion_entry(market, holdings, rules, universe, index)
+    return _dispersion_entry(market, holdings, rules, universe, index, current)
 
 
-def _dispersion_entry(market, holdings, rules, universe, index) -> list[Action]:
+def _dispersion_entry(market, holdings, rules, universe, index, corr=None) -> list[Action]:
     weights = market.market_caps(universe)
     names = sorted((u for u in weights if weights[u] > 0), key=lambda u: -weights[u])[: rules.n_names]
     if not names:
@@ -520,6 +523,9 @@ def _dispersion_entry(market, holdings, rules, universe, index) -> list[Action]:
         cost,
         net_vega,
     )
-    actions: list[Action] = [Open(fly, n_fly * fly_m.max_loss * 1.05, reason="index fly")]
-    actions += [Open(straddles[u], n * metrics[u].price * 1.05, reason="member straddle") for u, n in lots.items()]
+    meta = {"corr": corr}
+    actions: list[Action] = [Open(fly, n_fly * fly_m.max_loss * 1.05, reason="index fly", meta=meta)]
+    actions += [
+        Open(straddles[u], n * metrics[u].price * 1.05, reason="member straddle", meta=meta) for u, n in lots.items()
+    ]
     return actions

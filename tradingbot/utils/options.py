@@ -24,6 +24,8 @@ import logging
 import math
 import re
 from collections.abc import Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
@@ -284,9 +286,33 @@ def option_price(contract_symbol: str) -> float:
     return quote.mid
 
 
-@lru_cache(maxsize=1)
+_RATE_AS_OF: ContextVar[float | None] = ContextVar("risk_free_rate_as_of", default=None)
+
+
+@contextmanager
+def rate_override(rate: float | None):
+    """
+    Within the block, risk_free_rate() returns `rate`: a replayed day's T-bill
+    yield instead of today's. Every pricing helper defaults its r to
+    risk_free_rate(), so a 2020 day replayed without this solves its IVs at
+    today's ~4% instead of ~0%. None leaves the live rate in place.
+    """
+    token = _RATE_AS_OF.set(rate)
+    try:
+        yield
+    finally:
+        _RATE_AS_OF.reset(token)
+
+
 def risk_free_rate() -> float:
-    """13-week T-bill yield (^IRX) as a decimal, once per process; 4% if unavailable."""
+    """13-week T-bill yield (^IRX) as a decimal: the rate_override in force, else today's."""
+    pinned = _RATE_AS_OF.get()
+    return pinned if pinned is not None else _live_risk_free_rate()
+
+
+@lru_cache(maxsize=1)
+def _live_risk_free_rate() -> float:
+    """Today's ^IRX, once per process; 4% if unavailable."""
     try:
         hist = yf.Ticker("^IRX").history(period="5d", interval="1d")
         rate = float(hist["Close"].dropna().iloc[-1]) / 100.0

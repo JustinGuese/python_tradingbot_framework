@@ -203,3 +203,66 @@ def get_fundamentals_batch(
     """Lenient `get_fundamentals` for many symbols: None means not available."""
     found = _latest_rows(list(symbols), _as_date(as_of), max_age_days)
     return {s: found.get(s) for s in symbols}
+
+
+# ------------------------------------------------------------------
+# Market caps before the capture began
+# ------------------------------------------------------------------
+
+SHARE_SMOOTHING_OBS = 5  # trailing median over this many filings: get_shares_full has one-off spikes
+
+
+def split_adjusted_shares(shares: pd.Series, splits: pd.Series) -> pd.Series:
+    """
+    Reported share counts restated in today's share units. yfinance's
+    get_shares_full serves counts as filed (NVDA 610M in 2019, 24.6B after
+    its 4:1 and 10:1 splits), while its prices are split-adjusted, so every
+    count dated before a split is multiplied by that split's ratio. A trailing
+    median over SHARE_SMOOTHING_OBS filings removes isolated bad rows without
+    looking ahead.
+    """
+    if shares.empty:
+        return shares
+    out = shares.astype(float).copy()
+    out.index = pd.DatetimeIndex(out.index).tz_localize(None).normalize()
+    for when, ratio in splits.items():
+        if ratio and ratio > 0:
+            out[out.index < pd.Timestamp(when).tz_localize(None).normalize()] *= float(ratio)
+    out = out.groupby(level=0).last().sort_index()
+    return out.rolling(SHARE_SMOOTHING_OBS, min_periods=1).median()
+
+
+def historical_market_caps(
+    symbols: list[str] | tuple[str, ...], start: date, closes: dict[str, pd.Series] | None = None
+) -> pd.DataFrame:
+    """
+    Daily market caps from `start` (rows = days, columns = symbols): the
+    split-adjusted close times the last share count filed on or before that
+    day. For dates before stock_fundamentals began (2026-09-25), e.g. member
+    weights of a backfilled implied correlation.
+
+    Before a symbol's first filing in the window, its earliest count is used,
+    a small look-ahead in weights only (share counts move a few % a year).
+    `closes` (split-adjusted, by symbol) skips the price download.
+    """
+    columns = {}
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+            shares = split_adjusted_shares(ticker.get_shares_full(start=str(start)), ticker.splits)
+            close = closes.get(symbol) if closes else None
+            if close is None:
+                close = ticker.history(start=str(start), auto_adjust=False)["Close"]
+        except Exception as exc:
+            logger.warning("%s: no share history (%s); left out of the caps", symbol, exc)
+            continue
+        if shares is None or shares.empty or close is None or close.empty:
+            logger.warning("%s: no share history; left out of the caps", symbol)
+            continue
+        close = close.copy()
+        close.index = pd.DatetimeIndex(close.index).tz_localize(None).normalize()
+        close = close[close.index >= pd.Timestamp(start)]
+        held = shares.reindex(close.index.union(shares.index)).ffill().bfill().reindex(close.index)
+        columns[symbol] = close * held
+        time.sleep(SYMBOL_DELAY_SECONDS)
+    return pd.DataFrame(columns).sort_index()

@@ -615,6 +615,7 @@ class VolSurfaceSnapshot(Base):
     iv_25c_30: Mapped[float | None] = mapped_column(Float, nullable=True)
     rr25_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # 25d put IV - 25d call IV
     fly25_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # wings avg - ATM
+    cp_spread_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # call IV - put IV, same strikes
     term_slope: Mapped[float | None] = mapped_column(Float, nullable=True)  # atm_iv_90 / atm_iv_30
     fair_vol_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # HAR forecast, 30d
     vrp_30: Mapped[float | None] = mapped_column(Float, nullable=True)  # atm_iv_30 - fair_vol_30

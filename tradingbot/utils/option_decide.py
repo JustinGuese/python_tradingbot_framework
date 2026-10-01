@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 import pandas as pd
@@ -51,6 +51,9 @@ class Open:
     pick: options.StructurePick
     max_risk_usd: float
     reason: str = ""
+    # What the decision saw (IV, fair vol, z...): the replay's trade log records
+    # it so a loss can be traced to the forecast. Not part of the decision.
+    meta: dict | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

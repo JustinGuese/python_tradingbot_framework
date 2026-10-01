@@ -37,13 +37,14 @@ historical chains).
 import argparse
 import logging
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 
 from tradingbot.utils import market_calendar
 from tradingbot.utils.config import setup_logging
 from tradingbot.utils.db import init_db
+from tradingbot.utils.fundamentals import historical_market_caps
 from tradingbot.utils.option_capture import capture_universe
 from tradingbot.utils.universes import OPTION_CAPTURE_UNIVERSE
 from tradingbot.utils.vol_surface import (
@@ -74,8 +75,12 @@ def capture_due(now: datetime) -> tuple[bool, str]:
     return True, f"{left:.0f} min to the close"
 
 
-def derive(day=None, closes=None, r=None) -> bool:
-    """vol_surface + implied correlation + mispricing scan for one day. False on failure."""
+def derive(day=None, closes=None, r=None, caps=None) -> bool:
+    """
+    vol_surface + implied correlation + mispricing scan for one day. False on
+    failure. `caps` ({symbol: market cap} as of the day) weights names that
+    stock_fundamentals has no row for.
+    """
     from tradingbot.utils.mispricing_scan import snapshot_scan
 
     try:
@@ -83,12 +88,23 @@ def derive(day=None, closes=None, r=None) -> bool:
         if not surface["written"]:
             logger.error("vol surface wrote nothing for %s", day or "today")
             return False
-        snapshot_implied_correlation(day)
+        snapshot_implied_correlation(day, fallback_weights=caps)
         snapshot_scan(day, r=r)
     except Exception:
         logger.exception("deriving the vol surface for %s failed", day or "today")
         return False
     return True
+
+
+def caps_on(caps: pd.DataFrame, day: date) -> dict[str, float]:
+    """The last market cap per symbol on or before `day` (as stock_fundamentals is read live)."""
+    if caps.empty:
+        return {}
+    known = caps[caps.index <= pd.Timestamp(day)]
+    if known.empty:
+        return {}
+    last = known.iloc[-1].dropna()
+    return {u: float(v) for u, v in last.items() if v > 0}
 
 
 def rate_on(irx: pd.Series, day: date) -> float | None:
@@ -101,8 +117,9 @@ def backfill(since: date | None = None) -> int:
     """
     Rebuild the derived tables for every captured date from `since`, oldest
     first: each day's scan z-scores read the vrp history the days before it
-    wrote. Closes and ^IRX are downloaded once and cut at each day, so no day
-    sees later prices or today's rate.
+    wrote. Closes, ^IRX and market caps (implied-correlation weights) are
+    downloaded once and cut at each day, so no day sees later prices, today's
+    rate or today's caps.
     """
     days = [d for d in captured_dates() if since is None or d >= since]
     if not days:
@@ -111,9 +128,11 @@ def backfill(since: date | None = None) -> int:
     start = (pd.Timestamp(days[0]) - pd.DateOffset(years=CLOSE_HISTORY_YEARS)).date()
     closes = download_closes(sorted(OPTION_CAPTURE_UNIVERSE), start)
     irx = download_closes(["^IRX"], start).get("^IRX", pd.Series(dtype=float))
+    members = sorted(set(OPTION_CAPTURE_UNIVERSE) - {"SPY", "QQQ"})
+    caps = historical_market_caps(members, days[0] - timedelta(days=10))
     failed = []
     for i, day in enumerate(days):
-        if not derive(day, closes=closes, r=rate_on(irx, day)):
+        if not derive(day, closes=closes, r=rate_on(irx, day), caps=caps_on(caps, day)):
             failed.append(day)
         if i % 20 == 0:
             logger.info("backfill: %d/%d days done (%s), %d failed", i + 1, len(days), day, len(failed))

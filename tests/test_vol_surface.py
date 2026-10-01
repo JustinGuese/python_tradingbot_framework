@@ -70,6 +70,14 @@ def test_put_skew_shows_up_as_positive_risk_reversal():
     assert row["iv_25p_30"] > row["atm_iv_30"] > row["iv_25c_30"]
 
 
+def test_call_put_spread_is_zero_at_parity_and_positive_when_calls_are_rich():
+    assert vs.summarize(chain(), S, TODAY, R)["cp_spread_30"] == pytest.approx(0.0, abs=0.003)
+    rich = chain()
+    calls = rich["option_type"] == "C"
+    rich.loc[calls, ["bid", "ask", "last_price"]] += 0.10
+    assert vs.summarize(rich, S, TODAY, R)["cp_spread_30"] > 0.005
+
+
 def test_constant_maturity_is_linear_in_total_variance():
     pts = [(20 / 365, 0.30), (40 / 365, 0.20)]
     w = (0.30**2 * 20 + 0.20**2 * 40) / 2 / 365
@@ -188,6 +196,38 @@ def test_snapshot_implied_correlation(sqlite_db, db_session):
     assert stored.value == pytest.approx(value) and 0 < value < 0.3
     assert stored.n_names == 12
     assert vs.implied_correlation_history(as_of=TODAY).tolist() == pytest.approx([value])
+
+
+def test_names_without_a_fundamentals_cap_take_the_historical_one(sqlite_db, db_session):
+    names = [f"N{i}" for i in range(12)]
+    for u, iv in [("SPY", 0.15), *[(n, 0.30) for n in names]]:
+        db_session.add(VolSurfaceSnapshot(underlying=u, snapshot_date=TODAY, atm_iv_30=iv))
+    db_session.commit()
+    assert vs.snapshot_implied_correlation(TODAY) is None  # stock_fundamentals has no row that far back
+    value = vs.snapshot_implied_correlation(TODAY, fallback_weights=dict.fromkeys(names, 1.0))
+    assert value == pytest.approx(vs.implied_correlation(0.15, [0.30] * 12, [1.0] * 12))
+
+
+def test_backfill_caps_are_the_last_known_on_the_day():
+    from tradingbot.optionchainsnapshot import caps_on
+
+    caps = pd.DataFrame({"A": [1.0, 2.0], "B": [np.nan, 3.0]}, index=pd.to_datetime(["2025-01-02", "2025-01-03"]))
+    assert caps_on(caps, date(2025, 1, 2)) == {"A": 1.0}
+    assert caps_on(caps, date(2025, 1, 5)) == {"A": 2.0, "B": 3.0}
+    assert caps_on(caps, date(2024, 12, 31)) == {}
+    assert caps_on(pd.DataFrame(), date(2025, 1, 5)) == {}
+
+
+def test_reported_share_counts_are_restated_across_splits():
+    """yfinance files NVDA at 610M shares in 2021 and 24.5B after its 4:1 and 10:1 splits."""
+    from tradingbot.utils.fundamentals import split_adjusted_shares
+
+    tz = "America/New_York"
+    when = pd.to_datetime(["2021-01-04", "2021-06-01", "2021-09-01", "2024-03-01", "2024-09-01"]).tz_localize(tz)
+    shares = pd.Series([610e6, 612e6, 2.45e9, 2.46e9, 24.5e9], index=when)
+    splits = pd.Series([4.0, 10.0], index=pd.to_datetime(["2021-07-20", "2024-06-10"]).tz_localize(tz))
+    out = split_adjusted_shares(shares, splits)
+    assert out.min() > 24.0e9 and out.max() < 25.0e9
 
 
 def test_snapshot_scan_writes_vrp_rows_and_replaces_the_day(sqlite_db, db_session):

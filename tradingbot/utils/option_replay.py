@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_SLIPPAGE = 0.02  # fills when a leg has no two-sided quote: mid ± 2%, as live off-hours
 EARNINGS_EVENTS = 40  # options.earnings_events' default window
+IRX = "^IRX"  # 13-week T-bill yield in percent: each replayed day's risk-free rate
 
 
 def _load_quotes(start: date, end: date, underlyings: Iterable[str] | None) -> pd.DataFrame:
@@ -96,6 +97,9 @@ class ReplayMarket:
         self._events: dict[str, corporate_events.StoredEvents | None] = {}
         self._macro: pd.DataFrame | None = None
         self._derived: dict[str, dict[str, pd.Series]] = {}
+        # Market caps by day (columns = symbols), e.g. fundamentals.historical_market_caps;
+        # None reads stock_fundamentals, which only exists from 2026-09-25.
+        self.caps: pd.DataFrame | None = None
         frame = _load_quotes(start, end, underlyings)
         self._spots: dict[str, pd.Series] = {}
         if frame.empty:
@@ -294,22 +298,36 @@ class ReplayBook:
     and marked from a ReplayMarket. It tracks what the live book gets from the
     trades table: each contract's entry value, when each structure opened,
     and its cash flows (for a hedged structure's P&L).
+
+    fill="quote" pays the ask and receives the bid; fill="mid" fills every
+    option leg at mid, which separates what a strategy's signal earns from
+    what the spread costs it. `records` logs one row per structure, from its
+    open to its close or expiry.
     """
 
     market: ReplayMarket
     cash: float = 100_000.0
+    fill: str = "quote"
     positions: dict[str, float] = field(default_factory=dict)
     shares: dict[str, float] = field(default_factory=dict)
     entry_by_key: dict[str, float] = field(default_factory=dict)  # contract -> signed cash paid to open
     opened: dict[str, date] = field(default_factory=dict)  # underlying -> first open of the current structure
     flows: dict[str, float] = field(default_factory=dict)  # underlying -> net cash since that open
     trades: int = 0
+    records: list[dict] = field(default_factory=list)  # closed structures, oldest first
+    _open_records: dict[str, dict] = field(default_factory=dict)  # underlying -> its structure's record so far
     _last_mark: dict[str, float] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.fill not in ("quote", "mid"):
+            raise ValueError(f"fill must be 'quote' or 'mid', not {self.fill!r}")
 
     # -- prices ------------------------------------------------------------
 
     def _fill(self, key: str, day: date, buy: bool) -> float | None:
         bid, ask, mid = self.market.quote(key, day)
+        if self.fill == "mid" and mid and mid > 0:
+            return mid
         side = ask if buy else bid
         if side and side > 0:
             return side
@@ -356,15 +374,30 @@ class ReplayBook:
         self.opened.setdefault(underlying, day)
         self.flows[underlying] = self.flows.get(underlying, 0.0) + cash
 
-    def _forget_if_flat(self, underlying: str) -> None:
+    def _forget_if_flat(self, underlying: str, day: date, how: str) -> None:
         if not self.legs(underlying) and abs(self.shares.get(underlying, 0.0)) < 1e-9:
+            record = self._open_records.pop(underlying, None)
+            if record is not None:
+                record.update(exit=day, exit_kind=how, pnl=self.flows.get(underlying, 0.0))
+                self.records.append(record)
             self.opened.pop(underlying, None)
             self.flows.pop(underlying, None)
             self.shares.pop(underlying, None)
 
+    def _spread_cost(self, key: str, day: date, qty: float, px: float) -> float:
+        """What a fill of qty at px gave up against the mid (>= 0 at bid/ask, 0 in fill='mid')."""
+        _, _, mid = self.market.quote(key, day)
+        return qty * (px - mid) if mid and mid > 0 else 0.0
+
+    def open_records(self) -> list[dict]:
+        """Records of the structures still held: no exit, P&L at today's marks is the caller's."""
+        return list(self._open_records.values())
+
     # -- trading -----------------------------------------------------------
 
-    def open(self, pick: options.StructurePick, units: int, day: date) -> bool:
+    def open(
+        self, pick: options.StructurePick, units: int, day: date, reason: str = "", meta: dict | None = None
+    ) -> bool:
         """Open `units` of a pick at bid/ask. False (nothing traded) if any leg is unpriceable."""
         fills = {}
         for key, lots in pick.legs:
@@ -376,11 +409,12 @@ class ReplayBook:
             if px is None:
                 return False
             fills[key] = px
-        paid = 0.0
+        paid = spread = 0.0
         for key, lots in pick.legs:
             qty = lots * units * om.CONTRACT_MULTIPLIER
             cost = qty * fills[key]
             if options.is_option_symbol(key):
+                spread += self._spread_cost(key, day, qty, fills[key])
                 self.positions[key] = self.positions.get(key, 0.0) + qty
                 self.entry_by_key[key] = self.entry_by_key.get(key, 0.0) + cost
                 self._last_mark[key] = fills[key]
@@ -390,6 +424,14 @@ class ReplayBook:
         self.cash -= paid
         self._flow(pick.underlying, -paid, day)
         self.trades += 1
+        record = self._open_records.setdefault(
+            pick.underlying,
+            {"underlying": pick.underlying, "entry": day, "reason": reason, "units": 0, "paid": 0.0, "spread": 0.0}
+            | (meta or {}),
+        )
+        record["units"] += units
+        record["paid"] += paid
+        record["spread"] += spread
         return True
 
     def trade_shares(self, underlying: str, qty: float, day: date) -> bool:
@@ -402,8 +444,11 @@ class ReplayBook:
         return True
 
     def close(self, underlying: str, day: date, include_stock: bool = False) -> None:
+        record = self._open_records.get(underlying)
         for key, qty in self.legs(underlying).items():
             px = self._fill(key, day, qty < 0) or self.mark(key, day)
+            if record is not None:
+                record["spread"] += self._spread_cost(key, day, -qty, px)
             self.cash += qty * px
             self._flow(underlying, qty * px, day)
             del self.positions[key]
@@ -411,7 +456,7 @@ class ReplayBook:
         held = self.shares.get(underlying, 0.0)
         if include_stock and abs(held) > 1e-9:
             self.trade_shares(underlying, -held, day)
-        self._forget_if_flat(underlying)
+        self._forget_if_flat(underlying, day, "close")
 
     def settle(self, day: date) -> None:
         """
@@ -436,7 +481,7 @@ class ReplayBook:
         for u in touched:
             if not self.legs(u) and abs(self.shares.get(u, 0.0)) > 1e-9:
                 self.trade_shares(u, -self.shares[u], day)
-            self._forget_if_flat(u)
+            self._forget_if_flat(u, day, "expiry")
 
     # -- valuation ---------------------------------------------------------
 
@@ -536,6 +581,22 @@ class ReplayDayMarket(Market):
 
     def vol_index(self, symbol: str) -> float | None:
         return self._prices.level(symbol, self.today)
+
+    def risk_free_rate(self) -> float:
+        """The day's 13-week T-bill yield when ^IRX was loaded, else the live rate."""
+        level = self._prices.level(IRX, self.today)
+        return level / 100.0 if level is not None and 0.0 <= level <= 20.0 else super().risk_free_rate()
+
+    def market_caps(self, symbols) -> dict[str, float]:
+        """Point-in-time caps from the run's cap history (strictly before the day), else stock_fundamentals."""
+        caps = self._market.caps
+        if caps is None:
+            return super().market_caps(symbols)
+        before = caps[caps.index < pd.Timestamp(self.today)]
+        if before.empty:
+            return dict.fromkeys(symbols, 0.0)
+        last = before.iloc[-1]
+        return {u: float(last.get(u, 0.0)) if pd.notna(last.get(u)) else 0.0 for u in symbols}
 
     def closes(self, underlying: str) -> pd.Series:
         part = self._prices.upto(underlying, self.today)  # every close so far: see Market.closes
@@ -647,7 +708,7 @@ def execute(
             per_unit = book.max_loss(action.pick, day)
             free = book.cash - options.margin_requirement(book.portfolio())
             units = options.units_for_risk(per_unit or 0.0, action.max_risk_usd, free)
-            if units and book.open(action.pick, units, day):
+            if units and book.open(action.pick, units, day, reason=action.reason, meta=action.meta):
                 opened += 1
         elif isinstance(action, Hedge):
             if action.underlying not in book.underlyings():
@@ -666,13 +727,20 @@ def run_strategy(
     decide: Callable[[Market, Holdings], list[Action]],
     prices: PriceHistory,
     cash: float = 100_000.0,
+    fill: str = "quote",
 ) -> tuple[pd.Series, ReplayBook]:
-    """Replay every stored day through `decide` (a live bot's strategy function). Returns (equity curve, book)."""
-    book, curve = ReplayBook(market, cash=cash), {}
+    """
+    Replay every stored day through `decide` (a live bot's strategy function).
+    Returns (equity curve, book). Each day prices at that day's T-bill rate
+    (^IRX in `prices`), not today's.
+    """
+    book, curve = ReplayBook(market, cash=cash, fill=fill), {}
     for day in market.days:
-        book.settle(day)
-        holdings = ReplayHoldings(book, day)
-        actions = decide(ReplayDayMarket(market, day, prices), holdings)
-        execute(actions, book, day, holdings)
-        curve[pd.Timestamp(day)] = book.equity(day)
+        day_market = ReplayDayMarket(market, day, prices)
+        with options.rate_override(day_market.risk_free_rate()):
+            book.settle(day)
+            holdings = ReplayHoldings(book, day)
+            actions = decide(day_market, holdings)
+            execute(actions, book, day, holdings)
+            curve[pd.Timestamp(day)] = book.equity(day)
     return pd.Series(curve, dtype=float), book

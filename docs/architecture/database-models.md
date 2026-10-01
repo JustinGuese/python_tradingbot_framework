@@ -335,6 +335,7 @@ class VolSurfaceSnapshot(Base):
     iv_25c_30: float
     rr25_30: float  # 25d put IV - 25d call IV (risk reversal)
     fly25_30: float  # wings average - ATM (butterfly)
+    cp_spread_30: float  # call IV - put IV at matched strikes within 10% of spot (Cremers-Weinbaum)
     term_slope: float  # atm_iv_90 / atm_iv_30
     fair_vol_30: float  # HAR-RV forecast, 30 days
     vrp_30: float  # atm_iv_30 - fair_vol_30 (the variance risk premium)

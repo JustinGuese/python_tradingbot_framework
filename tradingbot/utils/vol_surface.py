@@ -65,6 +65,7 @@ SURFACE_FIELDS = (
     "iv_25c_30",
     "rr25_30",
     "fly25_30",
+    "cp_spread_30",
     "term_slope",
     "fair_vol_30",
     "vrp_30",
@@ -199,6 +200,34 @@ def smile_iv_at_delta(
     return float(np.interp(target, d, iv))
 
 
+CP_SPREAD_BAND = 0.10  # strikes within +/-10% of spot pair a call with a put
+
+
+def call_put_spread(solved: pd.DataFrame, spot: float, band: float = CP_SPREAD_BAND) -> float | None:
+    """
+    Mean call IV minus put IV over the strikes of one expiry where both are
+    quoted, within `band` of spot (Cremers & Weinbaum 2010). Parity makes it
+    zero up to American early exercise and frictions; calls priced rich
+    against puts have predicted the stock's next weeks. Equal weights: the
+    imported history has no open interest to weight by.
+    """
+    near = solved[(solved["strike"] / spot - 1.0).abs() <= band]
+    calls = near[near["option_type"] == "C"].groupby("strike")["iv"].last()
+    puts = near[near["option_type"] == "P"].groupby("strike")["iv"].last()
+    both = calls.index.intersection(puts.index)
+    if not len(both):
+        return None
+    return float((calls[both] - puts[both]).mean())
+
+
+def interpolate_in_time(points: Sequence[tuple[float, float]], days: float) -> float | None:
+    """A quantity at `days` from (T years, value) points: linear in T, flat outside."""
+    pts = sorted((T, v) for T, v in points if T > 0 and v is not None and math.isfinite(v))
+    if not pts:
+        return None
+    return float(np.interp(days / 365.0, [p[0] for p in pts], [p[1] for p in pts]))
+
+
 def constant_maturity_iv(points: Sequence[tuple[float, float]], days: float) -> float | None:
     """IV at `days` from (T years, iv) points: linear in total variance, flat in vol outside."""
     pts = sorted((T, iv) for T, iv in points if T > 0 and iv is not None and iv > 0)
@@ -266,7 +295,7 @@ def summarize(
     if solved.empty:
         return row
 
-    atm_pts, p25_pts, c25_pts = [], [], []
+    atm_pts, p25_pts, c25_pts, cp_pts = [], [], [], []
     for _, grp in solved.groupby("expiry"):
         T = float(grp["T"].iloc[0])
         atm = expiry_atm_iv(grp, spot)
@@ -279,10 +308,14 @@ def summarize(
                 p25_pts.append((T, p25))
             if c25 is not None:
                 c25_pts.append((T, c25))
+            cp = call_put_spread(grp, spot)
+            if cp is not None:
+                cp_pts.append((T, cp))
     for d in CM_DAYS:
         row[f"atm_iv_{d}"] = constant_maturity_iv(atm_pts, d)
     row["iv_25p_30"] = constant_maturity_iv(p25_pts, 30)
     row["iv_25c_30"] = constant_maturity_iv(c25_pts, 30)
+    row["cp_spread_30"] = interpolate_in_time(cp_pts, 30)
     atm30 = row["atm_iv_30"]
     if row["iv_25p_30"] is not None and row["iv_25c_30"] is not None:
         row["rr25_30"] = row["iv_25p_30"] - row["iv_25c_30"]
@@ -438,14 +471,19 @@ def snapshot_vol_surface(
 
 
 def snapshot_implied_correlation(
-    snapshot_date: date | None = None, index_symbol: str = "SPY", weights: dict[str, float] | None = None
+    snapshot_date: date | None = None,
+    index_symbol: str = "SPY",
+    weights: dict[str, float] | None = None,
+    fallback_weights: dict[str, float] | None = None,
 ) -> float | None:
     """
     Implied correlation of `index_symbol` against the captured single names on a day.
 
     Reads that day's vol_surface rows (so run it after snapshot_vol_surface);
-    weights default to the latest stock_fundamentals market caps. Returns the
-    value written, or None when there was not enough to compute it.
+    weights default to the latest stock_fundamentals market caps, and names
+    without one take `fallback_weights` (a backfill's historical caps: the
+    capture began 2026-09-25). Returns the value written, or None when there
+    was not enough to compute it.
     """
     from tradingbot.utils.fundamentals import get_fundamentals_batch
 
@@ -461,6 +499,8 @@ def snapshot_implied_correlation(
     if weights is None:
         caps = get_fundamentals_batch(names, day, max_age_days=10)
         weights = {u: (c or {}).get("market_cap") for u, c in caps.items()}
+    if fallback_weights:
+        weights = {u: weights.get(u) or fallback_weights.get(u) for u in names}
     names = [u for u in names if weights.get(u)]
     value = None
     if index_iv and len(names) >= 10:
