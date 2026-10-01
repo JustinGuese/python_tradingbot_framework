@@ -231,6 +231,35 @@ starts now.
 | `option_EarningsCrushBot` (14:30 and 19:30) | ATM iron butterflies, wings at 1.5 implied moves, entered the session before a report whose two-expiry implied move is ≥ 1.25× its historical RMS move; closed after the open | Large caps price earnings moves above what they deliver, on average | The average hides fat tails: the one report that moves 3× costs several wins |
 | `option_DispersionBot` (15:55) | Short SPY iron fly vs long straddles on the 10 largest names, vega-weighted N_i = \|V_I\|·w_i/V_i, when implied correlation is ≥ its 80th percentile | Rich implied correlation mean-reverts; the long straddles pay when members move apart | Correlation → 1 in a crash; 11 structures of rounding error on $100k. Trades nothing until 60 days of history exist |
 
+### option_CrossVolBot on real chains: paused (2026-10-01)
+
+The 50-name DoltHub import made a real replay possible.
+
+**Setup:**
+- 25 names with a full history, 2025-01-02 to 2026-09-29 (434 days).
+- Fills at the recorded bid/ask.
+- Fair vol was fitted only on closes up to each day.
+- The shortlist is every loaded name. Live shortlists by yesterday's scan; with every chain loaded, ranking all names makes the same choice.
+- Two ways of pricing the expiry:
+  - **Listed:** only the expiries DoltHub recorded.
+  - **Bot's own:** the bot's own ~30-day expiry, priced off each day's surface (`--live-expiries`). The data does not list that expiry.
+
+The kill rule was fixed before the result: t < −2 on listed expiries kills it, and the 8-point gap is a robustness check, not a rescue.
+
+| Expiries | Variant | Alpha/yr | t | H1 t | H2 t | Max DD | Trades |
+|---|---|---|---|---|---|---|---|
+| Listed | live rules (gap ≥ 5) | −10.2% | −3.56 | −2.27 | −2.81 | −14.3% | 34 |
+| Listed | gap ≥ 8 | −5.1% | −2.76 | −1.25 | −2.45 | −7.5% | 18 |
+| Bot's own (surface) | live rules | −12.0% | −3.61 | −2.65 | −2.56 | −16.7% | 89 |
+| Bot's own (surface) | gap ≥ 8 | −8.1% | −3.77 | −1.60 | −3.53 | −11.7% | 52 |
+
+- **Every variant is negative, with beta under 0.1.** It is not losing to the market. It loses on the trades themselves.
+- **Raising the gap does not help.** On listed expiries the 8-point gap loses less only because it trades half as often. On the bot's own expiry it loses more (t −3.77).
+- **What happened:** paused (`suspend: true`). It never traded live, and its book is $100k cash.
+- **Caveats:**
+  - The 25 names were picked by today's size. Survivorship flatters short vol, so the real result is, if anything, worse.
+  - The replays solved IV with today's T-bill rate. That is close to the 2025–26 rate.
+
 ## What still limits all of this
 
 - **No per-name option history**, until the capture accumulates or history

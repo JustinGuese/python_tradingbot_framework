@@ -385,6 +385,10 @@ bots:
 # once option_quotes has months). docs/backtests/option-round3-2026-09.md.
 - name: option_crossvolbot
   schedule: "50 15 * * 1-5" # condors on the 50 captured names furthest above their HAR forecast, up to 5
+  # Paused 2026-10-01. Replayed on real DoltHub chains for 25 names, 2025-01 to 2026-09, at
+  # bid/ask on listed expiries: alpha -10%/yr, t -3.56 (H1 -2.27, H2 -2.81), 34 trades.
+  # The 8-point gap variant is negative too (t -2.76). Never traded live; the book is flat cash.
+  suspend: true
 - name: option_mispricingscanbot
   schedule: "0 16 * * 1-5" # z-scored IV vs Yang-Zhang forecast, both directions, vega + crash-stress caps
 - name: option_dispersionbot
