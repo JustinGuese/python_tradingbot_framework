@@ -209,10 +209,11 @@ postgresql:
 #   "0 17 * * 2"        - Weekly on Tuesday at 5:00 PM
 #   "0 */4 * * 1-5"     - Every 4 hours, Monday-Friday
 #   "30 17 * * 1-5"     - Daily at 5:30 PM, Monday-Friday
-# Feeder CronJob for aihedgefundbot (templates/cronjob-ai-hedge-fund.yaml). It
-# makes paid LLM calls, so it is paused together with that bot.
+# Feeder CronJob for aihedgefundbot (templates/cronjob-ai-hedge-fund.yaml). Enabled
+# 2026-10-01 now that its LLM calls go through df-ai-router (free tiers first); the
+# bot itself stays paused, so this only writes decisions.
 aiHedgeFund:
-  suspend: true
+  suspend: false
 
 bots:
 - name: eurusdtreebot

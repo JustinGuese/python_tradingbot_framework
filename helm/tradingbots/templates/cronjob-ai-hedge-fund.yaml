@@ -34,7 +34,7 @@ spec:
             - "AAPL,MSFT,NVDA,AAPL,GOOGL,MSFT,NVDA,TSLA"
             - "--analysts-all"
             - "--model"
-            - "openrouter:free"
+            - "auto"
             resources:
               {{- toYaml $.Values.resources | nindent 14 }}
             env:
@@ -43,10 +43,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secretName }}
                   key: POSTGRES_URI_AI_HEDGE_FUND
-            - name: OPENROUTER_API_KEY
+            # LLM calls go through the in-house df-ai-router (OpenAI-compatible).
+            - name: OPENAI_API_BASE
+              value: "http://df-ai-router-service.df-ai-router.svc.cluster.local:8000/v1"
+            - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secretName }}
-                  key: OPENROUTER_API_KEY
+                  name: df-ai-router-api-key
+                  key: ROUTER_API_KEY
           restartPolicy: OnFailure
 
