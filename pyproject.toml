@@ -14,10 +14,7 @@ dependencies = [
     "fear-and-greed>=0.4",
     "ipython>=9.4.0",
     "jinja2>=3.1.6",
-    # numpy 2.4 raised its wheel baseline to x86-64-v2 (SSE4.2). The k3s node is a
-    # KVM guest exposing only x86-64-v1, so >=2.4 crashes at import with
-    # "NumPy was built with baseline optimizations: (X86_V2)". Keep on the 2.3.x line.
-    "numpy<2.4",
+    "numpy",
     "pandas>=2.3.1",
     "plotly>=5.24.0",
     "psycopg2-binary>=2.9.10",
@@ -43,8 +40,7 @@ dependencies = [
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
     "ibind[oauth]>=0.1.23",
-    # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account;
-    # pulls no numpy, so the numpy<2.4 pin above is unaffected.
+    # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account.
     "hyperliquid-python-sdk>=0.24.0",
     "exchange-calendars>=4.5",
 ]
