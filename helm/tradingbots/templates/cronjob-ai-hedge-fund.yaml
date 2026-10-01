@@ -34,7 +34,7 @@ spec:
             - "AAPL,MSFT,NVDA,AAPL,GOOGL,MSFT,NVDA,TSLA"
             - "--analysts-all"
             - "--model"
-            - "deepseek/deepseek-v3.2"
+            - "openrouter:free"
             resources:
               {{- toYaml $.Values.resources | nindent 14 }}
             env:
