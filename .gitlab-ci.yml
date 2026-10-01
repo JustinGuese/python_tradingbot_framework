@@ -1,15 +1,28 @@
+# Test, build on the node's Docker, deploy the Helm chart -- see datafortress/gitlab-df-template.
+#
+# Every bot is a CronJob on $CI_REGISTRY_IMAGE:main (no Deployment runs it), so
+# CRONJOB_ONLY is "true": the next CronJob run pulls the fresh :main
+# (pullPolicy: Always). IMAGE is the template default, :main on the default
+# branch, and MUST match helm's image.tag below -- deploying any tag nothing
+# publishes sends the whole fleet to ImagePullBackOff ("manifest unknown"),
+# which is what happened between 2026-08-18 and 2026-08-21.
+#
+# Only main deploys (the template's deploy rule). Without that a refactor branch
+# would deploy itself, which makes it impossible to land a multi-commit change
+# (e.g. an import rewrite and its matching CronJob invocation) as one atomic
+# production cutover.
+
+include:
+  - project: datafortress/gitlab-df-template
+    file: [templates/build.yml, templates/deploy-helm.yml]
+
 variables:
-  IMAGE: $CI_REGISTRY/$CI_PROJECT_PATH:main
-  DOCKER_TLS_CERTDIR: "/certs"
-
-default:
-  services:
-  - docker:25.0.5-dind
-
-stages:
-- test
-- build
-- deploy
+  NAMESPACE: tradingbots-2025
+  RELEASE: tradingbots
+  HELM_CHART: ./helm/tradingbots
+  CRONJOB_ONLY: "true"
+  # Deploys trading bots and PostgreSQL. image.tag is the default branch's slug.
+  HELM_ARGS: --create-namespace --set image.tag=main
 
 pytest:
   stage: test
@@ -36,43 +49,6 @@ pytest:
   - uv run ruff format --check .
   - uv run pytest tests/ -q
 
+# Build only after tests pass.
 build-docker:
-  stage: build
-  image: docker:25.0.5-git
-  needs:
-  - pytest
-  # tags:
-  #   - dfserver
-  script:
-  - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
-  - docker build --pull -t $IMAGE .
-  - docker push $IMAGE
-
-helm-kubectl-deploy:
-  stage: deploy
-  # Only main deploys. Without this a refactor branch would deploy itself, which
-  # makes it impossible to land a multi-commit change (e.g. an import rewrite and
-  # its matching CronJob invocation) as one atomic production cutover.
-  rules:
-  - if: $CI_COMMIT_BRANCH == "main"
-  tags:
-  - dfserver
-  image:
-    name: dtzar/helm-kubectl
-    entrypoint: [ '' ]
-  dependencies:
-  - build-docker
-  script:
-  # Deploy trading bots and PostgreSQL using Helm, pinned to the tag build-docker
-  # just pushed. This MUST match $IMAGE above: build-docker only ever pushes
-  # :main, so deploying :latest pins every CronJob to a tag nothing publishes and
-  # the whole fleet goes ImagePullBackOff ("manifest unknown") until the next
-  # deploy. That is exactly what happened between 2026-08-18 and 2026-08-21.
-  - |
-    helm upgrade --install tradingbots \
-      ./helm/tradingbots \
-      --create-namespace \
-      --namespace tradingbots-2025 \
-      --set image.tag=main
-
-  environment: production
+  needs: [pytest]
