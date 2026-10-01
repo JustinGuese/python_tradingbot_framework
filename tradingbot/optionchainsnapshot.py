@@ -37,14 +37,22 @@ historical chains).
 import argparse
 import logging
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+
+import pandas as pd
 
 from tradingbot.utils import market_calendar
 from tradingbot.utils.config import setup_logging
 from tradingbot.utils.db import init_db
 from tradingbot.utils.option_capture import capture_universe
 from tradingbot.utils.universes import OPTION_CAPTURE_UNIVERSE
-from tradingbot.utils.vol_surface import captured_dates, snapshot_implied_correlation, snapshot_vol_surface
+from tradingbot.utils.vol_surface import (
+    CLOSE_HISTORY_YEARS,
+    captured_dates,
+    download_closes,
+    snapshot_implied_correlation,
+    snapshot_vol_surface,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,26 +74,49 @@ def capture_due(now: datetime) -> tuple[bool, str]:
     return True, f"{left:.0f} min to the close"
 
 
-def derive(day=None) -> bool:
+def derive(day=None, closes=None, r=None) -> bool:
     """vol_surface + implied correlation + mispricing scan for one day. False on failure."""
     from tradingbot.utils.mispricing_scan import snapshot_scan
 
     try:
-        surface = snapshot_vol_surface(day)
+        surface = snapshot_vol_surface(day, closes=closes, r=r)
         if not surface["written"]:
             logger.error("vol surface wrote nothing for %s", day or "today")
             return False
         snapshot_implied_correlation(day)
-        snapshot_scan(day)
+        snapshot_scan(day, r=r)
     except Exception:
         logger.exception("deriving the vol surface for %s failed", day or "today")
         return False
     return True
 
 
-def backfill() -> int:
-    days = captured_dates()
-    failed = [d for d in days if not derive(d)]
+def rate_on(irx: pd.Series, day: date) -> float | None:
+    """^IRX as a decimal on `day` (the last print on or before it); None if there is none."""
+    known = irx[irx.index.date <= day].dropna()
+    return float(known.iloc[-1]) / 100.0 if len(known) else None
+
+
+def backfill(since: date | None = None) -> int:
+    """
+    Rebuild the derived tables for every captured date from `since`, oldest
+    first: each day's scan z-scores read the vrp history the days before it
+    wrote. Closes and ^IRX are downloaded once and cut at each day, so no day
+    sees later prices or today's rate.
+    """
+    days = [d for d in captured_dates() if since is None or d >= since]
+    if not days:
+        logger.info("backfill: no captured dates")
+        return 0
+    start = (pd.Timestamp(days[0]) - pd.DateOffset(years=CLOSE_HISTORY_YEARS)).date()
+    closes = download_closes(sorted(OPTION_CAPTURE_UNIVERSE), start)
+    irx = download_closes(["^IRX"], start).get("^IRX", pd.Series(dtype=float))
+    failed = []
+    for i, day in enumerate(days):
+        if not derive(day, closes=closes, r=rate_on(irx, day)):
+            failed.append(day)
+        if i % 20 == 0:
+            logger.info("backfill: %d/%d days done (%s), %d failed", i + 1, len(days), day, len(failed))
     logger.info("backfill: %d days, %d failed %s", len(days), len(failed), failed)
     return 1 if failed else 0
 
@@ -93,12 +124,13 @@ def backfill() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backfill", action="store_true", help="rebuild the derived tables for every captured date")
+    parser.add_argument("--since", type=date.fromisoformat, help="with --backfill: only dates from this one on")
     parser.add_argument("--force", action="store_true", help="capture now, whatever the time to the close")
     args = parser.parse_args(argv)
     setup_logging()
     init_db()
     if args.backfill:
-        return backfill()
+        return backfill(args.since)
     due, why = capture_due(datetime.now(UTC))
     if not due and not args.force:
         logger.info("option chain snapshot: skipped, %s", why)

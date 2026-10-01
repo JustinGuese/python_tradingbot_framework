@@ -339,15 +339,34 @@ def load_day_quotes(day: date, underlyings: Iterable[str] | None = None) -> dict
     return {u: g.reset_index(drop=True) for u, g in df.groupby("underlying")}
 
 
-def _closes(symbols: list[str]) -> dict[str, pd.Series]:
-    """3 years of daily closes per symbol, one batched yfinance download."""
+CLOSE_HISTORY_YEARS = 3  # what the live capture downloads for the fair-vol fit
+
+
+def download_closes(symbols: list[str], start: date | None = None) -> dict[str, pd.Series]:
+    """Daily closes per symbol, one batched yfinance download: the last 3 years, or from `start`."""
     import yfinance as yf
 
-    data = yf.download(symbols, period="3y", auto_adjust=True, progress=False, group_by="column")
+    when = {"start": str(start)} if start else {"period": f"{CLOSE_HISTORY_YEARS}y"}
+    data = yf.download(symbols, **when, auto_adjust=True, progress=False, group_by="column")
     close = data.get("Close", data)
     if isinstance(close, pd.Series):
         close = close.to_frame(symbols[0])
     return {s: close[s].dropna() for s in symbols if s in close}
+
+
+def close_window(close: pd.Series | None, day: date) -> pd.Series | None:
+    """
+    The closes a capture on `day` would have seen: the CLOSE_HISTORY_YEARS up to
+    and including `day`. A backfilled day must not fit its fair vol on later
+    prices (until 2026-10-01 the backfill fitted every past day on the 3 years
+    up to the run date). Undated series (tests) pass through unchanged.
+    """
+    if close is None or not isinstance(close.index, pd.DatetimeIndex):
+        return close
+    idx = close.index.tz_localize(None) if close.index.tz is not None else close.index
+    end = pd.Timestamp(day)
+    begin = end - pd.DateOffset(years=CLOSE_HISTORY_YEARS)
+    return close[(idx.normalize() <= end) & (idx > begin)]
 
 
 def fair_vol_from_close(close: pd.Series | None) -> float | None:
@@ -379,7 +398,8 @@ def snapshot_vol_surface(
     Idempotent (select-then-write, like fundamentals.snapshot_fundamentals).
     `closes` / `r` / `dividend_yield` are injectable for tests and backfills;
     by default closes come from one batched yfinance download, r from ^IRX and
-    q from options.dividend_yield.
+    q from options.dividend_yield. Closes are cut at `snapshot_date` either way
+    (close_window), so injecting the whole history is safe.
 
     Returns {"written": [...], "failed": [...]}.
     """
@@ -394,15 +414,18 @@ def snapshot_vol_surface(
     r = options.risk_free_rate() if r is None else r
     q_of = dividend_yield or options.dividend_yield
     if closes is None:
+        past = day < datetime.now(UTC).date() - timedelta(days=7)
+        start = (pd.Timestamp(day) - pd.DateOffset(years=CLOSE_HISTORY_YEARS)).date() if past else None
         try:
-            closes = _closes(sorted(quotes))
+            closes = download_closes(sorted(quotes), start)
         except Exception as exc:
             logger.warning("vol surface: close history unavailable (%s); fair vol left empty", exc)
             closes = {}
     for underlying, frame in quotes.items():
         try:
             spot = float(pd.to_numeric(frame["underlying_price"], errors="coerce").dropna().iloc[-1])
-            row = summarize(frame, spot, day, r, q_of(underlying), fair_vol_from_close(closes.get(underlying)))
+            fair = fair_vol_from_close(close_window(closes.get(underlying), day))
+            row = summarize(frame, spot, day, r, q_of(underlying), fair)
             _upsert(VolSurfaceSnapshot, {"underlying": underlying, "snapshot_date": day}, row)
             result["written"].append(underlying)
         except Exception as exc:

@@ -149,6 +149,35 @@ def test_snapshot_vol_surface_writes_one_idempotent_row(sqlite_db, db_session):
     assert vs.captured_dates() == [TODAY]
 
 
+def test_a_backfilled_day_fits_fair_vol_only_on_closes_up_to_it(sqlite_db, db_session):
+    """Handing the backfill the whole history must give the same row as the history the day had."""
+    _store_quotes(db_session, chain(skew=0.2), "AAPL", TODAY)
+    idx = pd.bdate_range(end=TODAY + timedelta(days=200), periods=1200)
+    rng = np.random.default_rng(2)
+    rets = np.where(idx.date <= TODAY, rng.normal(0, 0.01, len(idx)), rng.normal(0, 0.05, len(idx)))
+    close = pd.Series(100 * np.exp(np.cumsum(rets)), index=idx)  # calm until TODAY, wild after
+
+    def fair(closes):
+        vs.snapshot_vol_surface(TODAY, closes={"AAPL": closes}, r=R, dividend_yield=lambda u: 0.0)
+        return db_session.query(VolSurfaceSnapshot).one().fair_vol_30
+
+    with_future, as_of = fair(close), fair(close[close.index.date <= TODAY])
+    assert with_future == pytest.approx(as_of)
+    assert as_of == pytest.approx(0.16, abs=0.04)  # the calm regime, not the later 5%/day one
+    window = vs.close_window(close, TODAY)
+    assert window.index[-1].date() == TODAY
+    assert window.index[0] > pd.Timestamp(TODAY) - pd.DateOffset(years=vs.CLOSE_HISTORY_YEARS)
+
+
+def test_backfill_rate_is_the_one_known_on_the_day():
+    from tradingbot.optionchainsnapshot import rate_on
+
+    irx = pd.Series([5.0, 4.0, 3.0], index=pd.to_datetime(["2025-01-02", "2025-06-02", "2026-09-01"]))
+    assert rate_on(irx, date(2025, 3, 1)) == pytest.approx(0.05)
+    assert rate_on(irx, date(2026, 9, 1)) == pytest.approx(0.03)
+    assert rate_on(irx, date(2024, 12, 31)) is None
+
+
 def test_snapshot_implied_correlation(sqlite_db, db_session):
     names = [f"N{i}" for i in range(12)]
     for u, iv in [("SPY", 0.15), *[(n, 0.30) for n in names]]:
