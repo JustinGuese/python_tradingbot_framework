@@ -76,11 +76,35 @@ class Collective2Broker(LiveBroker):
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _money_required(obj: dict, *keys: str) -> float:
+        """First present key's value. Raises if NONE of them exist.
+
+        `_money` returns 0.0 for a key the payload does not carry, and for cash
+        that is indistinguishable from a genuinely empty account — so a renamed
+        field reads as "no money" instead of as an error. `get_cash` asked for
+        `ModelAccountCash`, which GetStrategyDetails does not return (the keys
+        are `Cash` and `BuyingPower`), so cash was $0.00 on every call. The
+        copier's buy clamp then logged "Available cash is $0.00; skipping all
+        buys" and skipped them, every run: the strategy liquidated into the
+        2026-09-22 blend change, the sells filled, and from then on nothing
+        could ever be bought back. It sat at zero positions for 17 days with
+        $60k of buying power, and the only symptom was one ERROR line in a job
+        that still exited 0. Raising makes a future rename loud instead.
+        """
+        for key in keys:
+            if obj.get(key) is not None:
+                return Collective2Broker._money(obj, key)
+        raise ValueError(f"Collective2 GetStrategyDetails has none of {keys}; got keys: {sorted(obj)}")
+
     def get_cash(self) -> float:
-        return self._money(self._strategy_details(), "ModelAccountCash")
+        return self._money_required(self._strategy_details(), "Cash", "BuyingPower")
 
     def get_total_equity(self) -> float:
-        return self._money(self._strategy_details(), "ModelAccountValue")
+        # Required for the same reason as cash, but the failure is worse: a 0
+        # equity sizes every target to 0, which reads as "liquidate the book".
+        # No fallback to the payload's `Equity`, which is 0 on a funded account.
+        return self._money_required(self._strategy_details(), "ModelAccountValue")
 
     def get_positions(self) -> dict[str, float]:
         """Returns broker_symbol -> quantity.

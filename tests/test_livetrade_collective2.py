@@ -222,3 +222,68 @@ def test_c2_is_tradeable_rejects_venues_c2_cannot_fill(broker, symbol):
     """The default mapper passes these through unchanged, so nothing else stops
     a nightly order C2 rejects."""
     assert broker.is_tradeable(symbol) is False
+
+
+def _details(**overrides):
+    """GetStrategyDetails, in the shape C2 API v4 actually returns (verified 2026-10-10)."""
+    payload = {
+        "StrategyName": "AdaptiveMeanReversionBot",
+        "StrategyId": 155809898,
+        "Cash": 60152.1,
+        "BuyingPower": 60152.1,
+        "ModelAccountValue": 60121.0,
+        "StartingCash": 50000.0,
+        "Equity": 0,
+        "MarginUsed": 0,
+    }
+    payload.update(overrides)
+    return {"Results": [payload]}
+
+
+def test_c2_get_cash_reads_the_cash_field(broker):
+    """
+    Cash comes from "Cash", not "ModelAccountCash" — which C2 does not return.
+
+    The missing key read as $0.00 (via _money's `or 0`), so the copier's buy
+    clamp logged "Available cash is $0.00; skipping all buys" and skipped them
+    on every run. The live strategy liquidated into the 2026-09-22 blend change
+    and then sat at zero positions for 17 days holding $60k of buying power,
+    while the job still exited 0.
+    """
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response(_details())
+        assert broker.get_cash() == pytest.approx(60152.1)
+
+
+def test_c2_get_cash_falls_back_to_buying_power(broker):
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response(_details(Cash=None))
+        assert broker.get_cash() == pytest.approx(60152.1)
+
+
+def test_c2_get_cash_raises_when_no_cash_field_exists(broker):
+    """A rename must be loud. Returning 0.0 is what made the outage invisible."""
+    details = _details()
+    del details["Results"][0]["Cash"]
+    del details["Results"][0]["BuyingPower"]
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response(details)
+        with pytest.raises(ValueError, match="none of"):
+            broker.get_cash()
+
+
+def test_c2_total_equity_ignores_the_zero_equity_field(broker):
+    """C2's `Equity` is 0 on a funded account; ModelAccountValue is the real one."""
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response(_details())
+        assert broker.get_total_equity() == pytest.approx(60121.0)
+
+
+def test_c2_total_equity_raises_rather_than_reporting_zero(broker):
+    """0 equity sizes every target to 0, which the copier reads as 'liquidate'."""
+    details = _details()
+    del details["Results"][0]["ModelAccountValue"]
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response(details)
+        with pytest.raises(ValueError, match="none of"):
+            broker.get_total_equity()
