@@ -231,6 +231,19 @@ bots:
 - name: xauzenbot
   schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
 
+- name: vwappullbackbot
+  # QQQ intraday, long-only: first pullback into VWAP after the opening range breaks
+  # up; stop below the recent range, 2R target, flat before the close. Paper only.
+  # UTC window covers both EST (14:30 open) and EDT (13:30 open); the bot no-ops
+  # outside the session. See docs/backtests/intraday-orb-vwap-2026-11.md.
+  schedule: "*/5 13-20 * * 1-5" # Every 5 minutes, 13:00-20:55 UTC, Mon-Fri
+
+- name: openrangebreakoutbot
+  # QQQ intraday, long-only: first close above the opening range in the first 90
+  # minutes, 0.35R target, range-low stop, flat when the window ends. Paper only.
+  # See docs/backtests/intraday-orb-vwap-2026-11.md.
+  schedule: "*/5 13-20 * * 1-5" # Every 5 minutes, 13:00-20:55 UTC, Mon-Fri
+
 - name: xauaisyntheticmetalbot
   schedule: "*/5 * * * 1-5" # Every 5 minutes, Mon-Fri
 
