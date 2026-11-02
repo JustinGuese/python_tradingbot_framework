@@ -576,21 +576,23 @@ liveTrade:
     # apiKeySecretKey: "COLLECTIVE2_API_KEY_XAUZERIFINE" # optional: only if a different C2 account
     # portfolioFraction: "0.5" # optional: override the shared liveTrade.portfolioFraction
 
-  # Interactive Brokers — IBKR Web API (Client Portal) via headless OAuth 1.0a.
-  # Requires in tradingbot-secrets: IB_ACCOUNT_ID, IBIND_OAUTH1A_CONSUMER_KEY,
-  # IBIND_OAUTH1A_ACCESS_TOKEN, IBIND_OAUTH1A_ACCESS_TOKEN_SECRET, IBIND_OAUTH1A_DH_PRIME.
-  # Requires a separate secret (oauthKeysSecret) holding private_encryption.pem and
-  # private_signature.pem, mounted at /etc/ibkr. No IB Gateway / NetworkPolicy needed.
-  #
-  # DISABLED: none of the IBIND_OAUTH1A_* keys nor the ib-oauth-keys secret exist yet.
-  # IBKR self-service OAuth 1.0a requires registering a consumer key + your RSA public
-  # keys with IBKR and waiting for approval. Flip to true only once both secrets exist,
-  # and do one run with liveTrade.dryRun="true" first.
+  # Interactive Brokers — paper account via the IB Gateway deployed in the
+  # `interactivebrokersgateway` namespace (gnzsnz/ib-gateway, TWS socket API).
+  # The gateway holds the IBKR login; the job needs no credentials, only the
+  # `ib-gateway-client=true` pod label the template adds (the gateway's
+  # NetworkPolicy admits nothing else). Service port 4002 -> pod 4004.
+  # Local testing: kubectl -n interactivebrokersgateway port-forward svc/ib-gateway-service 4002:4002
   interactiveBrokers:
     enabled: true
     schedule: "20 21 * * 1-5" # 9:20 PM UTC
-    oauthKeysSecret: "ib-oauth-keys" # secret with private_encryption.pem & private_signature.pem
-    # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
+    accountId: "DU6347896" # paper account (DU-prefixed => recorded as sandbox)
+    # gatewayHost: ib-gateway-service.interactivebrokersgateway
+    # gatewayPort: "4002"
+    # clientId: "17"
+    # The validated C2 blend, not the stale shared default (which includes the paused
+    # SynthesizedHyperConvexityBot, 3x TQQQ/SQQQ).
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+    portfolioFraction: "0.5" # trade with half of the paper account's equity
 
   # eToro — requires ETORO_API_KEY and ETORO_USER_KEY in tradingbot-secrets.
   etoro:

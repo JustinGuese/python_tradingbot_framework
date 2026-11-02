@@ -4,7 +4,7 @@ Shared pieces of the livetrade CronJobs.
 The six livetrade templates were ~604 lines of which roughly 400 were identical:
 the same CronJob skeleton, the same Postgres/secret env plumbing, and the same
 five LIVETRADE_* config vars. Only the credential block genuinely differs per
-broker (and IBKR additionally mounts OAuth key files), so that is all each
+broker , so that is all each
 template still spells out.
 
 Deliberately three helpers rather than one: IBKR needs to inject volumeMounts
@@ -17,7 +17,7 @@ point.
 
 {{/*
 CronJob skeleton, ending with `env:` so the caller appends env entries at 12 spaces.
-Args: root (the $ context), name, schedule, module.
+Args: root (the $ context), name, schedule, module, podLabels (optional map).
 */}}
 {{- define "tradingbots.livetrade.header" -}}
 {{- $ := .root -}}
@@ -49,6 +49,11 @@ spec:
       activeDeadlineSeconds: {{ $.Values.cronjob.activeDeadlineSeconds }}
       ttlSecondsAfterFinished: {{ $.Values.cronjob.ttlSecondsAfterFinished }}
       template:
+{{- if .podLabels }}
+        metadata:
+          labels:
+            {{- toYaml .podLabels | nindent 12 }}
+{{- end }}
         spec:
           imagePullSecrets:
           {{- range $.Values.imagePullSecrets }}

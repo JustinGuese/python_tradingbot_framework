@@ -417,7 +417,7 @@ See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup ins
 > [!WARNING]
 > **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (IBKR Web API via headless OAuth 1.0a / `ibind`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (IB Gateway socket API via `ib_async`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
 
 ### 1. Configure Environment
 
@@ -428,17 +428,11 @@ Add these to your `.env` or Kubernetes secrets:
 COLLECTIVE2_API_KEY=your_api_key
 COLLECTIVE2_SYSTEM_ID=12345678
 
-# Interactive Brokers (IBKR Web API — headless OAuth 1.0a, no gateway)
+# Interactive Brokers (IB Gateway socket API; the gateway holds the IBKR login)
 IB_ACCOUNT_ID=DU1234567   # paper accounts start with DU; live with U
-IBIND_USE_OAUTH=True
-IBIND_OAUTH1A_CONSUMER_KEY=YOURKEY
-IBIND_OAUTH1A_ACCESS_TOKEN=your_access_token
-IBIND_OAUTH1A_ACCESS_TOKEN_SECRET=your_access_token_secret
-IBIND_OAUTH1A_DH_PRIME=hex_dh_prime_from_dhparam_pem
-IBIND_OAUTH1A_ENCRYPTION_KEY_FP=/etc/ibkr/private_encryption.pem
-IBIND_OAUTH1A_SIGNATURE_KEY_FP=/etc/ibkr/private_signature.pem
-
-#   ^ see "Generating the IBKR OAuth credentials" below for where these come from
+IB_GATEWAY_HOST=127.0.0.1 # in-cluster: ib-gateway-service.interactivebrokersgateway
+IB_GATEWAY_PORT=4002
+IB_CLIENT_ID=17           # keep stable: cancel_open_orders only sees this clientId's orders
 
 # eToro (Public REST API)
 ETORO_API_KEY=your_public_key
@@ -456,126 +450,25 @@ LIVETRADE_BOT_WEIGHTS='{"adaptivemeanreversionbot": 1.0}'
 LIVETRADE_DRY_RUN=false
 ```
 
-### Generating the IBKR OAuth Credentials
+### Interactive Brokers gateway
 
-None of the `IBIND_OAUTH1A_*` values are handed to you in one place — you generate the key
-material locally, register it with IBKR, and IBKR returns two of the five. Requires a
-**funded IBKR Pro** account (Lite won't work); paper rides on the live account's entitlement.
-
-**1. Generate the keys and DH params locally:**
-
-```bash
-mkdir -p ~/ibkr-oauth-paper && cd ~/ibkr-oauth-paper
-openssl genrsa -out private_signature.pem 2048
-openssl rsa -in private_signature.pem -pubout -out public_signature.pem
-openssl genrsa -out private_encryption.pem 2048
-openssl rsa -in private_encryption.pem -pubout -out public_encryption.pem
-openssl dhparam -out dhparam.pem 2048   # slow, a minute or two
-```
-
-Use a **separate keypair for paper and live** — do not reuse one across both.
-
-**2. Register at the OAuth self-service portal.**
-
-It is *not* a menu item inside Client Portal. It's a separate app behind its own SSO entry
-point — open it in a browser already logged in as the username you want the bot to trade as
-(your **paper** username for paper):
-
-```
-https://ndcdyn.interactivebrokers.com/sso/Login?action=OAUTH&RL=1&ip2loc=US
-```
-
-The `action=OAUTH` parameter is what routes you there instead of the normal portal. Use the
-US domain — IBKR support has reported other entry points misbehaving. If it bounces you back
-to Client Portal, the username isn't OAuth-enabled: raise a ticket with API Support.
-
-On that page:
-
-- **Consumer Key** — *you invent this.* It is not issued by IBKR. Exactly **9 characters**,
-  alphanumeric (e.g. `TILEDOM01`). Record it verbatim: it becomes
-  `IBIND_OAUTH1A_CONSUMER_KEY`, and a mismatch later fails auth with no useful error.
-- Upload `public_signature.pem`, `public_encryption.pem`, and `dhparam.pem`.
-- Generate the **access token** and **access token secret** → `IBIND_OAUTH1A_ACCESS_TOKEN`
-  and `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET`.
-
-**3. Extract the DH prime** (a hex string derived from your `dhparam.pem`; the portal never
-shows it) → `IBIND_OAUTH1A_DH_PRIME`:
-
-```bash
-python3 -c "
-import subprocess, re
-out = subprocess.run(['openssl','dhparam','-in','dhparam.pem','-text'],
-                     capture_output=True, text=True).stdout
-m = re.search(r'(?:prime|P):\s*((?:\s*[0-9a-fA-F:]+\s*)+)', out)
-print(re.sub(r'[\s:]', '', m.group(1)) if m else 'No prime found')
-"
-```
-
-**4. Keep the two private keys** (`private_encryption.pem`, `private_signature.pem`) on disk
-and point `IBIND_OAUTH1A_*_KEY_FP` at them. In Kubernetes they are mounted at `/etc/ibkr`
-from the `ib-oauth-keys` secret.
-
-> **Activation is not always instant.** There's no formal approval process for first-party
-> self-service (the 8–14 week compliance review applies to *third-party* OAuth vendors), but
-> consumer keys have been reported taking 24 hours to ~2 weeks to go live, possibly tied to
-> IBKR's weekend server restarts. Register early; a 401 on day one isn't necessarily a
-> misconfiguration.
-
-### Loading the IBKR Credentials Into Kubernetes
-
-All five string values plus the two private PEMs go into a single `ib-oauth-keys` secret —
-that is what the CronJob reads its env from and mounts at `/etc/ibkr`.
-
-**Do not try to build it with one `kubectl create secret` call.** `--from-env-file` cannot be
-combined with `--from-file`, so a secret mixing string values and file content is impossible
-in a single invocation:
-
-```
-error: from-env-file cannot be combined with from-file or from-literal
-```
-
-Use the helper instead, which assembles the manifest and pipes it to `apply`:
-
-```bash
-./scripts/create_ib_oauth_secret.sh [key-dir]     # default: ~/ibkr-oauth-paper
-```
-
-`key-dir` must hold `oauth.env`, `private_encryption.pem`, and `private_signature.pem`.
-Write `oauth.env` with an **editor, not the shell** — `--from-literal` and `export` both leak
-values into shell history and into `ps` output while the command runs:
-
-```
-IBIND_OAUTH1A_CONSUMER_KEY=DFTRADEBO
-IBIND_OAUTH1A_ACCESS_TOKEN=...
-IBIND_OAUTH1A_ACCESS_TOKEN_SECRET=...
-IBIND_OAUTH1A_DH_PRIME=...
-IB_ACCOUNT_ID=DU1234567
-```
-
-The script refuses to apply anything if a value is empty or the consumer key isn't exactly
-9 characters, strips stray whitespace (a trailing newline inside a token fails IBKR auth with
-an unhelpful error), never writes plaintext to disk, and prints only key names and byte
-lengths so no value reaches your terminal or scrollback. Re-running it updates the secret in
-place rather than erroring with "already exists".
-
-Because it exits non-zero on failure, gate the cleanup on success — otherwise a failed apply
-still destroys the tokens you just pasted:
-
-```bash
-./scripts/create_ib_oauth_secret.sh && shred -u ~/ibkr-oauth-paper/oauth.env
-```
-
-Override the target with `KUBE_CONTEXT`, `NAMESPACE`, or `SECRET_NAME` env vars. The default
-context is `luxvps` — the cluster's default context is a *different* cluster that will simply
-hang.
-
-Then enable the CronJob:
+The CronJob talks to the IB Gateway deployed in the `interactivebrokersgateway` namespace
+(`gnzsnz/ib-gateway`, paper). The gateway owns the IBKR login, 2FA and daily restart, so the
+job needs no credentials. Its NetworkPolicy only admits pods labelled `ib-gateway-client=true`
+(the Helm template adds the label); Service port 4002 maps to pod port 4004.
 
 ```yaml
 liveTrade:
-  dryRun: "true"                 # first run only
   interactiveBrokers:
     enabled: true
+    accountId: "DU6347896"
+```
+
+To test locally, port-forward the gateway and run the module directly:
+
+```bash
+kubectl -n interactivebrokersgateway port-forward svc/ib-gateway-service 4002:4002
+IB_GATEWAY_PORT=4002 uv run python -m tradingbot.livetrade.interactive_brokers
 ```
 
 Full runbook: [docs/guides/live-trading.md](docs/guides/live-trading.md).
@@ -590,7 +483,7 @@ before running the copier:
 # Collective2
 uv run python -m tradingbot.livetrade.collective2
 
-# Interactive Brokers (IBKR Web API; reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* from .env)
+# Interactive Brokers (IB Gateway socket; reads IB_GATEWAY_HOST/PORT + IB_ACCOUNT_ID from .env)
 uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro (reads ETORO_API_KEY, ETORO_USER_KEY, ETORO_DEMO from .env)

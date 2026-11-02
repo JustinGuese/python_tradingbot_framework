@@ -39,8 +39,8 @@ credentials and account IDs before running the copier:
 # Collective2 — reads COLLECTIVE2_API_KEY + COLLECTIVE2_SYSTEM_ID
 uv run python -m tradingbot.livetrade.collective2
 
-# Interactive Brokers — IBKR Web API via headless OAuth 1.0a.
-# Reads IB_ACCOUNT_ID + IBIND_OAUTH1A_* credentials; prints an account summary.
+# Interactive Brokers — IB Gateway socket API (port-forward the gateway first).
+# Reads IB_GATEWAY_HOST/PORT + IB_ACCOUNT_ID; prints an account summary.
 uv run python -m tradingbot.livetrade.interactive_brokers
 
 # eToro — reads ETORO_API_KEY + ETORO_USER_KEY + ETORO_DEMO
@@ -94,13 +94,9 @@ If you have $100,000 in your live account and configure:
 | `COLLECTIVE2_API_KEY` | Your C2 API v4 key. Get it from the [C2 API Dashboard](https://collective2.com/account-management/apiv4/dashboard/0). |
 | `COLLECTIVE2_SYSTEM_ID` | The ID of your C2 strategy. |
 | `IB_ACCOUNT_ID` | Your Interactive Brokers account ID (e.g., `DU1234567` for paper, `U1234567` for live). |
-| `IBIND_USE_OAUTH` | Enable headless OAuth 1.0a for the IBKR Web API. Set to `True`. |
-| `IBIND_OAUTH1A_CONSUMER_KEY` | 9-char consumer key registered in the IBKR self-service OAuth portal. |
-| `IBIND_OAUTH1A_ACCESS_TOKEN` | OAuth access token generated in the IBKR portal. |
-| `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET` | OAuth access token secret generated in the IBKR portal. |
-| `IBIND_OAUTH1A_DH_PRIME` | Diffie-Hellman prime (hex string from `dhparam.pem`). |
-| `IBIND_OAUTH1A_ENCRYPTION_KEY_FP` | Path to the private encryption key file (`private_encryption.pem`). |
-| `IBIND_OAUTH1A_SIGNATURE_KEY_FP` | Path to the private signature key file (`private_signature.pem`). |
+| `IB_GATEWAY_HOST` | IB Gateway host (in-cluster: `ib-gateway-service.interactivebrokersgateway`). |
+| `IB_GATEWAY_PORT` | IB Gateway API port (Service port `4002`). |
+| `IB_CLIENT_ID` | Stable API clientId (default `17`). |
 | `ETORO_API_KEY` | Your eToro Public API Key from the [eToro API Portal](https://api-portal.etoro.com/). |
 | `ETORO_USER_KEY` | Your eToro User Key (generated in API Portal settings). |
 | `ETORO_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
@@ -193,124 +189,49 @@ tickers under [Ticker Mapping (Discovery)](#-ticker-mapping-discovery).
 
 ## 🏦 Interactive Brokers (IBKR)
 
-The framework connects to Interactive Brokers through the **IBKR Web API** (Client Portal REST) using the [`ibind`](https://github.com/Voyz/ibind) library with **fully headless OAuth 1.0a** authentication. There is **no IB Gateway / TWS container** and no daily browser login — the live-session token is obtained programmatically and self-renews on a 24h cycle.
+The framework connects to Interactive Brokers through the **TWS socket API** ([`ib_async`](https://github.com/ib-api-reloaded/ib_async)) against an **IB Gateway** running in the cluster (`gnzsnz/ib-gateway`, namespace `interactivebrokersgateway`, paper trading). The gateway owns the IBKR login, 2FA and its daily restart; the copier only opens a socket session to it.
 
-### 1. One-time OAuth setup (in the IBKR self-service portal)
+### 1. Cluster wiring
 
-This is **first-party self-service** OAuth: you register against your own account and issue
-your own tokens. It replaces the **Client Portal Gateway** — the small Java program IBKR's
-"Getting Started → Retail" section points at. With OAuth 1.0a there is no gateway process
-to run, which is the whole reason for this integration: a CronJob cannot babysit a
-long-lived local Java daemon.
+- **Service:** `ib-gateway-service.interactivebrokersgateway:4002` (targets pod port 4004, the gateway's relay of its paper API port).
+- **NetworkPolicy:** `ibgateway-default-deny-ingress` plus `ibgateway-allow-clients`, which admits only pods labelled `ib-gateway-client=true`, on 4004/5900. The `livetrade-ib` pod template sets that label. Without it the connect hangs until `activeDeadlineSeconds`.
+- **Account:** `liveTrade.interactiveBrokers.accountId` in `values.yaml` (DU-prefixed = paper, recorded as sandbox). `connect()` fails loudly if the gateway does not manage that account.
 
-**Eligibility.** The live account must be fully open, **funded**, and of the **IBKR Pro**
-type (not Lite). Note that IBKR's own docs file OAuth 1.0a under "Web API Access for
-Organizations" and steer individuals toward the CP Gateway; in practice individual Pro
-accountholders do use the self-service portal, and IBKR API support has stated there is no
-technical limitation preventing it. If the portal refuses your login, that assumption is
-what broke — fall back to asking API support to enable OAuth on the username.
+### 2. Local testing
 
-**Activation lag.** There is no formal approval process here (unlike *third-party* OAuth,
-which carries an 8–14 week compliance review). But consumer keys are not always live
-immediately: reported activation delays run from 24 hours to about two weeks, possibly
-tied to IBKR's weekend server restarts. Register the key before you need it.
+```bash
+kubectl -n interactivebrokersgateway port-forward svc/ib-gateway-service 4002:4002
+# account summary
+IB_GATEWAY_HOST=127.0.0.1 IB_GATEWAY_PORT=4002 uv run python -m tradingbot.livetrade.interactive_brokers
+```
 
-**Paper accounts are supported.** Log into the portal with your **paper** credentials and
-follow the identical flow. Generate a *separate* keypair for paper — do not reuse the live
-account's keys.
+The port-forward bypasses the NetworkPolicy, so a working local test does not prove the in-cluster path; check the first CronJob run's logs.
 
-1. Generate the keys and DH params:
-
-   ```bash
-   mkdir -p ~/ibkr-oauth-paper && cd ~/ibkr-oauth-paper
-   openssl genrsa -out private_signature.pem 2048
-   openssl rsa -in private_signature.pem -outform PEM -pubout -out public_signature.pem
-   openssl genrsa -out private_encryption.pem 2048
-   openssl rsa -in private_encryption.pem -outform PEM -pubout -out public_encryption.pem
-   openssl dhparam -out dhparam.pem 2048   # slow, a minute or two
-   ```
-
-2. Open the [OAuth self-service portal](https://ndcdyn.interactivebrokers.com/sso/Login?action=OAUTH&RL=1&ip2loc=US)
-   and log in with the username you want the API to trade as (your paper username).
-   Register a **9-character consumer key** (you choose the string), then upload
-   `public_signature.pem`, `public_encryption.pem`, and `dhparam.pem`. Finally generate the
-   **access token** and **access token secret**.
-
-3. Extract the DH prime as a hex string:
-
-   ```bash
-   python3 -c "
-   import subprocess, re
-   out = subprocess.run(['openssl','dhparam','-in','dhparam.pem','-text'],
-                        capture_output=True, text=True).stdout
-   m = re.search(r'(?:prime|P):\s*((?:\s*[0-9a-fA-F:]+\s*)+)', out)
-   print(re.sub(r'[\s:]', '', m.group(1)) if m else 'No prime found')
-   "
-   ```
-
-4. Load them into the cluster — the two PEMs as a file-mounted secret, the rest as env keys:
-
-   ```bash
-   kubectl -n tradingbots-2025 create secret generic ib-oauth-keys \
-     --from-file=private_encryption.pem --from-file=private_signature.pem
-
-   kubectl -n tradingbots-2025 patch secret tradingbot-secrets --type=merge -p "$(cat <<JSON
-   {"stringData": {
-     "IBIND_OAUTH1A_CONSUMER_KEY": "<9-char key>",
-     "IBIND_OAUTH1A_ACCESS_TOKEN": "<token>",
-     "IBIND_OAUTH1A_ACCESS_TOKEN_SECRET": "<token secret>",
-     "IBIND_OAUTH1A_DH_PRIME": "<hex from step 3>",
-     "IB_ACCOUNT_ID": "<DU… paper account id>"
-   }}
-   JSON
-   )"
-   ```
-
-5. Smoke-test locally before enabling the CronJob (see the account-summary command above),
-   then set `liveTrade.interactiveBrokers.enabled: true` and do one run with
-   `liveTrade.dryRun: "true"`.
-
-### 2. Configuration
-Set these environment variables (see the reference table above for full descriptions):
+### 3. Configuration
 
 | Variable | Description | Default |
 | --- | --- | --- |
 | `IB_ACCOUNT_ID` | Your IB account ID (e.g., `DU1234567`). | **Required** |
-| `IBIND_USE_OAUTH` | Enable headless OAuth 1.0a. | `True` |
-| `IBIND_OAUTH1A_CONSUMER_KEY` | Consumer key from the portal. | **Required** |
-| `IBIND_OAUTH1A_ACCESS_TOKEN` | Access token from the portal. | **Required** |
-| `IBIND_OAUTH1A_ACCESS_TOKEN_SECRET` | Access token secret from the portal. | **Required** |
-| `IBIND_OAUTH1A_DH_PRIME` | DH prime (hex). | **Required** |
-| `IBIND_OAUTH1A_ENCRYPTION_KEY_FP` | Path to `private_encryption.pem`. | **Required** |
-| `IBIND_OAUTH1A_SIGNATURE_KEY_FP` | Path to `private_signature.pem`. | **Required** |
-| `LIVETRADE_DRY_RUN` | Paper-safety: defaults to `true`. | `true` |
+| `IB_GATEWAY_HOST` | Gateway host. | `ib-gateway-service.interactivebrokersgateway` |
+| `IB_GATEWAY_PORT` | Gateway API port. | `4002` |
+| `IB_CLIENT_ID` | API clientId; keep it stable. | `17` |
+| `LIVETRADE_DRY_RUN` | Skip order submission. | `false` in `values.yaml` |
 
 > [!IMPORTANT]
-> **Order Isolation**: The copier is idempotent. Before each sync it calls `cancel_open_orders()` to clear stale working orders from previous runs. Over the Web API this cancels the **account's** live orders — run the copier against a dedicated account (or accept that it manages that account's open orders) so it does not clear unrelated manual orders.
+> **Order Isolation**: The copier is idempotent. Before each sync it calls `cancel_open_orders()` to clear stale working orders from previous runs. This cancels only orders placed under the copier's own `IB_CLIENT_ID`, so manual orders and other API clients are left alone. Do not reuse that clientId for anything else.
 
 > [!NOTE]
-> **Scope**: order routing currently supports **US equities/ETFs** (conid resolved via `stock_conid_by_symbol`, which the live bots use). Forex/crypto/futures over the Web API is not yet implemented and raises `NotImplementedError`.
+> **Scope**: stocks and ETFs are routed via `reqContractDetails` (SMART/USD). Share counts are floored to whole shares, so fractional leftovers (e.g. 0.75 SOLS) cannot be sold through the API and are skipped with a warning.
 
 > [!WARNING]
-> **One brokerage session per username, across all IBKR platforms.** If you are logged into
-> TWS, IBKR Mobile, or Client Portal with the same username when the CronJob fires, the two
-> sessions compete and one gets displaced. Give the copier a **dedicated username** rather
-> than the one you log in with manually, or stay logged out around 21:20 UTC.
+> **One brokerage session per username.** Logging into TWS, IBKR Mobile or Client Portal with the gateway's username displaces the gateway session (`EXISTING_SESSION_DETECTED_ACTION=primary` makes the gateway take it back). Use a dedicated username for the gateway.
 
-> [!NOTE]
-> **No market data subscription is needed.** `_get_native_price()` returns `0.0` on purpose,
-> so the base class falls back to yfinance for pricing. The copier therefore never touches
-> `/iserver/marketdata/*` and consumes none of the account's 100 market data lines.
-> Rate limits worth knowing if this grows: 10 req/s globally, but `/iserver/orders` and
-> `/portfolio/accounts` are 1 req/5s each, and `/tickle` is 1 req/s. Exceeding them returns
-> 429 and can put the source IP in a 10-minute penalty box.
-
-### 3. Usage
+### 4. Usage
 ```bash
 uv run python -m tradingbot.livetrade_interactive_brokers
 ```
 
-### 4. Ticker Discovery for IB
+### 5. Ticker Discovery for IB
 ```bash
 uv run python -m tradingbot.livetrade.discover_symbols --broker ib
 ```
