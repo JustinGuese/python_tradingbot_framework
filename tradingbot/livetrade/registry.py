@@ -16,7 +16,7 @@ broker (true for eToro/IBKR, false for Collective2/Darwinex/Hyperliquid) and tha
 Hyperliquid deliberately runs at fraction 0.95, not 1.0.
 
 Adapter imports are deferred into each `build` function on purpose: a Hyperliquid
-CronJob should not pay for importing `ibind`, and an IBKR job should not import the
+CronJob should not pay for importing `ib_async`, and an IBKR job should not import the
 Hyperliquid SDK. Importing this module imports no broker SDK at all.
 """
 
@@ -90,8 +90,11 @@ def _build_interactive_brokers() -> LiveBroker:
     from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
     (account_id,) = _require("IB_ACCOUNT_ID")
-    logger.info(f"Initializing Interactive Brokers (Web API) copier for Account {account_id}")
-    return InteractiveBrokersBroker(account_id=account_id)
+    host = os.getenv("IB_GATEWAY_HOST", "ib-gateway-service.interactivebrokersgateway")
+    port = int(os.getenv("IB_GATEWAY_PORT", "4002"))
+    client_id = int(os.getenv("IB_CLIENT_ID", "17"))
+    logger.info(f"Initializing Interactive Brokers copier for Account {account_id} via gateway {host}:{port}")
+    return InteractiveBrokersBroker(host=host, port=port, client_id=client_id, account_id=account_id)
 
 
 def _build_hyperliquid() -> LiveBroker:
