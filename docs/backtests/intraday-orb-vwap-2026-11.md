@@ -48,3 +48,24 @@ from the reels' own results, which were on Nasdaq futures.
 - slippage 0.05%/side / second half: 19 trades, win 68%, avg win +0.25R, avg loss -0.70R, expectancy -0.050R, return -2.51%, alpha -19.3%/yr t -2.15 beta 0.06 corr 0.38, maxDD -2.57%
 - random-entry control (100 draws, matched risk): strategy total R beats 0% of them
 ```
+
+## Walk-forward tuning, 2026-11-02: nothing to ship
+
+`scripts/onetime_intraday_tune.py`: the same rules on 12 liquid tickers (QQQ, SPY, IWM, DIA, XLK,
+SMH, AAPL, MSFT, NVDA, AMZN, GOOGL, META) over the same 60 sessions, which is more trades but
+highly correlated ones. Cells are ranked on the first 30 sessions at 1bp/side, then judged on the
+last 30. Mean net return per trade, in bps:
+
+| | Defaults, 1bp | Defaults, 5bp | Cells net-positive at 1bp (H1 / H2) | Mean H2 of the H1-top-10 |
+|---|---|---|---|---|
+| ORB (162 cells) | −2.4 / −5.2 | −10 / −13 | 9% / 6% | −2.9 |
+| VWAP pullback (192 cells) | −3.3 / +5.0 | −11 / −3 | 24% / 61% | +0.6 |
+
+- **ORB:** no parameter set is positive out of sample, and none at 5bp in either half. The cells that
+  looked best in H1 lost in H2. There is no edge to tune.
+- **VWAP pullback:** the H1-top-10 average +0.6 bps out of sample, no better than the grid average
+  (+0.4). A positive H2 at 1bp is the market in that half, not the parameters. It is negative at 5bp.
+- **Shipped defaults are unchanged.** A re-tune would not pass the repo's own rule (new parameters ship
+  only if they beat the defaults out of sample).
+- **What would change this:** years of 5m bars (the 60-day yfinance cap is the limit), or a
+  structural change to the rules rather than a parameter move. See the chat summary for candidates.
