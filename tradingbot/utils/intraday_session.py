@@ -289,7 +289,7 @@ def walk_to_exit(
             return trade(last, float(rows["close"].iloc[last]), "time")
         hit = resolve_exit(rows.iloc[pos], stop, target)
         if hit:
-            return trade(pos, float(hit.price), str(hit.reason))
+            return trade(pos, float(hit.price or stop), str(hit.reason))
         last = pos
     done = to_ny(ts.iloc[last]) + step >= force
     return trade(last, float(rows["close"].iloc[last]), "time" if done else "open")
