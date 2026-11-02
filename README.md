@@ -637,6 +637,79 @@ Each broker is its own Helm CronJob gated by an independent flag in `values.yaml
 
 See the [Live Trading Guide](docs/guides/live-trading.md) for advanced configuration and mapping rules.
 
+### Collective2 status and C2 blend review (2026-10-26)
+
+**Collective2 does not work right now: every order is rejected.** The CronJob
+(`livetrade-collective2-xauzerifine`, strategy 155809898) completes green, which
+hides it. Each `NewStrategyOrder` returns HTTP 400, error `1020`: *"A paid Trade
+Leader plan is required"*. Evidence from the last three runs (2026-10-21 to 10-23):
+
+- All ten target legs (DBC, DBA, UUP, GLD, EFA, SPY, IWM, SLV, EEM, ...) failed.
+- `live_equity` shows $60,152 equity, all cash, `positions = {}`. It has not moved
+  since 2026-09-22. The blend has never been live in the broker.
+- The earlier `get_cash()` bug (cash read as $0) is fixed: cash now reads
+  $60,152 from 2026-10-19. That was a separate problem.
+- Nothing in the code can fix this. It is an account-plan restriction.
+- `livetrade-ib` is also failing on every run (the known `ssodh/init` 500), so
+  there is no working live broker at the moment. eToro and Darwinex are not
+  scheduled, and Darwinex has no equities.
+
+**Decision needed (yours):** buy the C2 Trade Leader plan, or move the blend to a
+broker that can take the orders (unblock IBKR, or enable eToro). Until then the
+live track record is zero. The paper sleeves below are the only evidence.
+
+**How the blend is done today**
+
+- `liveTrade.collective2XauZerifine.botWeights` in `helm/tradingbots/values.yaml`:
+  TARegimeMultiAssetBot 0.39 / GoldenButterflyMomBot 0.37 / TSMOMTrendBot 0.24.
+- Weights are inverse volatility, fit on 2019-01..2023-06 only. Idle weight is
+  parked in SHV. Legs C2 cannot trade are dropped to cash, not redistributed.
+- The copier reads each sleeve's paper portfolio from `bots.portfolio`, scales by
+  weight, and reconciles the whole C2 strategy to that target (full sync, so it
+  liquidates anything not in the target).
+- Backtest (`docs/backtests/c2-blend-2026-09.md`): alpha +3.5%/yr, t 2.02, beta
+  0.13, max DD -8.5%, CAGR 6.6% at 5.7% vol.
+
+**Live paper sleeves since 2026-09-21** (4.5 weeks, far too short to judge):
+
+| Sleeve | Return | Weight |
+|---|---|---|
+| TARegimeMultiAssetBot | -0.6% | 0.39 |
+| TSMOMTrendBot | -1.9% | 0.24 |
+| GoldenButterflyMomBot | -0.4% | 0.37 |
+| Weighted blend | about -0.9% | |
+| QQQ | -5.0% | |
+
+The blend held up in a down tape, as a beta 0.13 book should. That says nothing
+about alpha. The weekly report gives TARegimeMultiAsset and TSMOM only 19
+observations, and GoldenButterfly has alpha -7%/yr at t -1.13 over 101 days
+(backtest: +2.7%, t 1.43).
+
+**What I would do instead.** None of this has been backtested; these are
+proposals to test, not changes to ship.
+
+1. **Fix execution before touching weights.** A blend that places no orders
+   cannot be improved by re-weighting. Pick the broker first.
+2. **Do not re-fit now.** There are 4.5 weeks of live data. The doc's own plan
+   (re-score on `portfolio_worth` after ~6 months, about March 2027) stands.
+   Re-weighting on a month of noise is how a t of 2.02 becomes a t of 0.
+3. **Treat the three sleeves as about 1.5 independent bets, not 3.** Pairwise
+   correlation is 0.58-0.67, and the blend's t (2.02) barely beats
+   TARegimeMultiAsset alone (1.94). Inverse-vol ignores correlation. Test
+   covariance-aware weights (equal risk contribution or min-variance, fit on H1
+   only) against the current ones on the same H2 window.
+4. **Add a sleeve that is actually uncorrelated, not another trend ETF book.**
+   The candidates are weak: FearGreedInverse is a QQQ clone, IndexVolBot's edge
+   is gone on real SPY prices, and the option bots have under 15 live days.
+   Without one, the honest ceiling is about +3.5%/yr alpha.
+5. **If the live record confirms it, scale instead of adding.** At beta 0.13 the
+   book is too small to matter next to QQQ. Vol-target the blend to ~10% (about
+   1.7x) rather than adding weaker sleeves. The blend doc already says this is
+   only defensible after the live record confirms the backtest.
+6. **Keep GoldenButterfly under review, but do not drop it yet.** Its live t is
+   -1.13 on 101 days against a positive backtest. That is not significant. If it
+   is still negative in March, drop it and re-weight the other two.
+
 ## 🎯 Example Bots
 
 - **eurusdtreebot.py** - Decision tree-based strategy for EUR/USD
