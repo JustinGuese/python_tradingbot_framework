@@ -39,7 +39,7 @@ dependencies = [
     "huggingface_hub>=0.20.0",
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
-    "ibind[oauth]>=0.1.23",
+    "ib_async>=2.0.1",
     # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account.
     "hyperliquid-python-sdk>=0.24.0",
     "exchange-calendars>=4.5",
@@ -137,7 +137,7 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = [
-    "ta.*", "yfinance.*", "hyperliquid.*", "ibind.*", "telethon.*", "pypfopt.*",
+    "ta.*", "yfinance.*", "hyperliquid.*", "ib_async.*", "telethon.*", "pypfopt.*",
     "sklearn.*", "boto3.*", "botocore.*", "psycopg2.*", "pandas.*",
     "fear_and_greed", "cachetools.*", "scipy.*", "tqdm.*",
 ]

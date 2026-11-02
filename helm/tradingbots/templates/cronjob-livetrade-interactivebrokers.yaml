@@ -1,56 +1,19 @@
 {{- if .Values.liveTrade.interactiveBrokers.enabled }}
-{{- $ibSecret := $.Values.liveTrade.interactiveBrokers.oauthKeysSecret | default "ib-oauth-keys" }}
-{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-ib" "schedule" .Values.liveTrade.interactiveBrokers.schedule "module" "tradingbot.livetrade_interactive_brokers") }}
+{{- $ib := .Values.liveTrade.interactiveBrokers }}
+{{- /* ib-gateway-client=true is what the gateway's NetworkPolicy admits; without it the connect hangs. */}}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-ib" "schedule" $ib.schedule "module" "tradingbot.livetrade_interactive_brokers" "podLabels" (dict "ib-gateway-client" "true")) }}
 {{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
-            # IBKR Web API (Client Portal) OAuth 1.0a — fully headless, no gateway.
-            # Every IBKR credential lives in its own secret (oauthKeysSecret), not in the
-            # shared tradingbot-secrets blob: it has a separate rotation cadence, and it
-            # keeps the PEMs and their matching tokens in one object.
+            # IB Gateway (TWS socket API) deployed in its own namespace. The login,
+            # 2FA and daily restart live in the gateway; this job only opens a socket.
             - name: IB_ACCOUNT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $ibSecret }}
-                  key: IB_ACCOUNT_ID
-            - name: IBIND_USE_OAUTH
-              value: "True"
-            - name: IBIND_OAUTH1A_CONSUMER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $ibSecret }}
-                  key: IBIND_OAUTH1A_CONSUMER_KEY
-            - name: IBIND_OAUTH1A_ACCESS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $ibSecret }}
-                  key: IBIND_OAUTH1A_ACCESS_TOKEN
-            - name: IBIND_OAUTH1A_ACCESS_TOKEN_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $ibSecret }}
-                  key: IBIND_OAUTH1A_ACCESS_TOKEN_SECRET
-            - name: IBIND_OAUTH1A_DH_PRIME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $ibSecret }}
-                  key: IBIND_OAUTH1A_DH_PRIME
-            # Private key files mounted from the ib-oauth-keys secret (see volumes below).
-            - name: IBIND_OAUTH1A_ENCRYPTION_KEY_FP
-              value: "/etc/ibkr/private_encryption.pem"
-            - name: IBIND_OAUTH1A_SIGNATURE_KEY_FP
-              value: "/etc/ibkr/private_signature.pem"
-{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" .Values.liveTrade.interactiveBrokers) }}
-            volumeMounts:
-            - name: ib-oauth-keys
-              mountPath: /etc/ibkr
-              readOnly: true
-          volumes:
-          - name: ib-oauth-keys
-            secret:
-              secretName: {{ $ibSecret }}
-              items:
-              - key: private_encryption.pem
-                path: private_encryption.pem
-              - key: private_signature.pem
-                path: private_signature.pem
+              value: {{ required "liveTrade.interactiveBrokers.accountId is required" $ib.accountId | quote }}
+            - name: IB_GATEWAY_HOST
+              value: {{ $ib.gatewayHost | default "ib-gateway-service.interactivebrokersgateway" | quote }}
+            - name: IB_GATEWAY_PORT
+              value: {{ $ib.gatewayPort | default "4002" | quote }}
+            # Stable clientId: cancel_open_orders only sees orders under the same id.
+            - name: IB_CLIENT_ID
+              value: {{ $ib.clientId | default "17" | quote }}
+{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" $ib) }}
           restartPolicy: OnFailure
 {{- end }}

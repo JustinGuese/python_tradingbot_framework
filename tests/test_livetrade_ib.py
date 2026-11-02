@@ -1,185 +1,143 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
+STK_META = {"symbol": "AAPL", "type": "stock", "sec_type": "STK", "exchange": "SMART", "currency": "USD"}
 
-def _resp(data):
-    """ibind endpoints return a Result object exposing .data."""
-    return MagicMock(data=data)
+
+def _val(tag, value, currency="USD", account="DU123"):
+    return SimpleNamespace(tag=tag, value=str(value), currency=currency, account=account)
+
+
+def _pos(symbol, qty, avg=10.0):
+    return SimpleNamespace(contract=SimpleNamespace(symbol=symbol), position=qty, avgCost=avg)
 
 
 @pytest.fixture
-def mock_client():
-    """Patch the IbkrClient class so connect() yields a mock Web API client."""
-    with patch("tradingbot.livetrade.interactive_brokers.IbkrClient") as cls:
-        instance = cls.return_value
-        instance.get_ledger.return_value = _resp({"USD": {"cashbalance": 100000.0, "netliquidationvalue": 150000.0}})
-        instance.positions.return_value = _resp([{"ticker": "AAPL", "position": 10.0, "mktValue": 2000.0}])
-        instance.stock_conid_by_symbol.return_value = _resp({"AAPL": 265598})
-        instance.place_order.return_value = _resp([{"order_id": "1"}])
-        instance.live_orders.return_value = _resp({"orders": []})
-        yield instance
+def broker():
+    """A broker whose ib_async IB() is a mock that 'connects' instantly."""
+    with patch("tradingbot.livetrade.interactive_brokers.IB") as cls:
+        ib = cls.return_value
+        ib.managedAccounts.return_value = ["DU123"]
+        ib.accountValues.return_value = [_val("TotalCashValue", 100000.0), _val("NetLiquidation", 150000.0)]
+        ib.positions.return_value = [_pos("AAPL", 10.0)]
+        ib.openTrades.return_value = []
+        b = InteractiveBrokersBroker(account_id="DU123", client_id=17)
+        yield b
 
 
-def test_ib_get_cash(mock_client):
-    broker = InteractiveBrokersBroker(account_id="DU123")
+def test_ib_connect_uses_host_port_client_id(broker):
+    broker.host, broker.port = "gw", 4002
+    broker.connect()
+    args, kwargs = broker.ib.connect.call_args
+    assert args == ("gw", 4002)
+    assert kwargs["clientId"] == 17
+
+
+def test_ib_connect_rejects_unmanaged_account(broker):
+    broker.account_id = "DU999"
+    with pytest.raises(ValueError, match="not managed"):
+        broker.connect()
+    assert broker._connected is False
+
+
+def test_ib_is_sandbox_for_du_accounts():
+    assert InteractiveBrokersBroker(account_id="DU123").is_sandbox
+    assert not InteractiveBrokersBroker(account_id="U123").is_sandbox
+
+
+def test_ib_get_cash_and_equity(broker):
     assert broker.get_cash() == 100000.0
-    mock_client.tickle.assert_called()
-
-
-def test_ib_get_total_equity(mock_client):
-    broker = InteractiveBrokersBroker(account_id="DU123")
     assert broker.get_total_equity() == 150000.0
 
 
-def test_ib_get_total_equity_falls_back_to_positions_plus_cash(mock_client):
-    # Ledger exposes cash but no net liquidation value.
-    mock_client.get_ledger.return_value = _resp({"USD": {"cashbalance": 500.0}})
-    broker = InteractiveBrokersBroker(account_id="DU123")
-    # 2000.0 mktValue + 500.0 cash
-    assert broker.get_total_equity() == 2500.0
-
-
-def test_ib_get_positions(mock_client):
-    broker = InteractiveBrokersBroker(account_id="DU123")
-    assert broker.get_positions() == {"AAPL": 10.0}
-
-
-def test_ib_get_positions_skips_zero_and_pages(mock_client):
-    full_page = [{"ticker": f"SYM{i}", "position": 1.0} for i in range(100)]
-    second_page = [
-        {"ticker": "AAPL", "position": 5.0},
-        {"ticker": "FLAT", "position": 0.0},  # closed position, must be dropped
+def test_ib_get_cash_ignores_other_accounts(broker):
+    broker.ib.accountValues.return_value = [
+        _val("TotalCashValue", 1.0, account="DU999"),
+        _val("TotalCashValue", 42.0, account="DU123"),
     ]
-    mock_client.positions.side_effect = [_resp(full_page), _resp(second_page)]
-
-    broker = InteractiveBrokersBroker(account_id="DU123")
-    positions = broker.get_positions()
-
-    assert mock_client.positions.call_count == 2
-    assert positions["AAPL"] == 5.0
-    assert "FLAT" not in positions
-    assert len(positions) == 101
+    assert broker.get_cash() == 42.0
 
 
-def test_ib_place_order(mock_client):
-    broker = InteractiveBrokersBroker(account_id="DU123")
+def test_ib_get_total_equity_falls_back_to_portfolio_plus_cash(broker):
+    broker.ib.accountValues.return_value = [_val("TotalCashValue", 500.0)]
+    broker.ib.accountSummary.return_value = []
+    broker.ib.sleep = lambda _s: None
+    broker.ib.portfolio.return_value = [SimpleNamespace(marketValue=2000.0)]
+    with patch("tradingbot.livetrade.interactive_brokers.time.time", side_effect=[0, 10, 10, 10, 10, 10]):
+        assert broker.get_total_equity() == 2500.0
+
+
+def test_ib_get_positions_skips_zero_and_sums_duplicates(broker):
+    broker.ib.positions.return_value = [_pos("AAPL", 5.0), _pos("AAPL", 2.0), _pos("FLAT", 0.0)]
+    assert broker.get_positions() == {"AAPL": 7.0}
+
+
+def _place(broker, qty, side="BUY", contract=None):
+    contract = contract or MagicMock(name="contract")
+    trade = MagicMock()
+    trade.orderStatus.status = "Submitted"
+    broker.ib.placeOrder.return_value = trade
     with (
         patch.object(broker.symbol_mapper, "unmap_symbol", return_value="AAPL"),
-        patch.object(
-            broker,
-            "map_symbol",
-            return_value={
-                "symbol": "AAPL",
-                "type": "stock",
-                "sec_type": "STK",
-                "exchange": "SMART",
-                "currency": "USD",
-            },
-        ),
+        patch.object(broker, "map_symbol", return_value=STK_META),
+        patch.object(broker, "_resolve_stk_contract", return_value=contract),
     ):
-        broker.place_order("AAPL", 10.5, "BUY")
-
-    mock_client.place_order.assert_called_once()
-    order = mock_client.place_order.call_args[0][0]
-    assert order.conid == 265598
-    assert order.side == "BUY"
-    # 10.5 floored to a whole share
-    assert order.quantity == 10.0
-    assert order.order_type == "MKT"
+        broker.place_order("AAPL", qty, side)
+    return trade
 
 
-def test_ib_place_order_skips_sub_one_quantity(mock_client):
-    broker = InteractiveBrokersBroker(account_id="DU123")
+def test_ib_place_order_floors_to_whole_shares(broker):
+    _place(broker, 10.5)
+    order = broker.ib.placeOrder.call_args[0][1]
+    assert order.action == "BUY"
+    assert order.totalQuantity == 10.0
+    assert order.orderType == "MKT"
+    assert order.account == "DU123"
+
+
+def test_ib_place_order_skips_sub_one_quantity(broker):
+    _place(broker, 0.4, side="SELL")
+    broker.ib.placeOrder.assert_not_called()
+
+
+def test_ib_place_order_sell_reuses_held_contract(broker):
+    held = _pos("AAPL", 10.0)
+    held.contract = SimpleNamespace(symbol="AAPL")
+    broker.ib.positions.return_value = [held]
+    _place(broker, 3.0, side="SELL")
+    assert broker.ib.placeOrder.call_args[0][0] is held.contract
+
+
+def test_ib_place_order_raises_when_gateway_rejects(broker):
+    trade = MagicMock()
+    trade.orderStatus.status = "Cancelled"
+    trade.log = [SimpleNamespace(message="insufficient buying power")]
+    broker.ib.placeOrder.return_value = trade
     with (
-        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="VSNT"),
-        patch.object(
-            broker,
-            "map_symbol",
-            return_value={
-                "symbol": "VSNT",
-                "type": "stock",
-                "sec_type": "STK",
-                "exchange": "SMART",
-                "currency": "USD",
-            },
-        ),
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="AAPL"),
+        patch.object(broker, "map_symbol", return_value=STK_META),
+        patch.object(broker, "_resolve_stk_contract", return_value=MagicMock()),
+        pytest.raises(RuntimeError, match="insufficient buying power"),
     ):
-        mock_client.stock_conid_by_symbol.return_value = _resp({"VSNT": 111})
-
-        broker.place_order("VSNT", 2.16, "SELL")
-        assert mock_client.place_order.call_args[0][0].quantity == 2.0
-
-        mock_client.place_order.reset_mock()
-        broker.place_order("VSNT", 0.4, "SELL")
-        mock_client.place_order.assert_not_called()
+        broker.place_order("AAPL", 5.0, "BUY")
 
 
-def test_ib_place_order_skips_unresolvable_conid(mock_client):
-    mock_client.stock_conid_by_symbol.return_value = _resp({})
-    broker = InteractiveBrokersBroker(account_id="DU123")
-    with (
-        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="NOPE"),
-        patch.object(
-            broker,
-            "map_symbol",
-            return_value={
-                "symbol": "NOPE",
-                "type": "stock",
-                "sec_type": "STK",
-                "exchange": "SMART",
-                "currency": "USD",
-            },
-        ),
-    ):
-        broker.place_order("NOPE", 5.0, "BUY")
+def test_ib_cancel_open_orders_only_own_client_id(broker):
+    def _trade(client_id, done=False):
+        t = MagicMock()
+        t.order.clientId = client_id
+        t.isDone.return_value = done
+        return t
 
-    mock_client.place_order.assert_not_called()
+    mine, done, other = _trade(17), _trade(17, done=True), _trade(99)
+    broker.ib.openTrades.return_value = [mine, done, other]
 
-
-def test_ib_place_order_rejects_non_equity(mock_client):
-    """Forex/crypto/futures routing is not implemented over the Web API and must
-    raise rather than silently mis-route."""
-    broker = InteractiveBrokersBroker(account_id="DU123")
-    with (
-        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="EURUSD=X"),
-        patch.object(
-            broker,
-            "map_symbol",
-            return_value={
-                "symbol": "EURUSD",
-                "type": "forex",
-                "sec_type": "CASH",
-                "exchange": "IDEALPRO",
-                "currency": "USD",
-            },
-        ),
-        pytest.raises(NotImplementedError),
-    ):
-        broker.place_order("EURUSD", 1000.0, "BUY")
-
-    mock_client.place_order.assert_not_called()
-
-
-def test_ib_cancel_open_orders(mock_client):
-    mock_client.live_orders.return_value = _resp(
-        {
-            "orders": [
-                {"orderId": 1, "status": "Submitted"},
-                {"orderId": 2, "status": "PreSubmitted"},
-                {"orderId": 3, "status": "Filled"},  # terminal, must be skipped
-                {"orderId": 4, "status": "Cancelled"},  # terminal, must be skipped
-            ]
-        }
-    )
-    broker = InteractiveBrokersBroker(account_id="DU123")
-
-    assert broker.cancel_open_orders() == 2
-    assert mock_client.cancel_order.call_count == 2
-    mock_client.cancel_order.assert_any_call("1", "DU123")
-    mock_client.cancel_order.assert_any_call("2", "DU123")
+    assert broker.cancel_open_orders() == 1
+    broker.ib.cancelOrder.assert_called_once_with(mine.order)
 
 
 def test_ib_map_symbol():
@@ -187,11 +145,7 @@ def test_ib_map_symbol():
     with patch.object(
         broker.symbol_mapper,
         "map_symbol",
-        return_value={
-            "symbol": "EURUSD",
-            "type": "forex",
-            "source": "default-rule",
-        },
+        return_value={"symbol": "EURUSD", "type": "forex", "source": "default-rule"},
     ):
         meta = broker.map_symbol("EURUSD=X")
         assert meta is not None
@@ -205,11 +159,7 @@ def test_ib_map_symbol_defaults_to_us_equity():
     with patch.object(
         broker.symbol_mapper,
         "map_symbol",
-        return_value={
-            "symbol": "QQQ",
-            "type": "stock",
-            "source": "default-rule",
-        },
+        return_value={"symbol": "QQQ", "type": "stock", "source": "default-rule"},
     ):
         meta = broker.map_symbol("QQQ")
         assert meta is not None
