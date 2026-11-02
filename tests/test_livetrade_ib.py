@@ -1,3 +1,4 @@
+import itertools
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -67,7 +68,9 @@ def test_ib_get_total_equity_falls_back_to_portfolio_plus_cash(broker):
     broker.ib.accountSummary.return_value = []
     broker.ib.sleep = lambda _s: None
     broker.ib.portfolio.return_value = [SimpleNamespace(marketValue=2000.0)]
-    with patch("tradingbot.livetrade.interactive_brokers.time.time", side_effect=[0, 10, 10, 10, 10, 10]):
+    # Skip the 5s wait for account values (logging also reads time.time, so no finite side_effect list).
+    clock = itertools.count(0, 10)
+    with patch("tradingbot.livetrade.interactive_brokers.time.time", side_effect=lambda: next(clock)):
         assert broker.get_total_equity() == 2500.0
 
 
