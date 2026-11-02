@@ -214,3 +214,82 @@ class IntradayRules(Protocol):
 def simulate_session(bars: pd.DataFrame, rules: IntradayRules) -> SessionResult:
     """Simulate a single session using the provided rules."""
     return rules.simulate_session(bars)
+
+
+def session_close_ts(session: pd.DataFrame) -> pd.Timestamp:
+    """RTH close of the session's date (13:00 on early closes), as a New York timestamp."""
+    ts = _extract_timestamps(session)
+    first = ts.iloc[0]
+    first_ny = first.tz_localize(NEW_YORK) if first.tzinfo is None else first.tz_convert(NEW_YORK)
+    day = first_ny.date()
+    close = EARLY_CLOSE if mc.is_early_close(day) else REGULAR_CLOSE
+    return pd.Timestamp(datetime.combine(day, close), tz=NEW_YORK)
+
+
+def session_open_ts(session: pd.DataFrame) -> pd.Timestamp:
+    """RTH open (09:30 New York) of the session's date."""
+    ts = _extract_timestamps(session)
+    first = ts.iloc[0]
+    first_ny = first.tz_localize(NEW_YORK) if first.tzinfo is None else first.tz_convert(NEW_YORK)
+    return pd.Timestamp(datetime.combine(first_ny.date(), REGULAR_OPEN), tz=NEW_YORK)
+
+
+def bar_minutes(session: pd.DataFrame) -> float:
+    """Median bar spacing in minutes (5.0 if there is only one bar)."""
+    ts = _extract_timestamps(session)
+    if len(ts) < 2:
+        return 5.0
+    return float(ts.diff().dropna().median().total_seconds() / 60.0)
+
+
+def to_ny(ts: pd.Timestamp) -> pd.Timestamp:
+    """Normalise a timestamp (naive means UTC) to New York time."""
+    t = pd.Timestamp(ts)
+    return t.tz_localize("UTC").tz_convert(NEW_YORK) if t.tzinfo is None else t.tz_convert(NEW_YORK)
+
+
+def walk_to_exit(
+    session: pd.DataFrame,
+    entry_pos: int,
+    stop: float,
+    target: float,
+    force_exit_ts: pd.Timestamp,
+) -> Trade:
+    """
+    Enter at the close of ``session.iloc[entry_pos]`` and walk later bars to an exit.
+
+    Bars at or after ``force_exit_ts`` are never traded on. Stop wins ties
+    (``resolve_exit``). With no stop or target hit the trade exits at the last
+    allowed bar's close: reason ``"time"`` once the forced exit has been reached
+    (a bar at or after it exists, or the next bar would start at it), otherwise
+    ``"open"`` — the session is still in progress and the position is live.
+    """
+    ts = _extract_timestamps(session).reset_index(drop=True)
+    rows = session.reset_index(drop=True)
+    entry = float(rows["close"].iloc[entry_pos])
+    risk = entry - stop
+    step = pd.Timedelta(minutes=bar_minutes(session))
+    force = to_ny(force_exit_ts)
+
+    def trade(pos: int, price: float, reason: str) -> Trade:
+        return Trade(
+            entry_ts=ts.iloc[entry_pos],
+            entry=entry,
+            stop=stop,
+            target=target,
+            exit_ts=ts.iloc[pos],
+            exit=price,
+            exit_reason=reason,
+            r_multiple=(price - entry) / risk,
+        )
+
+    last = entry_pos
+    for pos in range(entry_pos + 1, len(rows)):
+        if to_ny(ts.iloc[pos]) >= force:
+            return trade(last, float(rows["close"].iloc[last]), "time")
+        hit = resolve_exit(rows.iloc[pos], stop, target)
+        if hit:
+            return trade(pos, float(hit.price), str(hit.reason))
+        last = pos
+    done = to_ny(ts.iloc[last]) + step >= force
+    return trade(last, float(rows["close"].iloc[last]), "time" if done else "open")
