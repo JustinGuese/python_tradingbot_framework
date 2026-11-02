@@ -242,6 +242,9 @@ bots:
   # QQQ intraday, long-only: first close above the opening range in the first 90
   # minutes, 0.35R target, range-low stop, flat when the window ends. Paper only.
   # See docs/backtests/intraday-orb-vwap-2026-11.md.
+  # SUSPENDED 2026-11-02: net-negative at every parameter set and at 1bp and 5bp
+  # costs (alpha t -3.21 on defaults, walk-forward grid found no edge).
+  suspend: true
   schedule: "*/5 13-20 * * 1-5" # Every 5 minutes, 13:00-20:55 UTC, Mon-Fri
 
 - name: xauaisyntheticmetalbot
