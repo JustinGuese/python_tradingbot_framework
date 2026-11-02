@@ -21,10 +21,10 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 sys.path.insert(0, str(Path(__file__).parent))
-from onetime_intraday_orb_vwap_backtest import fetch_5m, run_rules, split_sessions, trade_return  # noqa: E402
+from onetime_intraday_orb_vwap_backtest import fetch_5m, run_rules, split_sessions, trade_return
 
-from tradingbot.utils.orb_rules import ORBRules  # noqa: E402
-from tradingbot.utils.vwap_pullback_rules import VWAPPullbackRules  # noqa: E402
+from tradingbot.utils.orb_rules import ORBRules
+from tradingbot.utils.vwap_pullback_rules import VWAPPullbackRules
 
 UNIVERSE = ["QQQ", "SPY", "IWM", "DIA", "XLK", "SMH", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"]
 COSTS = {"1bp": 0.0001, "5bp": 0.0005}
@@ -97,7 +97,7 @@ def main() -> None:
     for sym in UNIVERSE:
         try:
             sess_by_sym[sym] = split_sessions(fetch_5m(sym))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"skip {sym}: {e}")
     days = sorted(set.intersection(*[set(s) for s in sess_by_sym.values()]))
     first, second = days[: len(days) // 2], days[len(days) // 2 :]
