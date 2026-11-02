@@ -79,15 +79,18 @@ class IntradayRulesBot(Bot):
         return -1 if holding else 0
 
     def makeOneIteration(self) -> int:
+        symbol = self.symbol
+        if symbol is None:
+            raise ValueError(f"{self.bot_name} needs a symbol")
         data = self.getYFData(interval=self.interval, period=self.period, saveToDB=True)
         portfolio = self.dbBot.portfolio
-        holding = float(portfolio.get(self.symbol, 0)) > 1e-6
+        holding = float(portfolio.get(symbol, 0)) > 1e-6
         has_cash = float(portfolio.get("USD", 0)) > 10
         decision = self.decide(data, datetime.now(UTC), holding, has_cash)
         if decision == 1:
-            logger.info("%s: rules say long - buying %s", self.bot_name, self.symbol)
-            self.buy(self.symbol)
+            logger.info("%s: rules say long - buying %s", self.bot_name, symbol)
+            self.buy(symbol)
         elif decision == -1:
-            logger.info("%s: rules say flat - selling %s", self.bot_name, self.symbol)
-            self.sell(self.symbol)
+            logger.info("%s: rules say flat - selling %s", self.bot_name, symbol)
+            self.sell(symbol)
         return decision

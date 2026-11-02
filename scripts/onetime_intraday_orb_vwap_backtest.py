@@ -168,7 +168,7 @@ def fetch_5m(symbol: str = "QQQ") -> pd.DataFrame:
     df = yf.download(symbol, interval="5m", period="60d", auto_adjust=False, progress=False)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    df = df.rename(columns=str.lower).reset_index()
+    df = df.reset_index().rename(columns=str.lower)
     df = df.rename(columns={"datetime": "timestamp", "date": "timestamp", "index": "timestamp"})
     return df[["timestamp", "open", "high", "low", "close", "volume"]]
 

@@ -310,6 +310,10 @@ Existing Strategies (don't duplicate)
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ PredictionMarketOverlayBot │ SPY/QQQ/IEF/GLD │ NOT SCHEDULED: equity sleeve cut by Kalshi recession odds / hawkish Fed-path repricing; lost to an SMA200 ablation out of sample │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ VWAPPullbackBot │ QQQ 5m │ Opening-range break, then first pullback into VWAP; 2R target, flat by close (paper; utils/vwap_pullback_rules.py) │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ OpenRangeBreakoutBot │ QQQ 5m │ First close above the opening range in 90 min; 0.35R target, range-low stop (paper; utils/orb_rules.py) │
 └────────────────────────┴──────────────┴────────────────────────────────────────────────┘
 
 ---
