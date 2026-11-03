@@ -61,6 +61,9 @@ class QuantsmdSmaDailyBot(Bot):
     The source's daily rebalance runs every bar. It never returns ``None``.
     """
 
+    # A 200-bar SMA needs more than the default 1y backtest window.
+    BACKTEST_PERIOD: ClassVar[str | None] = "max"
+
     param_grid: ClassVar[dict] = {
         "fast": [20, 50, 100],
         "slow": [150, 200, 250],
