@@ -504,6 +504,37 @@ bots:
 - name: quantsmd_futures_donchian_contracts
   schedule: "54 21 * * 1-5" # alpha t 1.11, beta 0.18
 
+# quants.md v2 variants (2026-11), paper. See docs/backtests/quantsmd-v2-2026-11.md.
+- name: quantsmd_macd_trend_v2
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_daily_partial_drift_v2
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_cross_sectional_reversal_v2
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_cross_sectional_momentum_v2
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_fx_etf_time_series_momentum
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_order_ensemble
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_pairs_basket_zscore
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_sma_daily_gated
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_quarterly_te_cost_gate_gated
+  schedule: "7 21 * * 1-5"
+
+- name: quantsmd_intraday_gated_ema
+  schedule: "*/5 13-20 * * 1-5"
+
 # Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours

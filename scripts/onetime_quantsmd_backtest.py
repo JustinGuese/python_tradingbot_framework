@@ -121,6 +121,16 @@ BOTS = [
     ("quantsmd_signal_change_rotation_orders", "QuantsmdSignalChangeRotationOrdersBot", 0.22),
     ("quantsmd_fx_momentum_lots", "QuantsmdFxMomentumLotsBot", -0.71),
     ("quantsmd_futures_donchian_contracts", "QuantsmdFuturesDonchianContractsBot", 0.30),
+    ("quantsmd_macd_trend_v2", "QuantsmdMacdTrendV2Bot", None),
+    ("quantsmd_daily_partial_drift_v2", "QuantsmdDailyPartialDriftV2Bot", None),
+    ("quantsmd_cross_sectional_reversal_v2", "QuantsmdCrossSectionalReversalV2Bot", None),
+    ("quantsmd_cross_sectional_momentum_v2", "QuantsmdCrossSectionalMomentumV2Bot", None),
+    ("quantsmd_fx_etf_time_series_momentum", "QuantsmdFxEtfTimeSeriesMomentumBot", None),
+    ("quantsmd_order_ensemble", "QuantsmdOrderEnsembleBot", None),
+    ("quantsmd_pairs_basket_zscore", "QuantsmdPairsBasketZscoreBot", None),
+    ("quantsmd_sma_daily_gated", "QuantsmdSmaDailyGatedBot", None),
+    ("quantsmd_quarterly_te_cost_gate_gated", "QuantsmdQuarterlyTeCostGateGatedBot", None),
+    ("quantsmd_intraday_gated_ema", "QuantsmdIntradayGatedEmaBot", None),
 ]
 
 
