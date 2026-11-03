@@ -44,8 +44,9 @@ def _erc(cov: np.ndarray, iters: int = 500) -> np.ndarray:
         total = rc.sum()
         if total <= 0:
             break
-        w_new = w * (total / n) / np.where(rc > 0, rc, np.nan)
-        w_new = np.nan_to_num(w_new, nan=0.0)
+        # A name with non-positive risk contribution (negative covariance) keeps
+        # its weight rather than collapsing to zero.
+        w_new = np.where(rc > 0, w * (total / n) / np.where(rc > 0, rc, 1.0), w)
         w_new = w_new / w_new.sum()
         w = 0.5 * w + 0.5 * w_new
     return w
