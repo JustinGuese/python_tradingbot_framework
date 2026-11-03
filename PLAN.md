@@ -11,7 +11,7 @@ Template to copy for every bot: `tradingbot/quantsmd_sma_daily.py` +
 ## 0. Rules every worker must follow
 
 0. **Worktree setup first**: your worktree branches from `main`, which lacks this PLAN.md and any
-   earlier batch. Run `git merge haiku/work` before anything else. Read the plan at
+   earlier batch. Run `git merge haiku/work2` before anything else. Read the plan at
    `/home/jguese/code/tradingbot/python_tradingbot_framework/PLAN.md`.
 1. Touch only the files listed in your step. Never edit configs, `pyproject.toml`, existing
    tests or other bots. Never weaken a test to make it pass.
@@ -483,7 +483,7 @@ Do NOT run the backtest (the lead does).
 
 ## 5. After the batches (done by the lead, not Haiku)
 
-1. Full checks on `haiku/work` after every batch: `uv run ruff check .`, `uv run ruff format --check .`,
+1. Full checks on `haiku/work2` after every batch: `uv run ruff check .`, `uv run ruff format --check .`,
    `uv run mypy tradingbot` (42 pre-existing errors, none in quantsmd files), full pytest.
 2. Run the backtest in the background for the 35 new bots (about 2-3 h, in two processes by
    subset), write `docs/backtests/quantsmd-2026-11-all.md` (alpha vs QQQ, t, beta, corr, max DD,
