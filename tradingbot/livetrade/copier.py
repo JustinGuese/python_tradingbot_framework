@@ -61,7 +61,7 @@ class LiveTradeCopier:
             return
 
         # 2. Map target weights to broker symbols
-        broker_target_weights = {}  # broker_symbol -> {"weight": float, "type": str}
+        broker_target_weights: dict[str, dict] = {}  # broker_symbol -> {"weight": float, "type": str}
         unmapped_tickers = []
 
         dropped: dict[str, float] = {}
@@ -81,7 +81,10 @@ class LiveTradeCopier:
             # order the broker silently rejects. Translated indices (^GSPC -> SPX)
             # have already lost the caret and are unaffected.
             if meta and mapped and not mapped.startswith("^"):
-                broker_target_weights[mapped] = {"weight": weight, "type": meta.get("type", "stock")}
+                # Two yf symbols may share one broker line (IB: IWM and IJS both -> XRSU):
+                # their weights add instead of the second overwriting the first.
+                entry = broker_target_weights.setdefault(mapped, {"weight": 0.0, "type": meta.get("type", "stock")})
+                entry["weight"] += weight
             else:
                 logger.warning(f"Ticker {yf_symbol} is unmapped")
                 unmapped_tickers.append(yf_symbol)

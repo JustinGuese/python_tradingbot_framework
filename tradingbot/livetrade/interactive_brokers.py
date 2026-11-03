@@ -2,6 +2,7 @@ import logging
 import time
 from typing import Literal
 
+import yfinance as yf
 from ib_async import IB, Contract, Crypto, Forex, Future, MarketOrder, Stock, util
 
 from tradingbot.livetrade.broker import LiveBroker
@@ -9,6 +10,11 @@ from tradingbot.livetrade.symbol_map import SymbolMapper
 from tradingbot.utils.data_service import DataService
 
 logger = logging.getLogger(__name__)
+
+# IB `stockType` values that are funds. A US-domiciled fund has no PRIIPs KID, so an
+# EU retail (MiFID) account is refused it (Error 201) and needs a UCITS line mapped in
+# symbol_map.json instead. Single stocks (COMMON, ADR, REIT...) are fine.
+_FUND_TYPES = {"ETF", "ETN", "ETC", "ETP", "FUND", "MUTUAL"}
 
 
 class InteractiveBrokersBroker(LiveBroker):
@@ -43,6 +49,8 @@ class InteractiveBrokersBroker(LiveBroker):
         self.symbol_mapper = symbol_mapper or SymbolMapper()
         self.data_service = data_service or DataService()
         self._connected = False
+        self._eligible: dict[str, bool] = {}
+        self._yf_prices: dict[str, float] = {}
 
     @property
     def account_ref(self) -> str:
@@ -166,18 +174,72 @@ class InteractiveBrokersBroker(LiveBroker):
         return result
 
     def _get_native_price(self, broker_symbol: str) -> float:
+        # Paper gateways usually carry no market-data subscription (price -1), in which
+        # case this returns 0.0 and get_latest_price falls back to yfinance.
         self.connect(readonly=True)
         yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
         meta = self.map_symbol(yf_symbol)
         if not meta:
             return 0.0
-        tickers = self.ib.reqTickers(self._build_contract(meta))
+        try:
+            tickers = self.ib.reqTickers(self._build_contract(meta))
+        except Exception as e:
+            logger.debug(f"reqTickers failed for {broker_symbol}: {e}")
+            return 0.0
         if not tickers:
             return 0.0
         price = tickers[0].marketPrice()
         if price and not util.isNan(price) and price > 0:
             return float(price)
         return 0.0
+
+    def get_latest_price(self, broker_symbol: str) -> float:
+        """Broker price, else yfinance on the mapped line's *own* ticker.
+
+        The base fallback prices ``unmap_symbol(broker_symbol)``, i.e. the US ETF the
+        line replaces. That is wrong for a UCITS line (TLT $81.73 vs IDTL $3.08, GLD
+        $361 vs IGLN $77) and would size every order off the wrong price.
+        """
+        try:
+            price = self._get_native_price(broker_symbol)
+            if price > 0:
+                return price
+        except Exception as e:
+            logger.debug(f"IB native price fetch failed for {broker_symbol}: {e}")
+        yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
+        entry = self.symbol_mapper.overrides.get(yf_symbol, {}).get(self.name) or {}
+        price_symbol = entry.get("price_symbol")
+        if price_symbol:
+            return self._yf_last_price(price_symbol)
+        return super().get_latest_price(broker_symbol)
+
+    def _yf_last_price(self, ticker: str) -> float:
+        """Last USD price of a UCITS line from yfinance, 0.0 if unavailable.
+
+        Not DataService: its fallback asks for 1-minute bars, which yfinance does not
+        serve for LSE ETFs, so every lookup would fail. Daily bars are the reliable
+        source; they also keep a pence-quoted line (GBp) from slipping in unnoticed.
+        """
+        if ticker in self._yf_prices:
+            return self._yf_prices[ticker]
+        price = 0.0
+        try:
+            info = yf.Ticker(ticker).fast_info
+            currency = str(info["currency"])
+            if currency != "USD":
+                logger.error(f"yfinance quotes {ticker} in {currency}, not USD; refusing to size off it")
+            else:
+                price = float(info["lastPrice"])
+        except Exception as e:
+            logger.debug(f"yfinance fast_info failed for {ticker}: {e}")
+            try:
+                hist = yf.Ticker(ticker).history(period="5d", interval="1d")
+                price = float(hist["Close"].iloc[-1]) if not hist.empty else 0.0
+            except Exception as e2:
+                logger.warning(f"yfinance price failed for {ticker}: {e2}")
+        if price > 0:
+            self._yf_prices[ticker] = price
+        return price
 
     # ------------------------------------------------------------------ #
     # Orders
@@ -210,6 +272,15 @@ class InteractiveBrokersBroker(LiveBroker):
         return chosen
 
     def _build_contract(self, meta: dict) -> Contract:
+        # A mapped UCITS line is pinned by conId: the bare ticker is ambiguous across
+        # exchanges and currencies, and SMART/USD would find the US look-alike instead.
+        if meta.get("conid"):
+            return Stock(
+                conId=int(meta["conid"]),
+                symbol=meta["symbol"],
+                exchange=meta.get("exchange", "SMART"),
+                currency=meta.get("currency", "USD"),
+            )
         sec_type = meta.get("sec_type", "STK")
         symbol = meta["symbol"]
         exchange = meta.get("exchange", "SMART")
@@ -249,6 +320,8 @@ class InteractiveBrokersBroker(LiveBroker):
                 if p.contract.symbol == broker_symbol and float(p.position) != 0.0:
                     contract = p.contract
                     break
+        if contract is None and meta.get("conid"):
+            contract = self._build_contract(meta)
         if contract is None and meta.get("sec_type", "STK") == "STK":
             contract = self._resolve_stk_contract(broker_symbol)
             if contract is None:
@@ -285,8 +358,13 @@ class InteractiveBrokersBroker(LiveBroker):
         status = trade.orderStatus.status
         logger.info(f"IB Order Status: {status}")
         if status in ("Cancelled", "ApiCancelled", "Inactive"):
-            last = trade.log[-1].message if trade.log else ""
-            raise RuntimeError(f"IB rejected {side} {final_qty} {broker_symbol}: {status} {last}".strip())
+            # The cause (e.g. Error 201, no trading permission) can arrive after the
+            # status flips; the first log entry is often only the TIF notice.
+            self.ib.sleep(1.5)
+            reasons = [e.message for e in trade.log if e.message and "TIF was set" not in e.message]
+            raise RuntimeError(
+                f"IB rejected {side} {final_qty} {broker_symbol}: {status} {(reasons[-1] if reasons else '')[:300]}".strip()
+            )
 
     def cancel_open_orders(self) -> int:
         """Cancel open orders submitted under this clientId."""
@@ -304,30 +382,80 @@ class InteractiveBrokersBroker(LiveBroker):
     # ------------------------------------------------------------------ #
     def map_symbol(self, yf_symbol: str) -> dict | None:
         meta = self.symbol_mapper.map_symbol(yf_symbol, broker_name=self.name)
-        if not meta:
+        if not meta or meta.get("tradeable") is False or not meta.get("symbol"):
             return None
 
         res = {
             "symbol": meta["symbol"],
             "type": meta.get("type", "stock"),
             "sec_type": "STK",
-            "exchange": "SMART",
-            "currency": "USD",
+            "exchange": meta.get("exchange", "SMART"),
+            "currency": meta.get("currency", "USD"),
             "yf_symbol": yf_symbol,
             "source": meta.get("source", "unknown"),
         }
+        for key in ("conid", "price_symbol"):
+            if meta.get(key):
+                res[key] = meta[key]
 
-        if meta["type"] == "forex":
+        if meta.get("type") == "forex":
             res["sec_type"] = "CASH"
             res["exchange"] = "IDEALPRO"
-        elif meta["type"] == "crypto":
+        elif meta.get("type") == "crypto":
             res["sec_type"] = "CRYPTO"
             res["exchange"] = "PAXOS"
-        elif meta["type"] == "future":
+        elif meta.get("type") == "future":
             res["sec_type"] = "FUT"
             res["exchange"] = meta.get("exchange", "CME")
 
         return res
+
+    def is_tradeable(self, yf_symbol: str) -> bool:
+        """Whether this account can buy ``yf_symbol``.
+
+        1. An explicit symbol_map.json entry decides (``"tradeable": false`` marks an
+           ETF with no UCITS equivalent).
+        2. Otherwise ask IB what the default-mapped ticker is. A fund means a US ETF
+           this EU-retail account cannot hold, so it is dropped to cash with a warning
+           naming the fix; a single stock is fine. Unknown to IB -> not tradeable.
+
+        This keeps a new symbol from failing at order time: it sits in cash, loudly,
+        until someone adds its UCITS line to symbol_map.json.
+        """
+        entry = self.symbol_mapper.overrides.get(yf_symbol, {}).get(self.name)
+        if entry is not None:
+            return bool(entry.get("tradeable", True))
+        if yf_symbol in self._eligible:
+            return self._eligible[yf_symbol]
+
+        meta = self.map_symbol(yf_symbol)
+        ok = False
+        if meta is None:
+            pass
+        elif meta["sec_type"] != "STK":
+            ok = True  # forex / crypto / futures keep their previous routing
+        elif any(ch in meta["symbol"] for ch in ".-^"):
+            logger.warning(f"IB: {yf_symbol} has an exchange suffix/index form; map it in symbol_map.json")
+        else:
+            self.connect(readonly=True)
+            try:
+                details = self.ib.reqContractDetails(Stock(meta["symbol"], "SMART", "USD"))
+            except Exception as e:
+                logger.warning(f"IB: contract lookup failed for {yf_symbol}: {e}")
+                details = []
+            stock_type = (details[0].stockType or "").upper() if details else ""
+            if not details:
+                logger.warning(f"IB: no US listing found for {yf_symbol}; not tradeable")
+            elif stock_type in _FUND_TYPES:
+                logger.warning(
+                    f"IB: {yf_symbol} is a US {stock_type} (no KID for EU retail); dropping to cash. "
+                    f"Add a UCITS line for it to livetrade/symbol_map.json "
+                    f"(find one: uv run python -m tradingbot.livetrade.discover_symbols --broker ib)"
+                )
+            else:
+                ok = True
+        self._eligible[yf_symbol] = ok
+        return ok
 
     def search_symbol(self, query: str) -> list[dict]:
         self.connect(readonly=True)

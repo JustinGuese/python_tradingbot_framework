@@ -226,6 +226,43 @@ The port-forward bypasses the NetworkPolicy, so a working local test does not pr
 > [!WARNING]
 > **One brokerage session per username.** Logging into TWS, IBKR Mobile or Client Portal with the gateway's username displaces the gateway session (`EXISTING_SESSION_DETECTED_ACTION=primary` makes the gateway take it back). Use a dedicated username for the gateway.
 
+### 3b. EU retail accounts: US ETFs need a UCITS line
+
+An EU/MiFID **retail** account cannot buy US-domiciled ETFs (no PRIIPs KID): IB refuses the
+order with Error 201 ("No Trading Permission, Customer Ineligible"). Single stocks are fine.
+So the bots' US ETFs (SPY, TLT, GLD, SHV...) are mapped to UCITS lines in
+`tradingbot/livetrade/symbol_map.json` under `interactive_brokers`:
+
+```json
+"TLT": {"interactive_brokers": {
+  "symbol": "IDTL", "type": "stock", "conid": 181150836, "exchange": "LSEETF",
+  "currency": "USD", "price_symbol": "IDTL.L", "source": "human", "verified": "2026-11-03"}}
+```
+
+- `conid` pins the exact listing (the bare ticker is ambiguous across exchanges/currencies).
+- `price_symbol` is the yfinance ticker of **that line**; orders are sized off it. UCITS prices
+  differ a lot from the US ETF (TLT $81.73 vs IDTL $3.08). Use USD-quoted lines; a non-USD
+  quote is refused.
+- `{"tradeable": false}` marks an ETF with no UCITS equivalent (UUP, FXA, FXB). Its weight stays
+  in cash, not redistributed.
+- Two US ETFs may share one line (IWM and IJS both -> XRSU); their weights add.
+
+**New symbols.** If a bot starts holding a symbol with no entry, `is_tradeable()` asks IB for its
+`stockType`: a fund (ETF/ETC/ETN) is **dropped to cash with a WARNING** naming the fix (it would
+only be rejected otherwise), a single stock trades normally, and an unknown ticker is skipped.
+To add the UCITS line:
+
+1. Find candidates: `uv run python -m tradingbot.livetrade.discover_symbols --broker ib`, or in
+   TWS/Client Portal search the fund's index (e.g. "MSCI World ex USA") and pick the **USD** line on
+   LSE ETF (`LSEETF`) / LSE.
+2. Get its `conId` (`IB.reqContractDetails(Stock("IDTL", "LSEETF", "USD"))`) and confirm
+   `yf.Ticker("IDTL.L").fast_info` is quoted in USD.
+3. Add the entry above and open a PR. `tests/test_livetrade_ib.py::test_symbol_map_ib_entries_are_complete`
+   rejects a half-filled entry.
+
+Eligibility is the account's, not the code's: place a 1-share order on the line once to confirm
+there is no Error 201 before relying on it.
+
 ### 4. Usage
 ```bash
 uv run python -m tradingbot.livetrade_interactive_brokers
