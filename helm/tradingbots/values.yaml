@@ -356,6 +356,41 @@ bots:
   # docs/backtests/taregimemultiassetbot.md.
   schedule: "10 21 * * 1-5" # Daily 9:10 PM UTC Mon-Fri
 
+# quants.md top-10 strategies (QuantJourney examples), paper. Daily CronJobs after the US
+# close and before the 21:20 IBKR copier; each bot gates its own rebalance (month/quarter
+# start, Friday) and holds otherwise. None is wired into any copier. Backtests: no
+# strategy has t >= 2 in both halves, so treat all as unproven.
+# See docs/backtests/quantsmd-2026-11.md.
+- name: quantsmd_continuous_futures_trend
+  schedule: "7 21 * * 1-5" # long-only trend on 6 continuous futures, monthly (W25)
+
+- name: quantsmd_sma_daily
+  schedule: "11 21 * * 1-5" # 9 sector ETFs, 50/200 SMA, daily (W01)
+
+- name: quantsmd_monthly_rotation
+  schedule: "12 21 * * 1-5" # top-3 6m momentum of 8 ETFs, monthly (O17)
+
+- name: quantsmd_vol_target_momentum
+  schedule: "13 21 * * 1-5" # top-3 positive momentum, 15% vol target, monthly (W18)
+
+- name: quantsmd_monthly_inverse_vol
+  schedule: "14 21 * * 1-5" # inverse 63d vol on 8 ETFs, monthly (W05)
+
+- name: quantsmd_risk_parity_capped
+  schedule: "15 21 * * 1-5" # 9 sectors, equal risk contribution, 25% cap, monthly (W20)
+
+- name: quantsmd_quarterly_te_cost_gate
+  schedule: "16 21 * * 1-5" # top-3 momentum, quarterly or tracking-error trigger (W11)
+
+- name: quantsmd_bollinger_reversion
+  schedule: "17 21 * * 1-5" # 9 sectors, buy below lower band, exit at midline (W21)
+
+- name: quantsmd_vol_target_trend
+  schedule: "18 21 * * 1-5" # 50/200 SMA trend, 10% vol target, monthly (W17)
+
+- name: quantsmd_weekly_rsi_reversion
+  schedule: "19 21 * * 1-5" # 9 sectors, RSI14 <35 in / >60 out, Fridays (W03)
+
 # Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours
