@@ -391,6 +391,121 @@ bots:
 - name: quantsmd_weekly_rsi_reversion
   schedule: "19 21 * * 1-5" # 9 sectors, RSI14 <35 in / >60 out, Fridays (W03)
 
+# quants.md round 2 (the other 35 QuantJourney examples), paper. Daily bots run 21:25-21:54 UTC
+# after the US close; intraday bots run on their bar size inside the 13:00-20:55 UTC window (the
+# 1m scalp every 5 minutes). Each bot gates its own rebalance and holds otherwise. None is wired
+# into any copier. Backtests: nothing is proven (see docs/backtests/quantsmd-2026-11-all.md);
+# the two intraday bots with t <= -2 are suspended.
+
+- name: quantsmd_monthly_drift_etf
+  schedule: "25 21 * * 1-5" # alpha t 0.96, beta 0.26
+
+- name: quantsmd_quarterly_dual_momentum
+  schedule: "26 21 * * 1-5" # alpha t -0.02, beta 0.38
+
+- name: quantsmd_signal_change_defensive
+  schedule: "27 21 * * 1-5" # alpha t 1.07, beta 0.22
+
+- name: quantsmd_intraday_rsi_15m
+  schedule: "*/15 13-20 * * 1-5" # intraday, 1533 bars, alpha t -0.35 (window too short for a verdict)
+
+- name: quantsmd_intraday_1m_ema_scalp
+  # SUSPENDED 2026-11-03: backtest alpha t -4.08 (alpha -178%/yr, Sharpe -17.7) over 2026-10-23..2026-11-02.
+  suspend: true
+  schedule: "*/5 13-20 * * 1-5" # intraday, 2703 bars, alpha t -4.08 (window too short for a verdict)
+
+- name: quantsmd_intraday_1h_sma_trend
+  schedule: "5 13-20 * * 1-5" # intraday, 5049 bars, alpha t -1.39 (window too short for a verdict)
+
+- name: quantsmd_monthly_circuit_breaker
+  schedule: "28 21 * * 1-5" # alpha t 0.66, beta 0.24
+
+- name: quantsmd_daily_partial_drift
+  schedule: "29 21 * * 1-5" # alpha t -0.11, beta 0.26
+
+- name: quantsmd_pairs_ratio_zscore
+  schedule: "30 21 * * 1-5" # alpha t 3.10, beta 0.05
+
+- name: quantsmd_pairs_hedge_ratio
+  schedule: "31 21 * * 1-5" # alpha t 0.64, beta 0.09
+
+- name: quantsmd_cross_sectional_momentum
+  schedule: "32 21 * * 1-5" # alpha t 2.09, beta 0.22
+
+- name: quantsmd_cross_sectional_reversal
+  schedule: "33 21 * * 1-5" # alpha t 0.98, beta 0.30
+
+- name: quantsmd_risk_parity_multiasset
+  schedule: "34 21 * * 1-5" # alpha t 1.84, beta 0.20
+
+- name: quantsmd_macd_trend
+  schedule: "35 21 * * 1-5" # alpha t -0.01, beta 0.29
+
+- name: quantsmd_fx_time_series_momentum
+  schedule: "36 21 * * 1-5" # alpha t -1.29, beta 0.02
+
+- name: quantsmd_fx_cross_sectional_momentum
+  schedule: "37 21 * * 1-5" # alpha t -1.19, beta 0.03
+
+- name: quantsmd_market_sma_cross
+  schedule: "38 21 * * 1-5" # alpha t 1.18, beta 0.16
+
+- name: quantsmd_market_rsi_reversion
+  schedule: "39 21 * * 1-5" # alpha t -0.52, beta 0.17
+
+- name: quantsmd_limit_rsi_dip
+  schedule: "40 21 * * 1-5" # alpha t -0.55, beta 0.23
+
+- name: quantsmd_limit_trend_pullback
+  schedule: "41 21 * * 1-5" # alpha t 0.88, beta 0.07
+
+- name: quantsmd_stop_breakout_entry
+  schedule: "42 21 * * 1-5" # alpha t 1.55, beta 0.05
+
+- name: quantsmd_stop_loss_protection
+  schedule: "43 21 * * 1-5" # alpha t 0.73, beta 0.11
+
+- name: quantsmd_stop_limit_breakout
+  schedule: "44 21 * * 1-5" # alpha t 1.51, beta 0.06
+
+- name: quantsmd_stop_limit_protection
+  schedule: "45 21 * * 1-5" # alpha t 1.01, beta 0.10
+
+- name: quantsmd_trailing_stop_trend
+  schedule: "46 21 * * 1-5" # alpha t 1.18, beta 0.04
+
+- name: quantsmd_trailing_stop_rsi
+  schedule: "47 21 * * 1-5" # alpha t 0.32, beta 0.19
+
+- name: quantsmd_trailing_stop_limit
+  schedule: "48 21 * * 1-5" # alpha t 1.26, beta 0.04
+
+- name: quantsmd_bracket_trend
+  schedule: "49 21 * * 1-5" # alpha t 1.77, beta 0.03
+
+- name: quantsmd_bracket_rsi_reversion
+  schedule: "50 21 * * 1-5" # alpha t 1.75, beta 0.09
+
+- name: quantsmd_oco_dip_or_breakout
+  schedule: "51 21 * * 1-5" # alpha t 1.39, beta 0.14
+
+- name: quantsmd_intraday_5m_bracket_reversion
+  # SUSPENDED 2026-11-03: backtest alpha t -3.66 (alpha -23%/yr, Sharpe -6.3) over 2026-08-10..2026-11-02.
+  suspend: true
+  schedule: "*/5 13-20 * * 1-5" # intraday, 4653 bars, alpha t -3.66 (window too short for a verdict)
+
+- name: quantsmd_intraday_30m_stop_breakout
+  schedule: "*/30 13-20 * * 1-5" # intraday, 753 bars, alpha t -0.93 (window too short for a verdict)
+
+- name: quantsmd_signal_change_rotation_orders
+  schedule: "52 21 * * 1-5" # alpha t 1.15, beta 0.16
+
+- name: quantsmd_fx_momentum_lots
+  schedule: "53 21 * * 1-5" # alpha t -0.60, beta 0.01
+
+- name: quantsmd_futures_donchian_contracts
+  schedule: "54 21 * * 1-5" # alpha t 1.11, beta 0.18
+
 # Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours
