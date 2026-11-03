@@ -41,20 +41,24 @@ import pandas as pd
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.runner import run_bot
 
+
 class TSMOMTrendBot(Bot):
     param_grid: ClassVar[dict] = {"lookback_days": [189, 252, 315]}
-    BACKTEST_PERIOD: ClassVar[str | None] = "max"   # needed: default 1y backtest is too short
+    BACKTEST_PERIOD: ClassVar[str | None] = "max"  # needed: default 1y backtest is too short
+
     def __init__(self, lookback_days: int = 252, **kwargs):
         super().__init__(
-            "TSMOMTrendBot",            # DB name == class name
+            "TSMOMTrendBot",  # DB name == class name
             tickers=list(UNIVERSE),
             interval="1d",
-            period="2y",                # live fetch; must exceed longest lookback
+            period="2y",  # live fetch; must exceed longest lookback
             lookback_days=lookback_days,  # every ctor param is also passed to super, as here
             **kwargs,
         )
         self.lookback_days = lookback_days
+
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None: ...
+
 
 if __name__ == "__main__":
     run_bot(TSMOMTrendBot)
@@ -108,6 +112,7 @@ Implement (type-hinted, docstring each, `from __future__` not needed):
 ETF8 = ["SPY", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "VNQ"]
 SECTORS9 = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
 
+
 def closes_frame(datas: dict[str, pd.DataFrame], tickers: list[str]) -> pd.DataFrame:
     """Wide close-price frame. For each ticker take datas[t]; skip None/empty or missing 'close'.
     Time axis: use column 'timestamp' if present, else the frame's index. Build a Series
@@ -115,17 +120,21 @@ def closes_frame(datas: dict[str, pd.DataFrame], tickers: list[str]) -> pd.DataF
     drop NaN, drop duplicate index (keep last). Combine with pd.concat(axis=1, keys=tickers_found),
     sort index. Return empty DataFrame if nothing found."""
 
+
 def period_rolled(index: pd.Index, period: str) -> bool:
     """True iff the LAST timestamp in index starts a new period vs the one before it.
     period 'M' -> (year, month) differs; 'Q' -> (year, quarter) differs. len(index) < 2 -> False.
     Raise ValueError for any other period."""
 
+
 def is_weekday_bar(index: pd.Index, weekday: int) -> bool:
     """True iff last timestamp's .weekday() == weekday (Mon=0 .. Fri=4). Empty index -> False."""
+
 
 def equal_weight(active: list[str], cap: float) -> dict[str, float]:
     """1/len(active) each, min(w, cap). NO redistribution of the clipped excess (stays cash).
     Empty list -> {}."""
+
 
 def annualized_vol(closes: pd.DataFrame, window: int) -> pd.Series:
     """Per column: std of pct_change over the LAST `window` returns * sqrt(252).
@@ -161,11 +170,12 @@ Upstream: https://github.com/QuantJourneyOrg/quantjourney-bt/blob/main/strategie
 Universe: `["MES=F", "MNQ=F", "ZN=F", "CL=F", "GC=F", "ZC=F"]`. Defaults fast=63, slow=252, vol_window=63. Monthly.
 Source logic (quoted):
 ```python
-fast = close.rolling(63, min_periods=63).mean(); slow = close.rolling(252, min_periods=252).mean()
+fast = close.rolling(63, min_periods=63).mean()
+slow = close.rolling(252, min_periods=252).mean()
 signals = np.sign(fast - slow).where(valid, 0.0)
 volatility = close.pct_change().rolling(63, min_periods=63).std() * np.sqrt(252.0)
 raw = signals / volatility.replace(0.0, np.nan)
-weights = raw.div(raw.abs().sum(axis=1).replace(0.0, np.nan), axis=0).fillna(0.0)   # unit gross, long/short
+weights = raw.div(raw.abs().sum(axis=1).replace(0.0, np.nan), axis=0).fillna(0.0)  # unit gross, long/short
 ```
 Departure: long-only. For `compute_weights(closes, fast, slow, vol_window)`: `rest = 1/vol` for every ticker with valid
 fast, slow, vol>0 (this is `|raw|`); `denominator = sum(rest over ALL valid tickers)` (longs AND would-be shorts);
@@ -184,8 +194,8 @@ Universe `ETF8`. Defaults lookback=126, top_n=3, cap=0.40, target_vol=0.15, vol_
 Source logic:
 ```python
 momentum = close.iloc[i] / close.iloc[i - 126] - 1.0
-picks = momentum[momentum > 0.0].nlargest(3).index          # signal 1.0
-weights = active.div(counts).clip(upper=0.40)               # equal weight among picks
+picks = momentum[momentum > 0.0].nlargest(3).index  # signal 1.0
+weights = active.div(counts).clip(upper=0.40)  # equal weight among picks
 # then VolTargetModel(target_vol=0.15, lookback=42, max_leverage=2.0)
 ```
 `compute_weights(closes, lookback, top_n, cap, target_vol, vol_lookback)`: `None` if not `period_rolled(...,'M')`;
@@ -205,8 +215,8 @@ Universe `ETF8`. Defaults lookback=126, top_n=3. Monthly (first bar of a new mon
 Source logic:
 ```python
 momentum = close.iloc[pos_idx] / close.iloc[pos_idx - 126] - 1.0
-target = set(momentum.dropna().nlargest(3).index)       # NO positivity filter: always fully invested
-per_name_nav = nav / max(1, len(target))                # equal weight, sells names that left target
+target = set(momentum.dropna().nlargest(3).index)  # NO positivity filter: always fully invested
+per_name_nav = nav / max(1, len(target))  # equal weight, sells names that left target
 ```
 `compute_weights(closes, lookback, top_n)`: `None` if not month-first; `{}` if < lookback+1 rows; else
 `{t: 1/len(target)}` for the top_n by momentum (dropna first). Departure: source executes market orders with 3bp slippage;
@@ -224,7 +234,7 @@ Source logic:
 ```python
 valid = sma_fast.notna() & sma_slow.notna()
 signals = (sma_fast > sma_slow).astype(float).where(valid, 0.0)
-weights = active.div(counts, axis=0).fillna(0.0).clip(upper=0.25)    # equal weight, cap 0.25, remainder cash
+weights = active.div(counts, axis=0).fillna(0.0).clip(upper=0.25)  # equal weight, cap 0.25, remainder cash
 ```
 `compute_weights(closes, fast, slow, cap)`: `{}` if < slow rows; active = tickers with both SMAs defined and fast > slow;
 return `equal_weight(active, cap)`. live `period="2y"`.
@@ -245,7 +255,9 @@ Source logic:
 ```python
 realized_vol = close.pct_change().rolling(63).std() * np.sqrt(252)
 inverse_vol = 1.0 / realized_vol.replace(0.0, np.nan)
-weights = inverse_vol.div(inverse_vol.sum(axis=1), axis=0).fillna(0.0).clip(upper=0.35)   # clip AFTER normalising, no redistribution
+weights = (
+    inverse_vol.div(inverse_vol.sum(axis=1), axis=0).fillna(0.0).clip(upper=0.35)
+)  # clip AFTER normalising, no redistribution
 ```
 `compute_weights(closes, lookback, cap)`: `None` if not month-first; `{}` if < lookback+1 rows or no valid vols;
 use `annualized_vol(closes, lookback)`; drop NaN/0; normalise inverse vols to sum 1; `min(w, cap)` each.
@@ -260,23 +272,30 @@ Universe `SECTORS9`. Defaults lookback=126 (also warmup), cap=0.25. Monthly.
 Source: equal-weight signal after 126-bar warmup, then `RiskParityModel(lookback=126)` chained with `PositionLimitModel(max_weight=0.25)` (capped weights renormalised). The model source is not available; implement equal-risk-contribution:
 ```python
 def _erc(cov: np.ndarray, iters: int = 500) -> np.ndarray:
-    n = cov.shape[0]; w = np.full(n, 1.0 / n)
+    n = cov.shape[0]
+    w = np.full(n, 1.0 / n)
     for _ in range(iters):
-        rc = w * (cov @ w)                  # risk contributions
+        rc = w * (cov @ w)  # risk contributions
         total = rc.sum()
-        if total <= 0: break
-        w_new = w * (total / n) / np.where(rc > 0, rc, np.nan)   # move toward equal RC
+        if total <= 0:
+            break
+        w_new = w * (total / n) / np.where(rc > 0, rc, np.nan)  # move toward equal RC
         w_new = np.nan_to_num(w_new, nan=0.0)
         w_new = w_new / w_new.sum()
-        w = 0.5 * w + 0.5 * w_new           # damping
+        w = 0.5 * w + 0.5 * w_new  # damping
     return w
-def _cap(w: np.ndarray, cap: float) -> np.ndarray:    # iterative cap with renormalisation
+
+
+def _cap(w: np.ndarray, cap: float) -> np.ndarray:  # iterative cap with renormalisation
     for _ in range(20):
         over = w > cap + 1e-12
-        if not over.any(): break
-        excess = (w[over] - cap).sum(); w = np.where(over, cap, w)
+        if not over.any():
+            break
+        excess = (w[over] - cap).sum()
+        w = np.where(over, cap, w)
         free = ~over & (w < cap - 1e-12)
-        if not free.any(): break
+        if not free.any():
+            break
         w[free] += excess * w[free] / w[free].sum()
     return w
 ```
@@ -363,10 +382,13 @@ Upstream: https://github.com/QuantJourneyOrg/quantjourney-bt/blob/main/strategie
 Universe `SECTORS9`. Defaults rsi_period=14, entry=35, exit=60, cap=0.25. Rebalance Fridays only.
 Source logic:
 ```python
-if pd.isna(value): in_position[inst] = False
-elif not in_position[inst] and value < 35: in_position[inst] = True
-elif in_position[inst] and value > 60: in_position[inst] = False      # 35..60: state unchanged
-weights = active.div(counts).fillna(0).clip(upper=0.25)               # applied on Fridays (RebalancePolicy W, weekday=4)
+if pd.isna(value):
+    in_position[inst] = False
+elif not in_position[inst] and value < 35:
+    in_position[inst] = True
+elif in_position[inst] and value > 60:
+    in_position[inst] = False  # 35..60: state unchanged
+weights = active.div(counts).fillna(0).clip(upper=0.25)  # applied on Fridays (RebalancePolicy W, weekday=4)
 ```
 RSI(14) per ticker: use `ta.momentum.RSIIndicator(close=series, window=rsi_period).rsi()` (the `ta` library is already a dependency).
 `compute_weights(closes, rsi_period, entry, exit_, cap, replay=250)`: `None` if not `is_weekday_bar(closes.index, 4)`; `{}` if < rsi_period+2 rows;
