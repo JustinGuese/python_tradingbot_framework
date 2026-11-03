@@ -10,7 +10,7 @@ trades, DailyPartialDrift 28k) lose to costs, FX bots are spot-only with no carr
 
 ## 0. Rules every worker must follow
 
-0. **Worktree setup first**: run `git merge haiku/work` before anything else. Read this plan at
+0. **Worktree setup first**: run `git merge haiku/v2` before anything else. Read this plan at
    `/home/jguese/code/tradingbot/python_tradingbot_framework/PLAN.md`.
 1. Touch only the files listed in your step. Never edit configs, `pyproject.toml`, existing tests, existing
    bots, `helm/`, `scripts/` or `docs/`. Never weaken a test to make it pass.
@@ -223,7 +223,7 @@ Instructions:
 Do NOT edit any other entry or file.
 
 ## After each batch (Claude, not workers)
-Merge branches into `haiku/work`, run full `uv run ruff check . && uv run ruff format --check . && uv run mypy
+Merge branches into `haiku/v2`, run full `uv run ruff check . && uv run ruff format --check . && uv run mypy
 tradingbot && pytest tests -q` (with `POSTGRES_URI` stub). After Batch 3: Claude runs the backtest script for
 the new bots, writes `docs/backtests/quantsmd-v2-2026-11.md` with alpha / t / beta / H1 / H2 versus the
 originals, and reports.
