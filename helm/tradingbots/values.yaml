@@ -410,8 +410,7 @@ bots:
   schedule: "*/15 13-20 * * 1-5" # intraday, 1533 bars, alpha t -0.35 (window too short for a verdict)
 
 - name: quantsmd_intraday_1m_ema_scalp
-  # SUSPENDED 2026-11-03: backtest alpha t -4.08 (alpha -178%/yr, Sharpe -17.7) over 2026-10-23..2026-11-02.
-  suspend: true
+  # Backtest alpha t -4.08 over 2026-10-23..2026-11-02 (9 days); runs anyway, per owner.
   schedule: "*/5 13-20 * * 1-5" # intraday, 2703 bars, alpha t -4.08 (window too short for a verdict)
 
 - name: quantsmd_intraday_1h_sma_trend
@@ -490,8 +489,7 @@ bots:
   schedule: "51 21 * * 1-5" # alpha t 1.39, beta 0.14
 
 - name: quantsmd_intraday_5m_bracket_reversion
-  # SUSPENDED 2026-11-03: backtest alpha t -3.66 (alpha -23%/yr, Sharpe -6.3) over 2026-08-10..2026-11-02.
-  suspend: true
+  # Backtest alpha t -3.66 over 2026-08-10..2026-11-02; runs anyway, per owner.
   schedule: "*/5 13-20 * * 1-5" # intraday, 4653 bars, alpha t -3.66 (window too short for a verdict)
 
 - name: quantsmd_intraday_30m_stop_breakout
