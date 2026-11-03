@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
+from ta.momentum import RSIIndicator
 
 ETF8 = ["SPY", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "VNQ"]
 SECTORS9 = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
@@ -104,3 +106,103 @@ def annualized_vol(closes: pd.DataFrame, window: int) -> pd.Series:
         else:
             out[column] = float(valid.iloc[-window:].std() * math.sqrt(_TRADING_DAYS))
     return pd.Series(out, dtype=float)
+
+
+def rsi(close: pd.Series, window: int = 14) -> pd.Series:
+    """Relative strength index of ``close`` over ``window`` bars, in 0..100.
+
+    Computed with ``ta.momentum.RSIIndicator``, the same library call the weekly
+    RSI bot uses. The first ``window`` values are NaN.
+    """
+    return RSIIndicator(close, window=window).rsi()
+
+
+def rsi_hysteresis(rsi_values: pd.Series, enter_below: float, exit_above: float) -> bool:
+    """Return whether an RSI series ends in the held state.
+
+    The state starts flat. Going from flat to held needs a value below
+    ``enter_below``; going from held to flat needs a value above ``exit_above``.
+    A NaN value resets the state to flat. Returns the final state.
+    """
+    held = False
+    for value in rsi_values:
+        if pd.isna(value):
+            held = False
+        elif not held and value < enter_below:
+            held = True
+        elif held and value > exit_above:
+            held = False
+    return held
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 20) -> pd.Series:
+    """Average true range over ``window`` bars.
+
+    True range is the max of ``high - low``, ``|high - prev_close|`` and
+    ``|low - prev_close|``. The first bar uses ``high - low`` alone. The average
+    is a simple rolling mean that needs a full window.
+    """
+    prev_close = close.shift(1)
+    true_range = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    return true_range.rolling(window, min_periods=window).mean()
+
+
+def top_n(scores: pd.Series, n: int, positive_only: bool = False) -> list[str]:
+    """Return the ``n`` index labels with the largest scores, largest first.
+
+    NaN scores are dropped. With ``positive_only`` only scores ``> 0`` are kept.
+    """
+    clean = scores.dropna()
+    if positive_only:
+        clean = clean[clean > 0]
+    ordered = clean.sort_values(ascending=False, kind="stable")
+    return [str(label) for label in ordered.index[:n]]
+
+
+def scale_to_max_gross(weights: dict[str, float], max_gross: float = 1.0) -> dict[str, float]:
+    """Drop non-positive weights, then scale so the sum is at most ``max_gross``.
+
+    Entries ``<= 0`` (and NaN) are removed. If the remaining sum exceeds
+    ``max_gross``, every weight is multiplied by ``max_gross / sum``.
+    """
+    kept = {ticker: float(w) for ticker, w in weights.items() if w > 0}
+    total = sum(kept.values())
+    if total > max_gross:
+        factor = max_gross / total
+        kept = {ticker: w * factor for ticker, w in kept.items()}
+    return kept
+
+
+def erc_weights(cov: np.ndarray, iters: int = 500) -> np.ndarray:
+    """Equal-risk-contribution weights for covariance matrix ``cov``.
+
+    Starts from equal weights and repeatedly moves each weight toward an equal
+    share of total risk, averaging old and new weights for damping. Returns
+    all-equal weights if the total risk is not positive.
+    """
+    n = cov.shape[0]
+    w = np.full(n, 1.0 / n)
+    for _ in range(iters):
+        rc = w * (cov @ w)  # risk contributions
+        total = rc.sum()
+        if total <= 0:
+            break
+        # A name with non-positive risk contribution (negative covariance) keeps
+        # its weight rather than collapsing to zero.
+        w_new = np.where(rc > 0, w * (total / n) / np.where(rc > 0, rc, 1.0), w)
+        w_new = w_new / w_new.sum()
+        w = 0.5 * w + 0.5 * w_new
+    return w
+
+
+def last_rows(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    """Return the last ``n`` rows of ``df`` (all rows if ``n`` exceeds its length)."""
+    return df.iloc[-n:]
+
+
+ETF3 = ["SPY", "QQQ", "IWM"]
+FX4 = ["EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X"]
+FUTS4 = ["MES=F", "MNQ=F", "CL=F", "GC=F"]
