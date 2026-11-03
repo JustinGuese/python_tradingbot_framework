@@ -169,3 +169,108 @@ def test_ib_map_symbol_defaults_to_us_equity():
         assert meta["sec_type"] == "STK"
         assert meta["exchange"] == "SMART"
         assert meta["currency"] == "USD"
+
+
+# --- UCITS mapping / eligibility ------------------------------------------------
+
+
+def _real_broker():
+    """A broker on the shipped symbol_map.json with a mocked IB session."""
+    with patch("tradingbot.livetrade.interactive_brokers.IB") as cls:
+        ib = cls.return_value
+        ib.managedAccounts.return_value = ["DU123"]
+        b = InteractiveBrokersBroker(account_id="DU123")
+        b.ib = ib
+        return b
+
+
+def test_ib_map_symbol_returns_ucits_line_pinned_by_conid():
+    meta = _real_broker().map_symbol("SPY")
+    assert meta is not None
+    assert (meta["symbol"], meta["conid"], meta["exchange"], meta["currency"]) == ("CSPX", 76023663, "LSEETF", "USD")
+    assert meta["price_symbol"] == "CSPX.L"
+
+
+def test_ib_build_contract_uses_conid():
+    broker = _real_broker()
+    contract = broker._build_contract(broker.map_symbol("TLT"))
+    assert contract.conId == 181150836
+    assert contract.exchange == "LSEETF"
+
+
+def test_ib_unmappable_etf_is_not_tradeable_and_not_mapped():
+    broker = _real_broker()
+    assert broker.is_tradeable("UUP") is False  # explicit tradeable:false
+    assert broker.map_symbol("UUP") is None
+    assert broker.is_tradeable("SPY") is True  # explicit UCITS entry, no IB lookup
+    broker.ib.reqContractDetails.assert_not_called()
+
+
+@pytest.mark.parametrize(("stock_type", "expected"), [("ETF", False), ("ETC", False), ("COMMON", True), ("ADR", True)])
+def test_ib_unmapped_symbol_eligibility_follows_ib_stock_type(stock_type, expected):
+    broker = _real_broker()
+    broker.ib.reqContractDetails.return_value = [SimpleNamespace(stockType=stock_type)]
+    assert broker.is_tradeable("ZZZZ") is expected
+    assert broker.is_tradeable("ZZZZ") is expected  # cached
+    assert broker.ib.reqContractDetails.call_count == 1
+
+
+def test_ib_unmapped_symbol_unknown_to_ib_is_not_tradeable():
+    broker = _real_broker()
+    broker.ib.reqContractDetails.return_value = []
+    assert broker.is_tradeable("ZZZZ") is False
+
+
+def test_ib_exchange_suffix_symbol_without_override_is_not_tradeable():
+    assert _real_broker().is_tradeable("IWDA.AS") is False
+
+
+def test_ib_price_uses_the_mapped_lines_own_yfinance_ticker():
+    broker = _real_broker()
+    with (
+        patch.object(broker, "_get_native_price", return_value=0.0),
+        patch.object(broker, "_yf_last_price", return_value=3.08) as yfp,
+    ):
+        assert broker.get_latest_price("IDTL") == 3.08
+    yfp.assert_called_once_with("IDTL.L")  # not TLT
+
+
+def test_ib_yf_price_refuses_non_usd_quote_and_caches():
+    broker = _real_broker()
+    with patch("tradingbot.livetrade.interactive_brokers.yf.Ticker") as tk:
+        tk.return_value.fast_info = {"currency": "GBp", "lastPrice": 800.0}
+        tk.return_value.history.return_value = MagicMock(empty=True)
+        assert broker._yf_last_price("X.L") == 0.0
+        tk.return_value.fast_info = {"currency": "USD", "lastPrice": 3.08}
+        assert broker._yf_last_price("IDTL.L") == 3.08
+        assert broker._yf_last_price("IDTL.L") == 3.08
+        assert tk.call_count == 2  # X.L once, IDTL.L once (second call cached)
+
+
+def test_ib_place_order_buys_mapped_line_by_conid():
+    broker = _real_broker()
+    trade = MagicMock()
+    trade.orderStatus.status = "Submitted"
+    broker.ib.positions.return_value = []
+    broker.ib.placeOrder.return_value = trade
+    broker.place_order("CSPX", 3.7, "BUY")
+    contract, order = broker.ib.placeOrder.call_args[0]
+    assert contract.conId == 76023663
+    assert order.totalQuantity == 3.0
+
+
+def test_symbol_map_ib_entries_are_complete():
+    """Every IB override is either explicitly untradeable or fully pinned, with a
+    price ticker for sizing; a half-filled entry would size or route wrongly."""
+    broker = _real_broker()
+    seen: dict[str, str] = {}
+    for yf, entry in broker.symbol_mapper.overrides.items():
+        slot = entry.get("interactive_brokers")
+        if slot is None:
+            continue
+        if slot.get("tradeable") is False:
+            continue
+        assert slot.get("conid") and slot.get("exchange") and slot.get("currency") == "USD", yf
+        assert slot.get("price_symbol"), f"{yf}: price_symbol missing, sizing would use the US ticker"
+        seen.setdefault(slot["symbol"], slot["conid"])
+        assert seen[slot["symbol"]] == slot["conid"], f"{yf}: same ticker, different conid"

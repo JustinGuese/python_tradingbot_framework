@@ -7,10 +7,15 @@
       "source": "human"
     },
     "interactive_brokers": {
-      "symbol": "QQQ",
+      "symbol": "CNDX",
       "type": "stock",
-      "verified": "2026-04-28",
-      "source": "human"
+      "conid": 75961314,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "CNDX.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares NASDAQ 100 UCITS"
     },
     "darwinex": {
       "symbol": "QQQ.US",
@@ -33,6 +38,17 @@
       "type": "stock",
       "verified": "2026-05-04",
       "source": "human"
+    },
+    "interactive_brokers": {
+      "symbol": "CSPX",
+      "type": "stock",
+      "conid": 76023663,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "CSPX.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares Core S&P 500 UCITS"
     }
   },
   "BTC-USD": {
@@ -49,6 +65,212 @@
       "type": "crypto",
       "verified": "2026-08-10",
       "source": "human"
+    }
+  },
+  "VTI": {
+    "interactive_brokers": {
+      "symbol": "VUAA",
+      "type": "stock",
+      "conid": 366244335,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "VUAA.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "Vanguard S&P 500 UCITS Acc (no US total-market UCITS; closest)"
+    }
+  },
+  "IWM": {
+    "interactive_brokers": {
+      "symbol": "XRSU",
+      "type": "stock",
+      "conid": 188869798,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "XRSU.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "Xtrackers Russell 2000 UCITS"
+    }
+  },
+  "IJS": {
+    "interactive_brokers": {
+      "symbol": "XRSU",
+      "type": "stock",
+      "conid": 188869798,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "XRSU.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "Xtrackers Russell 2000 UCITS (no S&P 600 Value UCITS found; shares IWM's line)"
+    }
+  },
+  "EFA": {
+    "interactive_brokers": {
+      "symbol": "EXUS",
+      "type": "stock",
+      "conid": 691133189,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "EXUS.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "Xtrackers MSCI World ex USA UCITS"
+    }
+  },
+  "EEM": {
+    "interactive_brokers": {
+      "symbol": "EIMI",
+      "type": "stock",
+      "conid": 153454131,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "EIMI.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares Core MSCI EM IMI UCITS"
+    }
+  },
+  "TLT": {
+    "interactive_brokers": {
+      "symbol": "IDTL",
+      "type": "stock",
+      "conid": 181150836,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "IDTL.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares $ Treasury Bond 20+yr UCITS"
+    }
+  },
+  "IEF": {
+    "interactive_brokers": {
+      "symbol": "IDTM",
+      "type": "stock",
+      "conid": 68489992,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "IDTM.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares $ Treasury Bond 7-10yr UCITS"
+    }
+  },
+  "SHY": {
+    "interactive_brokers": {
+      "symbol": "IBTA",
+      "type": "stock",
+      "conid": 272686955,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "IBTA.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares $ Treasury Bond 1-3yr UCITS Acc"
+    }
+  },
+  "SHV": {
+    "interactive_brokers": {
+      "symbol": "IB01",
+      "type": "stock",
+      "conid": 354802220,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "IB01.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares $ Treasury Bond 0-1yr UCITS Acc (cash proxy)"
+    }
+  },
+  "GLD": {
+    "interactive_brokers": {
+      "symbol": "IGLN",
+      "type": "stock",
+      "conid": 86656182,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "IGLN.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares Physical Gold ETC"
+    }
+  },
+  "SLV": {
+    "interactive_brokers": {
+      "symbol": "ISLN",
+      "type": "stock",
+      "conid": 86656188,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "ISLN.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares Physical Silver ETC"
+    }
+  },
+  "DBC": {
+    "interactive_brokers": {
+      "symbol": "ICOM",
+      "type": "stock",
+      "conid": 282849246,
+      "exchange": "LSEETF",
+      "currency": "USD",
+      "price_symbol": "ICOM.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "iShares Diversified Commodity Swap UCITS"
+    }
+  },
+  "DBA": {
+    "interactive_brokers": {
+      "symbol": "AIGA",
+      "type": "stock",
+      "conid": 41015861,
+      "exchange": "LSE",
+      "currency": "USD",
+      "price_symbol": "AIGA.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "WisdomTree Agriculture ETC"
+    }
+  },
+  "USO": {
+    "interactive_brokers": {
+      "symbol": "CRUD",
+      "type": "stock",
+      "conid": 41015921,
+      "exchange": "LSE",
+      "currency": "USD",
+      "price_symbol": "CRUD.L",
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "WisdomTree WTI Crude Oil ETC"
+    }
+  },
+  "UUP": {
+    "interactive_brokers": {
+      "tradeable": false,
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "no UCITS equivalent (USD index fund)"
+    }
+  },
+  "FXA": {
+    "interactive_brokers": {
+      "tradeable": false,
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "no UCITS equivalent (AUD currency fund)"
+    }
+  },
+  "FXB": {
+    "interactive_brokers": {
+      "tradeable": false,
+      "verified": "2026-11-03",
+      "source": "human",
+      "note": "no UCITS equivalent (GBP currency fund)"
     }
   }
 }

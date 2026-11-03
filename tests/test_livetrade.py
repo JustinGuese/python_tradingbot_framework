@@ -39,6 +39,24 @@ class TestLiveTrade(unittest.TestCase):
         weights = self.copier._calculate_target_weights()
         self.assertEqual(weights, {"AAPL": 0.6})
 
+    def test_sync_sums_weights_of_symbols_sharing_one_broker_line(self):
+        """IB maps IWM and IJS onto one UCITS line (XRSU); the second must add to the
+        first, not overwrite it."""
+        self.broker.is_tradeable.return_value = True
+        self.broker.map_symbol.return_value = {"symbol": "XRSU", "type": "stock"}
+        self.broker.get_total_equity.return_value = 10_000.0
+        self.broker.cancel_open_orders.return_value = 0
+        self.broker.get_positions.return_value = {}
+        self.copier.cash_proxy = None
+        with (
+            patch.object(self.copier, "_calculate_target_weights", return_value={"IWM": 0.10, "IJS": 0.05}),
+            patch.object(self.copier, "_calculate_orders", return_value=[]) as calc,
+            patch.object(self.copier, "_execute_orders"),
+        ):
+            self.copier.sync()
+        targets = calc.call_args[0][0]
+        self.assertAlmostEqual(targets["XRSU"]["weight"], 0.15)
+
     def test_calculate_orders(self):
         target_weights = {"AAPL": {"weight": 0.6, "type": "stock"}}
         current_positions = {"AAPL": 5.0}  # 5 shares already
