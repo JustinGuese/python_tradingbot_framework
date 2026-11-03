@@ -34,6 +34,7 @@ from tradingbot.utils.runner import run_bot
 UNIVERSE = list(SECTORS9)
 LOOKBACK = 63
 CAP = 0.35
+REPLAY_BARS = 500  # bounds the per-bar state replay so a long backtest stays linear
 ENTER = 0.02
 MIN_HOLD = 10
 MIN_SCORE = 0.001
@@ -60,7 +61,7 @@ def compute_weights(
     """
     if len(closes) < lookback + 1:
         return {}
-    mom_series = closes / closes.shift(lookback) - 1.0
+    mom_series = (closes / closes.shift(lookback) - 1.0).iloc[-REPLAY_BARS:]
     scores: dict[str, float] = {}
     for ticker in closes.columns:
         mom = mom_series[ticker]

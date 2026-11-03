@@ -40,6 +40,7 @@ CAP = 0.25
 MIN_ROWS = 35
 BAND = 0.002
 MIN_HOLD = 10
+REPLAY_BARS = 500  # bounds the per-bar state replay so a long backtest stays linear
 
 
 def compute_weights(
@@ -68,7 +69,7 @@ def compute_weights(
     ema_slow = closes.ewm(span=slow, adjust=False).mean()
     macd = ema_fast - ema_slow
     signal_line = macd.ewm(span=signal, adjust=False).mean()
-    hist_norm = (macd - signal_line) / closes
+    hist_norm = ((macd - signal_line) / closes).iloc[-REPLAY_BARS:]
     active: list[str] = []
     for ticker in closes.columns:
         raw = schmitt_state(hist_norm[ticker], enter_above=band, exit_below=-band)
