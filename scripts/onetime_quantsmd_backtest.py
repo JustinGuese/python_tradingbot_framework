@@ -97,7 +97,9 @@ def run_one(module: str, cls_name: str, source_sharpe: float, qqq_frame: pd.Data
     bot = cls()
     frames = {t: bot.getYFDataWithTA(symbol=t, interval="1d", period="max") for t in bot.tickers}
     qqq = _close_series(qqq_frame)
-    r = backtest_bot(bot, data=frames, benchmark_close=qqq, save_to_db=False, save_results_to_db=False, return_series=True)
+    r = backtest_bot(
+        bot, data=frames, benchmark_close=qqq, save_to_db=False, save_results_to_db=False, return_series=True
+    )
     values = [p["v"] for p in r["equity_curve"]]
     stamps = [pd.Timestamp(p["t"]) for p in r["equity_curve"]]
     bh = [p["v"] for p in r["buy_hold_curve"]]
