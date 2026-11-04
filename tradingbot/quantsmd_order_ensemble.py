@@ -64,10 +64,10 @@ COMPONENTS = (
     quantsmd_stop_limit_protection,
     quantsmd_limit_rsi_dip,
 )
-TARGET_VOL = 0.10
+TARGET_VOL = 0.06  # walk-forward 2026-11 (docs/backtests/quantsmd-v2-2026-11.md)
 VOL_WINDOW = 63
 MAX_GROSS = 1.0
-SLEEVE_BOOST = 4.0
+SLEEVE_BOOST = 2.0  # walk-forward 2026-11 (see TARGET_VOL)
 
 
 def compute_weights(

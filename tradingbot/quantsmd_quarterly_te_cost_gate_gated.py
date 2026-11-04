@@ -41,7 +41,7 @@ TE_THRESHOLD = base.TE_THRESHOLD
 TE_WINDOW = base.TE_WINDOW
 MAX_ANNUAL_TURNOVER = base.MAX_ANNUAL_TURNOVER
 REGIME_WINDOW = 200
-OFF_SCALE = 0.0
+OFF_SCALE = 0.5  # walk-forward 2026-11: beats 0.0 out of sample (docs/backtests/quantsmd-v2-2026-11.md)
 
 
 def compute_weights(

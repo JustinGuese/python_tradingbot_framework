@@ -8,13 +8,15 @@ from tradingbot.quantsmd_daily_partial_drift import compute_weights as original_
 from tradingbot.quantsmd_daily_partial_drift_v2 import (
     CAP,
     ENTER,
-    LOOKBACK,
     MIN_HOLD,
     UNIVERSE,
     QuantsmdDailyPartialDriftV2Bot,
     compute_weights,
 )
 from tradingbot.utils.quantsmd_common import SECTORS9
+
+# The scenarios below are sized for a 63-bar window; the shipped default is 126 (walk-forward 2026-11).
+LOOKBACK = 63
 
 # A steady 0.2%/bar rise gives a 63-bar momentum of about +13%, well above the
 # +0.02 entry threshold.

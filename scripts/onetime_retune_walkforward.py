@@ -27,7 +27,8 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 import tradingbot.utils.db as db  # noqa: E402
 
 SCRATCH = os.environ.get("RETUNE_SCRATCH", "/tmp")
-START, SPLIT = "2019-01-01", "2023-01-01"
+START = os.environ.get("RETUNE_START", "2019-01-01")
+SPLIT = os.environ.get("RETUNE_SPLIT", "2023-01-01")
 
 eng = create_engine(f"sqlite:///{SCRATCH}/retune_{sys.argv[2]}.db", connect_args={"check_same_thread": False})
 db.Base.metadata.create_all(eng)

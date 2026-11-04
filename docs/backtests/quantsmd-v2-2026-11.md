@@ -51,3 +51,32 @@ one `backtest_bot` run over the whole common history, default parameters, framew
   with no 1m spread, default parameters, no retune. None of these ten was walk-forward tuned.
 - The A1 hysteresis bots replay only the last 500 bars of state per call (to keep backtests linear).
 - All ten are registered as paper CronJobs in `helm/tradingbots/values.yaml` and none feeds a copier.
+
+## Walk-forward re-tune (2026-11-04)
+
+Same rule as `retune-2026-09.md`: grid-search on H1 by `alpha_t`, then judge the H1 winner against the
+defaults on the unseen H2. New parameters ship only if they beat the defaults on H2 with positive H2 alpha.
+Differences: H1 = 2000-2012 and H2 = 2013-2026 (these bots have 25 years of daily history), via
+`RETUNE_START` / `RETUNE_SPLIT` on `scripts/onetime_retune_walkforward.py`. The grids are the bots' own
+`param_grid` (2-9 combinations), so this is a narrow search. IntradayGatedEma is not tuned: yfinance serves 60
+days of 5m bars, so no H1/H2 split exists.
+
+H2 alpha (t) of the defaults vs the H1 winner:
+
+| Bot | H1 winner | Defaults H2 | Winner H2 | Verdict |
+|---|---|---|---|---|
+| DailyPartialDriftV2 | `lookback` 126 | -1.1% (-0.43) | +0.6% (0.25) | **shipped** (better in both halves; still no edge) |
+| OrderEnsemble | `target_vol` 0.06, `sleeve_boost` 2.0 | -0.9% (-0.68) | +0.2% (0.23) | **shipped** (lower beta; still a QQQ clone) |
+| QuarterlyTeCostGateGated | `off_scale` 0.5 | +1.3% (0.51) | +2.4% (0.93) | **shipped** (better in both halves) |
+| SmaDailyGated | `off_scale` 0.5 | +3.1% (1.35) | +1.2% (0.60) | keep 0.0 |
+| MacdTrendV2 | `min_hold` 21 | +1.7% (0.68) | +1.0% (0.38) | keep |
+| FxEtfTimeSeriesMomentum | `lookback` 63 | -2.3% (-1.44) | -3.5% (-2.10) | keep |
+| CrossSectionalReversalV2 | `buffer` 3 | +0.1% (0.09) | +0.1% (0.05) | keep |
+| CrossSectionalMomentumV2 | `skip` 21 | -0.2% (-0.15) | same as defaults | keep |
+| PairsBasketZscore | `window` 60 | +0.2% (0.08) | same as defaults | keep |
+
+None of the shipped changes gives a bot real edge: the largest H2 t is 0.93. They are small improvements
+that survived the out-of-sample check, and the other six defaults held up. SmaDailyGated's default (`off_scale`
+0.0) beat the grid winner out of sample, which supports the gate as designed. Note that on the 2013-2026 half
+alone its default t is 1.35 (H1 1.68), lower than the full-window 3.08, so the headline number leans on the
+2000-2012 drawdowns the gate avoided.

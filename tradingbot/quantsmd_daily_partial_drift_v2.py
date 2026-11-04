@@ -32,7 +32,7 @@ from tradingbot.utils.quantsmd_v2 import min_hold_state, schmitt_state
 from tradingbot.utils.runner import run_bot
 
 UNIVERSE = list(SECTORS9)
-LOOKBACK = 63
+LOOKBACK = 126  # walk-forward 2026-11: beats 63 out of sample (docs/backtests/quantsmd-v2-2026-11.md)
 CAP = 0.35
 REPLAY_BARS = 500  # bounds the per-bar state replay so a long backtest stays linear
 ENTER = 0.02
