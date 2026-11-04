@@ -412,6 +412,24 @@ telegramMonitor:
 
 See [Telegram Monitor Guide](docs/guides/telegram-monitor.md) for full setup instructions.
 
+## 🧪 quants.md Strategy Bots (`quantsmd_*`)
+
+45 re-implementations of the [quants.md](https://quants.md/?sort=sharpe) (QuantJourney) example strategies plus 10 `v2`
+variants, all `tradingbot/quantsmd_*.py`, all **paper** CronJobs, none wired into a live copier. Each file has a pure
+`compute_weights(...)` and a `targetWeights` bot; shared helpers are in `tradingbot/utils/quantsmd_common.py`
+(universes, rebalance gates), `quantsmd_orders.py` (OHLC fill model for order-style bots) and `quantsmd_v2.py`
+(hysteresis, minimum hold, vol targeting, SHV cash parking, SPY SMA200 regime gate).
+
+Backtest them with `uv run python scripts/onetime_quantsmd_backtest.py [module ...]`; results are judged on alpha vs
+QQQ and t-stat, not return:
+
+- [Top 10](docs/backtests/quantsmd-2026-11.md) and [the other 35](docs/backtests/quantsmd-2026-11-all.md): nothing
+  has real edge (t >= 2 in both halves). Most bots are under-invested (beta 0.03-0.3), so their small positive alpha
+  is a low-beta artefact. FX and intraday bots lose.
+- [v2 variants](docs/backtests/quantsmd-v2-2026-11.md): `quantsmd_sma_daily_gated` (SPY below SMA200 -> cash) is the
+  first to clear t >= 2 with both halves positive (t 3.08, beta 0.16), still a watch-list candidate. Hysteresis,
+  rank buffers, currency-ETF carry, a pairs basket and a 12-bot order ensemble did not help.
+
 ## 📈 Live Trading (Collective2, Interactive Brokers, eToro & Darwinex)
 
 > [!WARNING]
