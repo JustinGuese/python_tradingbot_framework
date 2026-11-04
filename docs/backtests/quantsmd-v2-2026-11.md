@@ -38,7 +38,7 @@ one `backtest_bot` run over the whole common history, default parameters, framew
 - **PairsBasketZscore confirms the KO/PEP hindsight worry.** Eight pairs give t 0.39 against 3.10 for the single
   pair.
 - **OrderEnsemble is a QQQ-correlated book** (corr 0.88, beta 0.41, alpha about 0, t -0.29). Averaging twelve
-  copies of one SMA signal and levering to 10% vol rebuilds QQQ exposure, not alpha. As Claude's CLAUDE.md rule
+  copies of one SMA signal and levering to 10% vol rebuilds QQQ exposure, not alpha. The project rule
   says: replace with QQQ, do not blend it.
 - **FxEtfTimeSeriesMomentum is still negative** (t -1.10), so currency-ETF carry did not rescue FX
   momentum. The H2 half is the loser (t -1.43). Drop the idea, or test short-rate carry directly.
