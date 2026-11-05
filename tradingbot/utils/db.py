@@ -588,6 +588,67 @@ class PredictionMarketSnapshot(Base):
     captured_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class WorldEvent(Base):
+    """
+    One sighting of a world event (headline, quake, filing, Telegram squawk) by one source.
+
+    The same story arrives from several sources; each sighting is its own row so
+    "which source is first" is a GROUP BY on `dedupe_key`. `is_first` marks the first
+    sighting of a key in the past 24h and is the only one that gets price snapshots.
+
+    Latency columns: `source_ts` is when the publisher says it was published,
+    `received_at` when WE got it. `received_at - source_ts` is the feed's delay;
+    it is NULL-safe (some feeds carry no timestamp). Written by
+    tradingbot/eventlogger.py (utils/world_events.py). No trading reads this yet.
+    `event_class` is reserved for the later LLM labelling step and stays NULL.
+    """
+
+    __tablename__ = "world_events"
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_world_events_source_external_id"),
+        Index("ix_world_events_dedupe_key", "dedupe_key"),
+        Index("ix_world_events_received_at", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # e.g. rss:fed, alpaca, telegram:-100..
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str | None] = mapped_column(String, nullable=True)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    symbols: Mapped[str | None] = mapped_column(String, nullable=True)  # comma-separated, if the source tags any
+    source_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # naive UTC
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # naive UTC
+    is_first: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    event_class: Mapped[str | None] = mapped_column(String, nullable=True)
+    acted_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class EventPriceSnapshot(Base):
+    """
+    Price of one watchlist symbol at a fixed offset after a first-sighting event.
+
+    `offset_s` is the scheduled offset (0, 60, 300, ...); `fetched_at` when the price
+    was really read; `bar_ts` the timestamp of the 1-minute bar it came from. A
+    `bar_ts` far behind `fetched_at` is stale data (closed market, slow feed), not a
+    flat reaction. Study code must filter on `fetched_at - bar_ts`.
+    """
+
+    __tablename__ = "event_price_snapshots"
+    __table_args__ = (
+        UniqueConstraint("event_id", "offset_s", "symbol", name="uq_event_price_snapshots_event_offset_symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("world_events.id"), nullable=False, index=True)
+    offset_s: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)  # NULL = no bar available
+    bar_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # naive UTC
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class VolSurfaceSnapshot(Base):
     """
     One row per underlying per day: the option_quotes chain condensed into the

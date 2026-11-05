@@ -118,6 +118,10 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ applied_splits │ One row per (bot, symbol, ex-date) once a split was applied to a book: never twice │ utils/splits.py │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ world_events │ One row per source sighting of a headline / quake / filing / Telegram squawk: source_ts, received_at, dedupe_key, is_first (eventlogger Deployment, utils/world_events.py) │ latency study only, nothing trades on it │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+│ event_price_snapshots │ Watchlist price at +0/1/5/15/60 min after each first-sighting event, with the 1m bar_ts it came from │ event study (filter on fetched_at - bar_ts for stale bars) │
+├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ bot_alpha_report │ Weekly alpha / t / beta / corr / max DD vs Benchmark_QQQ per live bot, with a verdict │ review (alphareport CronJob, utils/alpha_report.py) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ prediction_market_snapshots │ Daily Kalshi / Polymarket prices of curated macro contracts (Fed path + decisions, CPI, payrolls, U3, GDP, recession, shutdown), Kalshi from 2021-07 │ PredictionMarketOverlayBot, not scheduled (utils/prediction_market_features.py) │
@@ -922,6 +926,25 @@ Other helpers:
     - `PortfolioManager` locks the row inside each transaction and reads
       dicts otherwise.
     - This removed a latent `DetachedInstanceError` on partial option sells.
+
+### World-event latency logger (step 1, record only)
+
+`tradingbot/eventlogger.py` is a long-running Deployment (`eventLogger.enabled`,
+off by default; helm `deployment-eventlogger.yaml`), not a CronJob. It polls RSS/Atom
+feeds (45 s), Alpaca news over REST (15 s, needs optional `ALPACA_API_KEY` /
+`ALPACA_API_SECRET`) and bridges `telegram_messages`, writes `world_events`, and prices a
+watchlist at +0/1/5/15/60 min after each **first** sighting of a story. It never trades and
+makes no LLM calls (`event_class` stays NULL until a labelling step exists).
+
+- Source latency = `received_at - source_ts`. Which source is first = `GROUP BY dedupe_key`
+  ordered by `received_at`. The telegram bridge's `received_at` is the monitor row's
+  `created_at`, and that monitor is a 5-minute CronJob, so its floor is minutes.
+- `price` NULL means no 1m bar existed (closed market). Judge a reaction only where
+  `fetched_at - bar_ts` is small; yfinance 1m bars lag.
+- Default feed URLs were not verified live from the build sandbox; a dead feed logs a
+  warning per poll. Override with `eventLogger.rssFeeds`.
+- Next steps (not built): event study per class, then a paper `targetWeights` bot only on
+  classes where a lagging asset shows alpha t >= 2 vs QQQ.
 
 ### Stock splits
 

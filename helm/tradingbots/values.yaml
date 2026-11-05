@@ -846,3 +846,19 @@ telegramMonitor:
   channels: "-1002202241417,-1001998690333"
   # Number of recent messages to fetch per channel per run
   fetchLimit: "50"
+
+eventLogger:
+  # Long-running latency logger, step 1 of event-driven trading. Records world events
+  # (RSS, Alpaca news, Telegram) and watchlist prices at +0/1/5/15/60 min into
+  # world_events / event_price_snapshots. Never trades. Needs optional secret keys
+  # ALPACA_API_KEY / ALPACA_API_SECRET for the Alpaca source (skipped without them).
+  enabled: false
+  rssFeeds: "" # "name=url,name2=url2"; empty = built-in defaults (utils/world_events.py)
+  watchlist: "" # comma-separated yfinance symbols; empty = built-in defaults
+  resources:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
