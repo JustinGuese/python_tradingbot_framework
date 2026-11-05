@@ -125,7 +125,7 @@ def compute_weights(
             elif name == "te_gated":
                 cols = [c for c in ETF8 if c in closes.columns]
                 sub = closes[cols] if cols else pd.DataFrame(index=closes.index)
-                state = {"last_target": None, "turnover": []}
+                state: dict = {"last_target": None, "turnover": []}
                 book = te_gated.compute_weights(
                     sub,
                     te_gated.LOOKBACK,
