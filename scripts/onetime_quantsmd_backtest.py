@@ -131,6 +131,8 @@ BOTS = [
     ("quantsmd_sma_daily_gated", "QuantsmdSmaDailyGatedBot", None),
     ("quantsmd_quarterly_te_cost_gate_gated", "QuantsmdQuarterlyTeCostGateGatedBot", None),
     ("quantsmd_intraday_gated_ema", "QuantsmdIntradayGatedEmaBot", None),
+    ("quantsmd_sma_daily_gated_v3", "QuantsmdSmaDailyGatedV3Bot", None),
+    ("quantsmd_gated_blend", "QuantsmdGatedBlendBot", None),
 ]
 
 

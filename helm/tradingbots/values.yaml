@@ -535,6 +535,12 @@ bots:
 - name: quantsmd_intraday_gated_ema
   schedule: "*/5 13-20 * * 1-5"
 
+- name: quantsmd_sma_daily_gated_v3
+  schedule: "7 21 * * 1-5" # SMA daily sector rotation with SPY regime gate and SHV cash parking (v3)
+
+- name: quantsmd_gated_blend
+  schedule: "7 21 * * 1-5" # Equal-ish blend of positive-alpha quantsmd bots (sma_gated, reversal, momentum, te_gated)
+
 # Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours
