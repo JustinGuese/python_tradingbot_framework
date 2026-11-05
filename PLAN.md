@@ -112,7 +112,7 @@ Files: modify `helm/tradingbots/values.yaml` (append) and `scripts/onetime_quant
 3. `uv run ruff format` + `ruff check` on the script; `helm lint helm/tradingbots` if installed.
 
 ## After each batch (Claude, not workers)
-Merge branches into `agy/work`; run full `uv run ruff check . && uv run ruff format --check . && uv run mypy
+Merge branches into `agy/v3`; run full `uv run ruff check . && uv run ruff format --check . && uv run mypy
 tradingbot && pytest tests -q` (POSTGRES_URI stub). After Batch 2 Claude runs the backtests for the two new bots
 (`scripts/onetime_quantsmd_backtest.py`) and the four robustness sections, writes
 `docs/backtests/quantsmd-v3-2026-11.md`, and reports against the bar above.
