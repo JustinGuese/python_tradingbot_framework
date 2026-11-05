@@ -14,8 +14,9 @@ two bots and a robustness test of that one candidate. Reproduce with
 | GatedBlend (0.4 sma_gated / 0.2 reversal / 0.2 momentum / 0.2 te_gated, static) | 2006 | +1.3% | 1.06 | 0.17 | 0.57 | -12.8% | 0.54 | 0.99 |
 
 - V3 is on a 2007+ window (SHV exists from 2007), so its t is not comparable with the v2 bot's 3.08 over 2000-2026.
-  Both halves are positive. SHV parking adds the T-bill yield the paper bot was missing, but its beta is higher
-  (0.26 vs 0.16) because the SHV sleeve is not zero-beta in the way cash is for the regression window.
+  Both halves are positive. SHV parking adds the T-bill yield the paper bot was missing. Its beta is higher (0.26 vs 0.16), most likely
+  because the 2007+ window drops the 2000-06 stretch (beta 0.06) and keeps the 2013-19 stretch (beta 0.40); this was
+  not isolated, so the v2 bot on the same 2007+ window is the fair comparison and has not been run.
 - The blend does not beat its best component (t 1.06). The four components are all sector or ETF8 trend books,
   so they are correlated (corr with QQQ 0.57) and averaging them dilutes the one strong signal.
   The blend was fixed-weight, not fitted, so this is a clean negative.
