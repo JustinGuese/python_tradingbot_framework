@@ -794,7 +794,7 @@ def run_insider_study(
             placebo_p=placebo_p,
         )
         results.append(vr)
-        print(f"[{vr.name:28s}] N={vr.n_clusters:3d} | AR Mean={vr.ar_mean:+5.2f}% (t={vr.ar_t:4.2f}) | Net2bp Alpha={vr.net_2bp_alpha if vr.net_2bp_alpha is not None else 0.0:+5.2f}% (t={vr.net_2bp_t if vr.net_2bp_t is not None else 0.0:4.2f}) | Pass={vr.passes}")
+        print(f"[{vr.name:28s}] N={vr.n_clusters:3d} | AR Mean={vr.ar_mean:+5.2f}% (t={vr.ar_t:4.2f}) | Net2bp Alpha={(vr.net_2bp_alpha or 0.0) * 100:+5.2f}% (t={vr.net_2bp_t if vr.net_2bp_t is not None else 0.0:4.2f}) | Pass={vr.passes}")
 
     # Determine final study verdict
     passing_variants = [r for r in results if r.passes]
@@ -839,25 +839,32 @@ def generate_markdown_report(results: list[VariantResult], verdict: str, total_c
         ar_t_str = f"{r.ar_t:.2f}"
         win_str = f"{r.win_pct:.1f}%"
 
-        gross_str = f"{r.gross_alpha:+.2f}% ({r.gross_t:.2f})" if r.gross_alpha is not None else "N/A"
-        net2_str = f"{r.net_2bp_alpha:+.2f}% ({r.net_2bp_t:.2f})" if r.net_2bp_alpha is not None else "N/A"
-        net5_str = f"{r.net_5bp_alpha:+.2f}% ({r.net_5bp_t:.2f})" if r.net_5bp_alpha is not None else "N/A"
+        gross_str = f"{r.gross_alpha * 100:+.2f}% ({r.gross_t:.2f})" if r.gross_alpha is not None else "N/A"
+        net2_str = f"{r.net_2bp_alpha * 100:+.2f}% ({r.net_2bp_t:.2f})" if r.net_2bp_alpha is not None else "N/A"
+        net5_str = f"{r.net_5bp_alpha * 100:+.2f}% ({r.net_5bp_t:.2f})" if r.net_5bp_alpha is not None else "N/A"
         beta_str = f"{r.beta:.2f}" if r.beta is not None else "N/A"
-        h1_str = f"{r.h1_alpha:+.2f}% ({r.h1_t:.2f})" if r.h1_alpha is not None else "N/A"
-        h2_str = f"{r.h2_alpha:+.2f}% ({r.h2_t:.2f})" if r.h2_alpha is not None else "N/A"
+        h1_str = f"{r.h1_alpha * 100:+.2f}% ({r.h1_t:.2f})" if r.h1_alpha is not None else "N/A"
+        h2_str = f"{r.h2_alpha * 100:+.2f}% ({r.h2_t:.2f})" if r.h2_alpha is not None else "N/A"
         pass_str = "**PASS**" if r.passes else "FAIL"
 
         lines.append(
             f"| {r.name} | {r.hold_days}d | {r.min_size} | ${int(r.min_usd // 1000)}k | {r.n_clusters} | {ar_mean_str} | {ar_t_str} | {win_str} | {gross_str} | {net2_str} | {net5_str} | {beta_str} | {h1_str} | {h2_str} | {pass_str} |"
         )
 
+    scored = [r for r in results if r.net_2bp_t is not None]
+    best = max(scored, key=lambda r: r.net_2bp_t) if scored else None
+    best_name = best.name if best else "n/a"
+    best_alpha = (best.net_2bp_alpha or 0.0) * 100 if best else 0.0
+    best_t = best.net_2bp_t if best else 0.0
+    n_both_pos = sum(1 for r in results if (r.h1_alpha or 0) > 0 and (r.h2_alpha or 0) > 0)
+
     lines.extend([
         "",
         "## Key Findings",
         "",
         f"1. **Cluster Frequency in Large-Cap Equities:** Insider open-market purchases (Code `P`) in S&P 100 companies are relatively rare compared to stock awards or option exercises. Over the 20-year sample (2006-2026), {total_clusters} multi-insider cluster events were identified.",
-        "2. **Holding Horizons & Abnormal Returns:** Shorter holding periods (10-20 sessions) show modest positive abnormal returns post-filing, but transaction costs (2-5 bp/side) and holding beta dilute standalone portfolio alpha vs QQQ.",
-        "3. **Consistency Across Halves:** Splitting the sample into H1 (2006-2015) and H2 (2016-2026) reveals that insider cluster buy predictability degraded significantly in the second decade as systematic algorithmic disclosure scraping increased.",
+        f"2. **Best variant by net-2bp t:** {best_name} (alpha {best_alpha:+.2f}%/yr, t {best_t:.2f}).",
+        f"3. **Variants with positive alpha in both halves:** {n_both_pos} of {len(results)}.",
         f"4. **Verdict Assessment:** Final study verdict is `{verdict}` against the pre-registered acceptance criteria.",
     ])
 
