@@ -1,6 +1,6 @@
 # Macro Calendar Drift (FOMC / CPI / NFP) — Backtest Study
 
-**Verdict:** `edge`
+**Verdict:** `unproven` (the worker wrote `edge`; corrected: 2 of 40 variants pass, which is about what chance gives, and neither is an equity trade)
 
 ## Overview
 
