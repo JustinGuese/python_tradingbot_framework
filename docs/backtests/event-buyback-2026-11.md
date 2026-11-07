@@ -57,3 +57,5 @@ t of daily alpha vs QQQ. It reproduces the observed variant at t 2.96 / +12.2%/y
   - Buyback authorizations were identified by regex on the 8-K text (530 matches), not hand-checked.
 - Next step if pursued: a paper `targetWeights` bot that buys each new authorization at the next close and holds 10 sessions,
   then judge it with `alphareport`. Needs a live 8-K poller (EDGAR submissions API, 10 req/s limit).
+
+**Live forward test (2026-11-07):** `BuybackDriftBot` (paper) and the `buybackscan` CronJob collect the record. The bot caps each name at 50%, unlike this study's 100% single-name book. Judge it by `alphareport`; expect `too short` for months.
