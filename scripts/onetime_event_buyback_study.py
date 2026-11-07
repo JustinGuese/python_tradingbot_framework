@@ -94,16 +94,21 @@ class RateLimiter:
     """Enforces max requests per second."""
 
     def __init__(self, max_per_second: float = MAX_EDGAR_REQ_PER_SEC):
+        import threading
+
         self.interval = 1.0 / max_per_second if max_per_second > 0 else 0.0
-        self.last_request = 0.0
+        self.next_slot = 0.0
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
         if self.interval <= 0:
             return
-        elapsed = time_mod.time() - self.last_request
-        if elapsed < self.interval:
-            time_mod.sleep(self.interval - elapsed)
-        self.last_request = time_mod.time()
+        with self._lock:  # reserve the next free slot, then sleep outside the lock
+            now = time_mod.time()
+            slot = max(now, self.next_slot)
+            self.next_slot = slot + self.interval
+        if slot > now:
+            time_mod.sleep(slot - now)
 
 
 RATE_LIMITER = RateLimiter(MAX_EDGAR_REQ_PER_SEC)
@@ -460,28 +465,31 @@ def filter_filings_by_buyback_primary_doc(
     Inspect the primary document of each candidate 8-K filing.
     Keeps only filings whose text matches the buyback regex.
     """
-    matched: list[dict] = []
-    for f in filings:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def check(f: dict) -> dict | None:
         cik = f["cik"]
-        acc_raw = f["accession_number"]
-        acc_clean = acc_raw.replace("-", "")
+        acc_clean = f["accession_number"].replace("-", "")
         pdoc = f["primary_document"]
         if not pdoc:
-            continue
-
+            return None
         doc_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{pdoc}"
         cache_file = DOCS_CACHE_DIR / f"{cik}_{acc_clean}_{pdoc}"
+        raw_bytes = fetch_edgar_bytes(doc_url, cache_file=cache_file, use_cache=use_cache)
+        text = clean_html(raw_bytes.decode("utf-8", errors="replace"))
+        return dict(f) if matches_buyback_regex(text) else None
 
+    def safe(f: dict) -> tuple[dict | None, bool]:
         try:
-            raw_bytes = fetch_edgar_bytes(doc_url, cache_file=cache_file, use_cache=use_cache)
-            raw_html = raw_bytes.decode("utf-8", errors="replace")
-            cleaned_text = clean_html(raw_html)
-            if matches_buyback_regex(cleaned_text):
-                f_matched = dict(f)
-                matched.append(f_matched)
+            return check(f), False
         except Exception:
-            pass
+            return None, True
 
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(safe, filings))
+    matched = [m for m, _ in results if m is not None]
+    failures = sum(1 for _, failed in results if failed)
+    print(f"Filings checked: {len(filings)}, matched: {len(matched)}, fetch failures: {failures}", flush=True)
     return matched
 
 
@@ -783,7 +791,10 @@ def run_placebo_test(
     rng = np.random.default_rng(seed)
 
     exceed_count = 0
-    for _ in range(n_draws):
+    t_start = time_mod.time()
+    for i_draw in range(n_draws):
+        if i_draw and i_draw % 25 == 0:
+            print(f"  placebo {i_draw}/{n_draws} draws, {time_mod.time() - t_start:.0f}s elapsed, exceed so far {exceed_count}", flush=True)
         rand_dates = rng.choice(valid_dates, size=n_events, replace=True)
         rand_syms = rng.choice(symbols, size=n_events, replace=True)
         sim_signals = pd.DataFrame({
@@ -831,7 +842,7 @@ def format_markdown_report(
         "- **Look-Ahead Guard:** Entry is strictly the first daily close following filing acceptance time (or next session close if only date is known).",
         "- **Execution Costs:** Net of 2 bp per side (standard) and also reported at 5 bp per side (framework default).",
         "- **Evaluation Bar (anti-p-hacking):** Strategy alpha vs QQQ with `t >= 2.0`, positive alpha in **both** halves (`H1 > 0`, `H2 > 0`), and `beta < 0.5`.",
-        "- **Verdict Standard:** `edge` only if passing AND surviving placebo (2,000 random same-count draws, p < 0.05); else `unproven` or `no edge`.",
+        "- **Verdict Standard:** `edge` only if passing AND surviving placebo (random same-count draws, p < 0.05); else `unproven` or `no edge`.",
         "",
         f"## Pre-registered Variants Table ({len(results)} variants)",
         "",
@@ -867,21 +878,23 @@ def format_markdown_report(
         "",
         "## Key Findings",
         "",
-        "1. **Post-Announcement Drift Decay:** Form 8-K buyback authorizations among S&P 100 large-cap constituents",
-        "   exhibit negligible abnormal drift over short (5-day), intermediate (10-day), and 20-day horizons.",
-        "   Any early-period abnormal drift documented in historical academic literature has largely decayed in the post-2015 era.",
-        "2. **Size Partitioning:** Partitioning by median market cap shows that mega-caps (above median) have lower announcement reaction",
-        "   and drift compared to the broader index, reflecting instantaneous price discovery by institutional market participants.",
-        "3. **Announcement Reaction Filter:** Filtering for positive initial announcement abnormal reaction (`AR > 0`) does not produce",
-        "   persistent forward alpha; initial spikes tend to mean-revert rather than trend.",
     ])
 
+    scored =[r for r in results if r.strat_t_2bp is not None]
+    best = max(scored, key=lambda r: r.strat_t_2bp) if scored else None
+    n_events = max((r.n_events for r in results), default=0)
+    lines.append(f"1. **Sample:** up to {n_events} events per variant.")
+    if best is not None:
+        lines.append(
+            f"2. **Best variant by t (2bp):** hold {best.hold_days}d, size={best.size_bucket}, "
+            f"AR filter={best.ar_filter}: alpha {best.strat_alpha_2bp_pct:+.2f}%/yr, t {best.strat_t_2bp:.2f}."
+        )
     if passing:
-        lines.append(f"4. **Passing Variants:** {len(passing)} variant(s) passed the initial statistical criteria.")
+        lines.append(f"3. **Passing Variants:** {len(passing)} variant(s) passed the initial statistical criteria.")
         if placebo_p is not None:
-            lines.append(f"   - Placebo test p-value: `{placebo_p:.4f}` (requires p < 0.05).")
+            lines.append(f"   - Placebo test p-value: `{placebo_p:.4f}` over {os.environ.get('PLACEBO_DRAWS', '2000')} random same-count draws (requires p < 0.05).")
     else:
-        lines.append("4. **Overall Assessment:** None of the 12 pre-registered variants clear the statistical threshold (`t >= 2.0`, `alpha > 0` in both halves, `beta < 0.5`).")
+        lines.append("3. **Overall Assessment:** None of the 12 pre-registered variants clear the statistical threshold (`t >= 2.0`, `alpha > 0` in both halves, `beta < 0.5`).")
 
     lines.append("")
     return "\n".join(lines)
@@ -976,14 +989,15 @@ def run_buyback_study(
     placebo_p = None
     if passing:
         best_pass = max(passing, key=lambda x: x.strat_t_2bp if x.strat_t_2bp is not None else -999)
-        print(f"\nRunning 2,000 Monte Carlo placebo draws for passing variant (t={best_pass.strat_t_2bp:.2f})...")
+        n_placebo = int(os.environ.get("PLACEBO_DRAWS", "2000"))
+        print(f"\nRunning {n_placebo} Monte Carlo placebo draws for passing variant (t={best_pass.strat_t_2bp:.2f})...")
         placebo_p = run_placebo_test(
             observed_t=best_pass.strat_t_2bp,
             n_events=best_pass.n_events,
             hold_days=best_pass.hold_days,
             prices=prices,
             qqq_prices=qqq_prices,
-            n_draws=2000,
+            n_draws=n_placebo,
         )
         print(f"Placebo p-value: {placebo_p:.4f}")
         verdict = "edge" if placebo_p < 0.05 else "unproven"
