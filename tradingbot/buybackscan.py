@@ -12,7 +12,7 @@ import argparse
 import logging
 import sys
 
-from tradingbot.utils.buyback_scan import scan
+from tradingbot.utils.buyback_scan import scan, touch_heartbeat
 from tradingbot.utils.config import setup_logging
 from tradingbot.utils.db import init_db
 from tradingbot.utils.universes import SP100
@@ -35,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         inserted = scan(symbols=SP100, since_days=args.backfill_days)
+        touch_heartbeat()
         logger.info("Buyback scan finished: %d event(s) inserted", len(inserted))
         return 0
     except Exception as exc:

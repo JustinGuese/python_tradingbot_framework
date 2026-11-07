@@ -213,6 +213,7 @@ def test_read_buyback_events_returns_rows_within_cutoff(monkeypatch):
 
 def test_target_weights_propagates_stale_scanner_error(make_bot, monkeypatch):
     """targetWeights does not suppress a dead scanner error."""
+
     def _raise():
         raise RuntimeError("buyback scanner is stale")
 

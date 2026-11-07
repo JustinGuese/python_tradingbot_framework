@@ -599,6 +599,26 @@ bots:
 - name: option_earningscrushbot
   schedule: "30 14,16,19 * * 1-5" # enters within 2h of the close (19:30, or 16:30 on an early close), 14:30 closes after the open
 
+- name: buybackscan
+  # Not a bot: scans SEC EDGAR for S&P 100 8-Ks (Item 8.01 / 7.01) announcing a share
+  # repurchase authorization and stores them in buyback_events (utils/buyback_scan.py).
+  # Feeds BuybackDriftBot. Idempotent on accession; writes a heartbeat row on every
+  # successful run; exits 1 if over 20% of symbols fail. <= 5 requests/s to SEC.
+  schedule: "*/30 13-21 * * 1-5" # every 30 min through US hours, Mon-Fri
+
+- name: buybackdriftbot
+  # Paper only. Holds an S&P 100 name for 10 sessions after its buyback authorization
+  # 8-K (equal weight, 0.5 cap). UNPROVEN: backtest t 2.56 but 1 of 12 pre-registered
+  # windows; judge by alphareport. Raises if the scanner heartbeat is stale.
+  # See docs/backtests/event-buyback-2026-11.md.
+  schedule: "10 21 * * 1-5" # after the 21:00 UTC scan and the US close
+
+- name: macroeventsleevebot
+  # Paper only. UUP/TLT/GLD held only around FOMC / CPI releases, cash otherwise.
+  # UNPROVEN (legs picked after seeing 40 variants); see
+  # docs/backtests/event-macro-followup-2026-11.md.
+  schedule: "5 21 * * 1-5" # after the US close
+
 - name: institutionalflowbot
   # Weekly top-20 of the S&P 100 passing institutional mandate filters
   # (liquidity, 200-day trend, QQQ above its 200-day), ranked by volume-based

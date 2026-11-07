@@ -8,15 +8,15 @@ the `buyback_events` table.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from datetime import UTC, datetime, time, timedelta
 import json
 import logging
 import threading
 import time as time_mod
-from typing import Any
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
+from datetime import UTC, datetime, time, timedelta
+from typing import Any
 
 import pandas as pd
 from sqlalchemy.exc import IntegrityError
@@ -94,7 +94,9 @@ def fetch_edgar_bytes(
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries:
-                logger.warning("Fetch failed for %s (attempt %d/%d), retrying: %s", url, attempt + 1, max_retries + 1, exc)
+                logger.warning(
+                    "Fetch failed for %s (attempt %d/%d), retrying: %s", url, attempt + 1, max_retries + 1, exc
+                )
                 time_mod.sleep(0.5)
             else:
                 logger.error("Fetch failed for %s after %d retries: %s", url, max_retries, exc)
@@ -117,10 +119,7 @@ def parse_acceptance_datetime(dt_str: str | None, filing_date_str: str | None = 
         if "T" in dt_str or "-" in dt_str:
             try:
                 ts = pd.Timestamp(dt_str)
-                if ts.tzinfo is not None:
-                    ts = ts.tz_convert(UTC)
-                else:
-                    ts = ts.tz_localize(UTC)
+                ts = ts.tz_convert(UTC) if ts.tzinfo is not None else ts.tz_localize(UTC)
                 return ts.to_pydatetime().replace(tzinfo=None)
             except Exception:
                 pass
@@ -213,14 +212,16 @@ def parse_candidate_filings(
             if filed_at < cutoff_dt:
                 continue
 
-            candidates.append({
-                "symbol": symbol,
-                "cik": cik,
-                "accession": acc,
-                "filing_date": fdate,
-                "filed_at": filed_at,
-                "primary_doc": pdoc,
-            })
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "cik": cik,
+                    "accession": acc,
+                    "filing_date": fdate,
+                    "filed_at": filed_at,
+                    "primary_doc": pdoc,
+                }
+            )
 
     recent = submissions_data.get("filings", {}).get("recent", {})
     if recent:
@@ -275,6 +276,31 @@ def _insert_event(event_data: dict[str, Any]) -> BuybackEvent | None:
             return None
 
 
+HEARTBEAT_ACCESSION = "heartbeat"
+
+
+def touch_heartbeat(now: datetime | None = None) -> None:
+    """Record that a scan finished OK, so a quiet market is not mistaken for a dead scanner.
+
+    One row (symbol ``_HEARTBEAT``, ``filed_at`` in 1970 so it is never an event) whose
+    ``created_at`` is refreshed on every successful run; BuybackDriftBot reads MAX(created_at).
+    """
+    stamp = (now or datetime.now(UTC)).astimezone(UTC).replace(tzinfo=None)
+    with get_db_session() as session:
+        row = session.query(BuybackEvent).filter_by(accession=HEARTBEAT_ACCESSION).first()
+        if row is None:
+            session.add(
+                BuybackEvent(
+                    symbol="_HEARTBEAT",
+                    accession=HEARTBEAT_ACCESSION,
+                    filed_at=datetime(1970, 1, 1),
+                    created_at=stamp,
+                )
+            )
+        else:
+            row.created_at = stamp
+
+
 def scan(
     symbols: Sequence[str] | None = None,
     since_days: int = DEFAULT_SINCE_DAYS,
@@ -302,10 +328,7 @@ def scan(
     Raises:
         RuntimeError: If more than fail_threshold (20%) of symbols fail.
     """
-    if symbols is None:
-        target_symbols = list(SP100)
-    else:
-        target_symbols = list(symbols)
+    target_symbols = list(SP100) if symbols is None else list(symbols)
 
     if not target_symbols:
         return []
@@ -401,7 +424,12 @@ def scan(
                 new_row = _insert_event(event_data)
                 if new_row is not None:
                     inserted_events.append(new_row)
-                    logger.info("Inserted BuybackEvent for %s: accession %s, filed_at %s", sym, cand["accession"], cand["filed_at"])
+                    logger.info(
+                        "Inserted BuybackEvent for %s: accession %s, filed_at %s",
+                        sym,
+                        cand["accession"],
+                        cand["filed_at"],
+                    )
 
         except Exception as exc:
             logger.warning("Error scanning symbol %s: %s", sym, exc)

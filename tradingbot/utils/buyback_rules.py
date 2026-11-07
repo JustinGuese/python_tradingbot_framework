@@ -7,10 +7,10 @@ holding period tracking across NYSE sessions, and rolling window deduplication.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from datetime import UTC, date, datetime
 import html
 import re
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -133,7 +133,7 @@ def _extract_symbol_and_entry(event: Any) -> tuple[str, date]:
                 raise ValueError(f"Event missing filed_at or entry_session: {event}")
             ent = entry_session(filed)
     else:
-        sym = str(getattr(event, "symbol"))
+        sym = str(event.symbol)
         ent = getattr(event, "entry_session", None)
         if ent is None:
             filed = (
@@ -211,7 +211,7 @@ def _extract_symbol(event: Any) -> str:
     """Extract symbol from event."""
     if isinstance(event, dict):
         return str(event["symbol"])
-    return str(getattr(event, "symbol"))
+    return str(event.symbol)
 
 
 def dedupe_recent(

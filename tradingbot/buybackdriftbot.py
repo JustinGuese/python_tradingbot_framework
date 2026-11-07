@@ -15,8 +15,8 @@ Schedule: 10 21 * * 1-5 (after the US close and the 21:00 buyback scan).
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
 import logging
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -43,22 +43,14 @@ def read_buyback_events(
     (MAX(created_at) older than max_staleness_days or no rows) so a dead scanner fails loudly.
     """
     ref_time = now or datetime.now(UTC)
-    ref_naive = (
-        ref_time.astimezone(UTC).replace(tzinfo=None)
-        if ref_time.tzinfo is not None
-        else ref_time
-    )
+    ref_naive = ref_time.astimezone(UTC).replace(tzinfo=None) if ref_time.tzinfo is not None else ref_time
 
     with get_db_session() as session:
         max_created = session.query(func.max(BuybackEvent.created_at)).scalar()
         if max_created is None:
             raise RuntimeError("buyback_events table is empty; scanner has never run")
 
-        max_naive = (
-            max_created.astimezone(UTC).replace(tzinfo=None)
-            if max_created.tzinfo is not None
-            else max_created
-        )
+        max_naive = max_created.astimezone(UTC).replace(tzinfo=None) if max_created.tzinfo is not None else max_created
 
         staleness_seconds = (ref_naive - max_naive).total_seconds()
         if staleness_seconds > max_staleness_days * 86400:
@@ -127,7 +119,7 @@ class BuybackDriftBot(Bot):
 
         n = len(active)
         weight = min(1.0 / n, 0.5)
-        weights = {sym: weight for sym in active}
+        weights = dict.fromkeys(active, weight)
         logger.info(
             "%s: %s active=%s (n=%d, cap=0.5) -> %s",
             self.bot_name,

@@ -122,6 +122,7 @@ Data Available
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ event_price_snapshots │ Watchlist price at +0/1/5/15/60 min after each first-sighting event, with the 1m bar_ts it came from │ event study (filter on fetched_at - bar_ts for stale bars) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
+| buyback_events │ S&P 100 8-K share-repurchase authorizations (accession, filed_at, snippet) plus a `_HEARTBEAT` row refreshed by each successful scan; `buybackscan` CronJob every 30 min in US hours │ BuybackDriftBot (utils/buyback_scan.py) │
 │ bot_alpha_report │ Weekly alpha / t / beta / corr / max DD vs Benchmark_QQQ per live bot, with a verdict │ review (alphareport CronJob, utils/alpha_report.py) │
 ├──────────────────────┼───────────────────────────────────────────────────┼────────────────────────┤
 │ prediction_market_snapshots │ Daily Kalshi / Polymarket prices of curated macro contracts (Fed path + decisions, CPI, payrolls, U3, GDP, recession, shutdown), Kalshi from 2021-07 │ PredictionMarketOverlayBot, not scheduled (utils/prediction_market_features.py) │
@@ -310,6 +311,8 @@ Existing Strategies (don't duplicate)
 │ option_EarningsCrushBot │ 50 names    │ Iron fly over reports priced >= 1.25x history  │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ option_DispersionBot   │ SPY + top 10 │ Short SPY fly vs member straddles, rich corr   │
+├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
+│ BuybackDriftBot │ S&P 100 │ Hold 10 sessions after a buyback-authorization 8-K, equal weight, 0.5 cap (paper, UNPROVEN: t 2.56 but 1 of 12 windows; utils/buyback_rules.py) │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤
 │ InstitutionalFlowBot │ S&P 100 │ Weekly top-N by institutional mandate filters + volume accumulation (utils/institutional_ta.py) │
 ├────────────────────────┼──────────────┼────────────────────────────────────────────────┤

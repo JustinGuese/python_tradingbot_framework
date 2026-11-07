@@ -4,18 +4,18 @@ Tests for SEC EDGAR 8-K buyback scanner (tradingbot.utils.buyback_scan and tradi
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import UTC, datetime
 import io
 import json
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from tradingbot.buybackscan import main as cli_main
 import tradingbot.utils.buyback_scan as scan_mod
+from tradingbot.buybackscan import main as cli_main
 from tradingbot.utils.buyback_scan import (
     TokenBucket,
     clear_cik_cache,
@@ -79,7 +79,7 @@ AAPL_SUBMISSIONS_FIXTURE = {
                 "aapl-10q.htm",
             ],
         }
-    }
+    },
 }
 
 AAPL_BUYBACK_DOC_HTML = """
@@ -201,7 +201,7 @@ def test_scan_inserts_matching_8k_once_and_not_twice(sqlite_buyback_db, monkeypa
     assert event.accession == "0000320193-24-000069"
     assert event.filed_at == datetime(2024, 5, 2, 16, 30, 15)
     assert "$110 billion" in (event.snippet or "")
-    assert "https://www.sec.gov/Archives/edgar/data/320193/000032019324000069/aapl-buyback.htm" == event.source_url
+    assert event.source_url == "https://www.sec.gov/Archives/edgar/data/320193/000032019324000069/aapl-buyback.htm"
 
     with sqlite_buyback_db() as session:
         rows = session.query(BuybackEvent).all()
