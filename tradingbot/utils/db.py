@@ -649,6 +649,26 @@ class EventPriceSnapshot(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class BuybackEvent(Base):
+    """
+    Form 8-K share repurchase / buyback authorization event.
+
+    Captured from SEC EDGAR 8-K filings (Item 8.01 or 7.01) by tradingbot/buybackscan.py
+    and traded by BuybackDriftBot.
+    """
+
+    __tablename__ = "buyback_events"
+    __table_args__ = (UniqueConstraint("accession", name="uq_buyback_events_accession"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    accession: Mapped[str] = mapped_column(String, nullable=False)
+    filed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class VolSurfaceSnapshot(Base):
     """
     One row per underlying per day: the option_quotes chain condensed into the
