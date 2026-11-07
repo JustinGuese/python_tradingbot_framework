@@ -1,6 +1,6 @@
 # Hard Events with LLM Labels — Backtest Study
 
-**Verdict:** `no edge`
+**Verdict:** `inconclusive` (only 2 of 5 classes had >= 20 events; the rest were not scored, so they are untested, not negative)
 
 ## Overview
 
