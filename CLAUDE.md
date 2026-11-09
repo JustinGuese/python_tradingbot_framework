@@ -67,7 +67,6 @@ rf × the cash share.
   "unproven" rather than "working".
 - **Prefer beta < 0.5 / correlation < 0.5.** A bot with beta ≈ 1 and ~0 alpha is
   a QQQ clone. Replace it with QQQ, don't blend it.
-- **Negative alpha with t ≤ −2 is a real result:** pause the bot.
 - Prefer a lower-alpha, lower-correlation bot over a higher-return,
   higher-beta one.
 
