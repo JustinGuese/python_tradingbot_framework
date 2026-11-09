@@ -59,3 +59,9 @@ t of daily alpha vs QQQ. It reproduces the observed variant at t 2.96 / +12.2%/y
   then judge it with `alphareport`. Needs a live 8-K poller (EDGAR submissions API, 10 req/s limit).
 
 **Live forward test (2026-11-07):** `BuybackDriftBot` (paper) and the `buybackscan` CronJob collect the record. The bot caps each name at 50%, unlike this study's 100% single-name book. Judge it by `alphareport`; expect `too short` for months.
+
+**Second look (2026-11-07, `event-buyback-broad-2026-11.md`):** the effect did not extend to the S&P 400/600 (815 new events:
+10-session alpha +4.6%, t 0.81, placebo p 0.13, event-level mean +0.02%). Re-running the complete S&P 100 set from 2010
+reproduces the lead (+10.1% at 2 bp, t 2.31) but at 10 bp it is t 1.82, the first half is flat, and the event-level mean
+abnormal return is +0.1% (median -0.4%). That rerun overlaps the original sample, so it is not independent confirmation.
+Treat this as a weak, unproven lead.

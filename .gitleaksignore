@@ -1,0 +1,4 @@
+# False positives: these are k8s Secret key NAMES (references), not secret values.
+c408139e3a2661f8f70bd3d298e1362d35eb8624:helm/tradingbots/values.yaml:generic-api-key:261
+ac5ae01fce9b477603dffa843bb77f1fade362e3:docs/guides/live-trading.md:generic-api-key:163
+6d852d8e03b15ffc82c30c97b39f4f8ce54485f7:helm/tradingbots/templates/cronjob-livetrade.yaml:generic-api-key:72

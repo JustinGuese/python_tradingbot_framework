@@ -669,6 +669,29 @@ class BuybackEvent(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class Sc13dEvent(Base):
+    """
+    Initial Schedule 13D filing against an S&P 100/400/600 name.
+
+    Captured from SEC EDGAR by tradingbot/sc13dscan.py and traded by Activist13DBot, which holds only the rows
+    with ``fund_like`` set. ``filers`` is the cover-page reporting-person text, and ``fund_like`` is the keyword
+    classifier of utils/sc13d_rules.py. A ``_HEARTBEAT`` row (``filed_at`` in 1970) is refreshed by each
+    successful scan so a quiet market is not mistaken for a dead scanner.
+    """
+
+    __tablename__ = "sc13d_events"
+    __table_args__ = (UniqueConstraint("accession", name="uq_sc13d_events_accession"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    accession: Mapped[str] = mapped_column(String, nullable=False)
+    filed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    fund_like: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    filers: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class VolSurfaceSnapshot(Base):
     """
     One row per underlying per day: the option_quotes chain condensed into the

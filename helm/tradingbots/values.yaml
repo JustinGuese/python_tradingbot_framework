@@ -541,6 +541,22 @@ bots:
 - name: quantsmd_gated_blend
   schedule: "7 21 * * 1-5" # Equal-ish blend of positive-alpha quantsmd bots (sma_gated, reversal, momentum, te_gated)
 
+# Schedule 13D: scanner over the frozen S&P 100/400/600 list (~1,100 submissions requests at 5/s, about 4 min) and a
+# paper bot that holds fund-like filings' targets for 20 sessions. UNPROVEN: pre-registered primary test t 1.60,
+# placebo p 0.0475, beta 0.68. See docs/backtests/event-13d-2026-11.md. The scan runs before the bot and before the 21:00 buyback scan.
+- name: sc13dscan
+  schedule: "45 20 * * 1-5"
+
+- name: activist13dbot
+  schedule: "15 21 * * 1-5"
+
+# 20 country ETFs, SMA50/200 trend book, gated by the universe's own 200-day trend (paper, UNPROVEN).
+# Backtest: +5.3%/yr alpha vs QQQ, t 2.32 over 1996-2026 (study); framework backtest 2003-2026 t 1.67,
+# H2 t 0.24. Beta 0.2-0.3. The edge is mostly the first half.
+# See docs/backtests/gate-other-markets-2026-11.md. Not wired into any copier.
+- name: countrytrendgatebot
+  schedule: "9 21 * * 1-5"
+
 # Paper option strategies on AAPL and SPY (utils/options.py, utils/option_rules.py). The
 # underscore stays in the module path; the CronJob is named option-<x>bot. They
 # run mid-morning New York because opening a position needs a LIVE chain: off-hours

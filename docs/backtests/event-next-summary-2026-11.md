@@ -34,3 +34,16 @@ Pooling any of these with the existing four macro-sleeve legs lowers its alpha.
 ## Process notes
 - The B1 worker committed a 5-ticker smoke-run doc (13 events) with prose written before any data; replaced by a full run.
 - B1 and B3 reports had hard-coded "findings" paragraphs; both now compute them from results.
+
+## Follow-ups, 2026-11-07
+
+| Idea | Data | Result | Doc |
+|---|---|---|---|
+| Buybacks beyond the S&P 100 | S&P 400 + 600, 815 events from a 25% random sample of 88k candidate 8-Ks, 2010 on | primary (10 sessions, 10 bp) t 0.81, placebo p 0.13: **no edge**. S&P 100 reproduces (not independently) at t 2.31 / 1.82 at 2 / 10 bp | event-buyback-broad-2026-11.md |
+| Trend gate on other markets | global sector ETFs, 20 country ETFs, plus a US replication | gate adds +2-3%/yr over ungated outside the US, no book clears the bar, alpha is early-sample: **unproven**; paper bot `CountryTrendGateBot` built on request (framework backtest 2003+: t 1.67, H2 t 0.24) | gate-other-markets-2026-11.md |
+| Schedule 13D filings | 1,152 initial 13Ds on S&P 100/400/600, 2010 on | primary (fund-like, 20 sessions) t 1.60, p 0.0475, beta 0.68; "all filers" books (t 2.3-2.8) are carried by a few outliers, event-level median ~0: **unproven, not worth building** | event-13d-2026-11.md |
+
+Process notes: two of the three looked better at book level than at event level, which is why the event-level table
+(mean, median, winsorised mean, vs random dates on the same names) is now part of both event studies. The shared simulator
+is `scripts/event_book_lib.py` (DST-aware entry close, tests in `tests/test_event_book_lib.py`); the older
+`onetime_event_buyback_placebo.py` uses a fixed 21:00 UTC close, which enters a close early for 16:00-17:00 EDT filings.
