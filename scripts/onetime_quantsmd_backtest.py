@@ -146,6 +146,33 @@ def _stats(values, stamps, qqq, interval) -> dict:
     return {"alpha": m["alpha"], "alpha_t": m["alpha_t"], "beta": m["beta"], "corr": m["benchmark_corr"]}
 
 
+def true_cagr(total_return: float | None, start, end) -> float | None:
+    """Annualized compound growth rate from total return and date window.
+
+    CAGR = (1 + total_return) ** (1 / years) - 1
+    where years = (end - start).days / 365.25.
+    Returns None if window has non-positive duration or total_return < -1.
+    """
+    if total_return is None or start is None or end is None:
+        return None
+    try:
+        s = pd.to_datetime(start)
+        e = pd.to_datetime(end)
+        if getattr(s, "tzinfo", None) is not None:
+            s = s.tz_localize(None) if hasattr(s, "tz_localize") else s.replace(tzinfo=None)
+        if getattr(e, "tzinfo", None) is not None:
+            e = e.tz_localize(None) if hasattr(e, "tz_localize") else e.replace(tzinfo=None)
+    except Exception:
+        return None
+    days = (e - s).days
+    if days <= 0:
+        return None
+    years = days / 365.25
+    if 1 + total_return <= 0:
+        return -1.0 if 1 + total_return == 0 else None
+    return float((1 + total_return) ** (1 / years) - 1)
+
+
 def run_one(module: str, cls_name: str, source_sharpe: float, qqq_frame: pd.DataFrame) -> dict:
     cls = getattr(importlib.import_module(f"tradingbot.{module}"), cls_name)
     bot = cls()
@@ -176,7 +203,8 @@ def run_one(module: str, cls_name: str, source_sharpe: float, qqq_frame: pd.Data
         "beta": r["beta"],
         "corr": r["benchmark_corr"],
         "sharpe": r["sharpe_ratio"],
-        "cagr": r["yearly_return"],
+        "total_return": r["yearly_return"],
+        "cagr": true_cagr(r["yearly_return"], stamps[0], stamps[-1]),
         "maxdd": _max_dd(values),
         "trades": r["nrtrades"],
         "qqq_cagr": float((qqq_window.iloc[-1] / qqq_window.iloc[0]) ** (1 / years) - 1),
