@@ -304,3 +304,23 @@ def test_etoro_cancel_open_orders_listing_failure_propagates(broker):
             broker.cancel_open_orders()
 
         mock_delete.assert_not_called()
+
+
+def test_etoro_cancel_open_orders_aborts_when_a_cancel_fails_for_real(broker):
+    """Only 404/409/410 mean "already gone". A 5xx or a timeout leaves the order possibly
+    working, so the sync must abort instead of submitting on top of it."""
+    import httpx
+
+    payload = {"clientPortfolio": {"orders": [{"orderID": "101"}]}}
+
+    with patch.object(broker.client, "get") as mock_get, patch.object(broker.client, "delete") as mock_delete:
+        mock_get.return_value = _response(payload)
+
+        mock_delete.return_value = MagicMock(status_code=500, text="boom")
+        with pytest.raises(httpx.HTTPStatusError):
+            broker.cancel_open_orders()
+
+        mock_delete.return_value = None
+        mock_delete.side_effect = httpx.ReadTimeout("timed out")
+        with pytest.raises(httpx.ReadTimeout):
+            broker.cancel_open_orders()

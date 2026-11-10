@@ -348,13 +348,19 @@ class EtoroBroker(LiveBroker):
                         except Exception:
                             pass
                     if not v1_done:
-                        logger.warning(f"Failed to cancel eToro order {order_id} via v1 fallback")
-                elif status in (400, 404, 409, 410, 422):
+                        # No endpoint accepted the cancel: the order may still be working,
+                        # so abort the sync instead of submitting on top of it.
+                        raise RuntimeError(f"eToro order {order_id} could not be cancelled via v2 or v1") from e
+                elif status in (404, 409, 410):
+                    # Gone already (filled or cancelled): the idempotent case.
                     logger.info(f"eToro order {order_id} already cancelled or filled (status {status})")
                 else:
-                    logger.warning(f"Failed to cancel eToro order {order_id}: {e}")
-            except Exception as e:
-                logger.info(f"eToro order {order_id} already cancelled or failed: {e}")
+                    # 400/422/401/403/429/5xx are NOT "already gone". 400 in particular
+                    # usually means a wrong path or payload, which would silently
+                    # leave every order working and re-create the overnight
+                    # double-submit this method exists to prevent.
+                    raise
+            # Transport errors (timeouts, connection resets) propagate for the same reason.
 
         return cancelled
 
