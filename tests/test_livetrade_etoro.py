@@ -232,3 +232,75 @@ def test_etoro_search_symbol(broker):
         assert len(results) == 2
         assert results[0]["symbol"] == "1"
         assert results[0]["description"] == "Apple"
+
+
+def test_etoro_cancel_open_orders_cancels_all_and_returns_count(broker):
+    """Cancels both pending open and close orders via v2 execution endpoints and returns count."""
+    portfolio_payload = {
+        "clientPortfolio": {
+            "orders": [{"orderID": "101"}],
+            "ordersForClose": [{"orderID": "102"}],
+        }
+    }
+    with patch.object(broker.client, "get") as mock_get, patch.object(broker.client, "delete") as mock_delete:
+        mock_get.return_value = _response(portfolio_payload)
+        mock_delete.return_value = MagicMock(status_code=200, text='{"token":"t"}', json=lambda: {"token": "t"})
+
+        count = broker.cancel_open_orders()
+        assert count == 2
+        assert mock_delete.call_count == 2
+
+        urls = [call.args[0] for call in mock_delete.call_args_list]
+        assert f"{broker.BASE_URL}/api/v2/trading/execution/demo/orders/101" in urls
+        assert f"{broker.BASE_URL}/api/v2/trading/execution/demo/orders/102" in urls
+
+        # Check headers have x-request-id
+        for call in mock_delete.call_args_list:
+            headers = call.kwargs.get("headers")
+            assert headers is not None
+            assert "x-request-id" in headers
+
+    # Also verify non-demo broker uses v2 without demo/ prefix
+    live_broker = EtoroBroker(api_key="key", user_key="usr", demo=False)
+    with patch.object(live_broker.client, "get") as mock_get, patch.object(live_broker.client, "delete") as mock_delete:
+        mock_get.return_value = _response({"clientPortfolio": {"orders": [{"orderID": "201"}]}})
+        mock_delete.return_value = MagicMock(status_code=200, text='{"token":"t"}', json=lambda: {"token": "t"})
+
+        assert live_broker.cancel_open_orders() == 1
+        urls = [call.args[0] for call in mock_delete.call_args_list]
+        assert f"{live_broker.BASE_URL}/api/v2/trading/execution/orders/201" in urls
+
+
+def test_etoro_cancel_open_orders_tolerates_already_cancelled(broker):
+    """Cancelling an already-cancelled or already-filled order (e.g. 404) does not raise."""
+    portfolio_payload = {
+        "clientPortfolio": {
+            "orders": [{"orderID": "101"}, {"orderID": "102"}],
+        }
+    }
+
+    def _delete_dispatch(url, *args, **kwargs):
+        if "102" in url:
+            # 102 was already cancelled/filled -> 404
+            return MagicMock(status_code=404, text='{"message":"Order already cancelled"}')
+        return MagicMock(status_code=200, text='{"token":"ok"}', json=lambda: {"token": "ok"})
+
+    with patch.object(broker.client, "get") as mock_get, patch.object(broker.client, "delete") as mock_delete:
+        mock_get.return_value = _response(portfolio_payload)
+        mock_delete.side_effect = _delete_dispatch
+
+        # Must not raise; order 101 succeeded, order 102 was already cancelled
+        count = broker.cancel_open_orders()
+        assert count == 1
+        assert mock_delete.call_count == 2
+
+
+def test_etoro_cancel_open_orders_listing_failure_propagates(broker):
+    """If listing pending orders fails, the copier must abort rather than trade on unknown state."""
+    with patch.object(broker.client, "get") as mock_get, patch.object(broker.client, "delete") as mock_delete:
+        mock_get.side_effect = RuntimeError("eToro 503 Service Unavailable")
+
+        with pytest.raises(RuntimeError, match="eToro 503"):
+            broker.cancel_open_orders()
+
+        mock_delete.assert_not_called()
