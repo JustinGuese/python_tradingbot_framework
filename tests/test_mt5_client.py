@@ -1,9 +1,6 @@
 """Tests for MT5 client protocol, FakeMT5, and connect_rpyc factory."""
 
-import sys
 from unittest.mock import MagicMock
-
-import pytest
 
 from tests.mt5_fake import FakeMT5
 from tradingbot.livetrade.mt5.client import (
@@ -193,42 +190,14 @@ def test_fake_implements_mt5client_protocol():
     fake.shutdown()
 
 
-def test_connect_rpyc_lazy_import_and_stub():
-    """connect_rpyc imports mt5linux lazily and raises ImportError if missing."""
-    # When mt5linux is missing
-    sys_modules_backup = sys.modules.get("mt5linux")
-    try:
-        if "mt5linux" in sys.modules:
-            del sys.modules["mt5linux"]
+def test_connect_rpyc_returns_remote_metatrader5_module(mocker):
+    """connect_rpyc opens a classic RPyC connection and returns conn.modules['MetaTrader5']."""
+    import rpyc
 
-        # Stubbing import to fail
-        import builtins
+    conn = MagicMock()
+    remote_mt5 = MagicMock()
+    conn.modules.__getitem__.side_effect = lambda name: remote_mt5 if name == "MetaTrader5" else None
+    connect = mocker.patch.object(rpyc.classic, "connect", return_value=conn)
 
-        real_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "mt5linux":
-                raise ImportError("No module named 'mt5linux'")
-            return real_import(name, *args, **kwargs)
-
-        builtins.__import__ = fake_import
-        try:
-            with pytest.raises(ImportError, match="mt5linux is required"):
-                connect_rpyc("127.0.0.1", 18812)
-        finally:
-            builtins.__import__ = real_import
-
-        # When mt5linux is present (stubbed)
-        mock_mt5_mod = MagicMock()
-        mock_instance = MagicMock()
-        mock_mt5_mod.MetaTrader5.return_value = mock_instance
-        sys.modules["mt5linux"] = mock_mt5_mod
-
-        client = connect_rpyc(host="cluster-bridge", port=8001)
-        mock_mt5_mod.MetaTrader5.assert_called_once_with(host="cluster-bridge", port=8001)
-        assert client == mock_instance
-    finally:
-        if sys_modules_backup is not None:
-            sys.modules["mt5linux"] = sys_modules_backup
-        elif "mt5linux" in sys.modules:
-            del sys.modules["mt5linux"]
+    assert connect_rpyc(host="cluster-bridge", port=8001) is remote_mt5
+    connect.assert_called_once_with("cluster-bridge", 8001)

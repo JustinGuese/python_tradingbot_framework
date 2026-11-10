@@ -32,6 +32,23 @@ spec:
       - name: {{ .name }}
       {{- end }}
       {{- end }}
+      initContainers:
+      # The image installs the newest mt5linux at first boot; 1.1.x has a
+      # Python 3.12-only f-string and crashes on the image's Python 3.11
+      # (SyntaxError, so the RPyC server never starts). Pin a release that
+      # compiles, into the persisted /config user site, before start.sh runs.
+      - name: pin-mt5linux
+        image: {{ $bridge.image | default "gmag11/metatrader5_vnc:2.3" | quote }}
+        imagePullPolicy: {{ $bridge.imagePullPolicy | default "IfNotPresent" | quote }}
+        command:
+        - sh
+        - -c
+        - >-
+          HOME=/config pip install --user --break-system-packages --no-cache-dir
+          --no-deps --force-reinstall mt5linux=={{ $bridge.mt5linuxVersion | default "0.1.9" }}
+        volumeMounts:
+        - name: mt5-bridge-config
+          mountPath: /config
       containers:
       - name: mt5-bridge
         image: {{ $bridge.image | default "gmag11/metatrader5_vnc:2.3" | quote }}

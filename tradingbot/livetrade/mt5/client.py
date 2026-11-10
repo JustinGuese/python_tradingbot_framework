@@ -200,12 +200,17 @@ class MT5Client(Protocol):
 
 
 def connect_rpyc(host: str = "localhost", port: int = 18812) -> MT5Client:
-    """Connect to an MT5 bridge over RPyC using mt5linux."""
-    try:
-        from mt5linux import MetaTrader5
-    except ImportError as exc:
-        raise ImportError(
-            "mt5linux is required to connect to MT5 over RPyC. Please install mt5linux and rpyc."
-        ) from exc
+    """Connect to an MT5 bridge over RPyC (classic) and return its MetaTrader5 module.
 
-    return MetaTrader5(host=host, port=port)
+    The bridge runs mt5linux's classic RPyC server inside Wine Python, so the
+    `MetaTrader5` package is reachable as a remote module. We use rpyc directly
+    instead of the mt5linux client: its 1.x releases try to manage Docker
+    containers and 0.1.x pins an ancient dependency set.
+    """
+    try:
+        import rpyc
+    except ImportError as exc:
+        raise ImportError("rpyc is required to connect to MT5 over RPyC. Please install rpyc.") from exc
+
+    conn = rpyc.classic.connect(host, port)
+    return conn.modules["MetaTrader5"]

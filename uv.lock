@@ -2564,22 +2564,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mt5linux"
-version = "1.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "plumbum" },
-    { name = "pyparsing" },
-    { name = "python-dotenv" },
-    { name = "rpyc" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/05/747be6fab3f6d6f67d0f5887fef174745cb603a8f8089b0fffc77a6da510/mt5linux-1.1.1.tar.gz", hash = "sha256:5bf77cb9cc103be73d61e26a50b5abac994887e1dd0f5aa002f717987cf637ce", size = 39040, upload-time = "2026-08-04T17:47:41.209Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/d1/d1fee2705eefcb31425cb9fa24b36ce90ca9417c34ca50751ae15c24f54d/mt5linux-1.1.1-py3-none-any.whl", hash = "sha256:0165d82dfa64ab6decee017bd9fd335040d758cb339cbaa77421b700d8a035d3", size = 40896, upload-time = "2026-08-04T17:47:40.045Z" },
-]
-
-[[package]]
 name = "multidict"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4624,7 +4608,6 @@ dependencies = [
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "lxml" },
-    { name = "mt5linux" },
     { name = "numerapi" },
     { name = "numpy" },
     { name = "pandas" },
@@ -4696,7 +4679,6 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
-    { name = "mt5linux", specifier = ">=0.1.7" },
     { name = "numerapi", specifier = ">=2.18.0" },
     { name = "numpy" },
     { name = "pandas", specifier = ">=2.3.1" },
