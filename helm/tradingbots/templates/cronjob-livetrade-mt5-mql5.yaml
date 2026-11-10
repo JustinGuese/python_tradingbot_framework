@@ -1,0 +1,30 @@
+{{- $cfg := .Values.liveTrade.mt5Mql5 | default dict -}}
+{{- if $cfg.enabled }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-mt5-mql5" "schedule" ($cfg.schedule | default "0 15 * * 1-5") "module" "tradingbot.livetrade_mt5_mql5" "podLabels" (dict "app.kubernetes.io/component" "livetrade")) }}
+{{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
+            # MT5 MQL5 credentials (from secret)
+            - name: MT5_MQL5_LOGIN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: MT5_MQL5_LOGIN
+            - name: MT5_MQL5_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: MT5_MQL5_PASSWORD
+            - name: MT5_MQL5_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: MT5_MQL5_SERVER
+            # MT5 bridge connection and demo flag
+            - name: MT5_MQL5_DEMO
+              value: {{ if hasKey $cfg "demo" }}{{ $cfg.demo | quote }}{{ else }}"true"{{ end }}
+            - name: MT5_BRIDGE_HOST
+              value: {{ $cfg.bridgeHost | default "mt5-bridge" | quote }}
+            - name: MT5_BRIDGE_PORT
+              value: {{ $cfg.bridgePort | default "8001" | quote }}
+{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" $cfg) }}
+          restartPolicy: OnFailure
+{{- end }}

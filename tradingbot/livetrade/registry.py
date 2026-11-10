@@ -124,6 +124,48 @@ def _build_hyperliquid() -> LiveBroker:
     )
 
 
+def _build_mt5_mql5() -> LiveBroker:
+    from tradingbot.livetrade.mt5.broker import MT5Broker
+    from tradingbot.livetrade.mt5.client import connect_rpyc
+
+    login, password, server = _require("MT5_MQL5_LOGIN", "MT5_MQL5_PASSWORD", "MT5_MQL5_SERVER")
+    host = os.getenv("MT5_BRIDGE_HOST", "mt5-bridge")
+    try:
+        port = int(os.getenv("MT5_BRIDGE_PORT", "8001"))
+    except ValueError as exc:
+        raise ConfigError(f"MT5_BRIDGE_PORT must be an integer: {exc}") from exc
+
+    try:
+        login_int = int(login)
+    except ValueError as exc:
+        raise ConfigError(f"MT5_MQL5_LOGIN must be an integer: {exc}") from exc
+
+    is_sandbox = _is_true("MT5_MQL5_DEMO", "true")
+    logger.info(f"Initializing MT5 MQL5 copier for {login} on {server} via bridge {host}:{port} (Demo: {is_sandbox})")
+    client = connect_rpyc(host=host, port=port)
+
+    try:
+        ok = client.login(login=login_int, password=password, server=server)
+    except Exception:
+        raise ConfigError(f"Failed to log in to MT5 server '{server}' with login {login}") from None
+
+    if not ok:
+        try:
+            err = client.last_error()
+            err_msg = f": error code {err[0]} ({err[1]})"
+        except Exception:
+            err_msg = ""
+        raise ConfigError(f"Failed to log in to MT5 server '{server}' with login {login}{err_msg}")
+
+    return MT5Broker(
+        client=client,
+        name="mt5_mql5",
+        login=login_int,
+        server=server,
+        is_sandbox=is_sandbox,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Spec
 # --------------------------------------------------------------------------- #
@@ -221,5 +263,13 @@ REGISTRY: dict[str, BrokerSpec] = {
         # target notional exceeds that budget every run, so it scales every order
         # down and sits on the margin boundary. At 0.95 that branch never fires.
         default_portfolio_fraction="0.95",
+    ),
+    "mt5_mql5": BrokerSpec(
+        key="mt5_mql5",
+        logger_name="livetrade_mt5_mql5",
+        build=_build_mt5_mql5,
+        required_env=("MT5_MQL5_LOGIN", "MT5_MQL5_PASSWORD", "MT5_MQL5_SERVER"),
+        default_bot_weights='{"TARegimeMultiAssetBot": 0.39, "TSMOMTrendBot": 0.24, "GoldenButterflyMomBot": 0.37}',
+        default_dry_run="false",
     ),
 }
