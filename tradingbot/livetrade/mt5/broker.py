@@ -144,10 +144,10 @@ class MT5Broker(LiveBroker):
         """
         raw_positions = self.client.positions_get()
         if raw_positions is None:
+            # MT5 returns an empty tuple for "no positions"; None means the call failed.
+            # Reading that as "flat" would make the copier buy the whole target again.
             err_code, err_msg = self.client.last_error()
-            if err_code != 0:
-                raise RuntimeError(f"MT5 positions_get failed: ({err_code}) {err_msg}")
-            return {}
+            raise RuntimeError(f"MT5 positions_get failed: ({err_code}) {err_msg}")
 
         net_positions: dict[str, float] = {}
         for pos in raw_positions:
@@ -202,6 +202,16 @@ class MT5Broker(LiveBroker):
         sym_info = self.client.symbol_info(broker_symbol)
         if sym_info is None:
             raise RuntimeError(f"MT5 symbol_info unavailable for {broker_symbol}")
+
+        # The copier sizes in shares (notional / price) and MT5 volume is in lots, which are
+        # the same thing only when one lot is one share. Refuse anything else rather than
+        # send an order 100x or 0.01x the intended size.
+        contract_size = float(getattr(sym_info, "trade_contract_size", 1.0) or 1.0)
+        if contract_size != 1.0:
+            raise RuntimeError(
+                f"MT5 symbol {broker_symbol} has contract size {contract_size}, not 1: "
+                "volume would not equal shares. Refusing to size this order."
+            )
 
         vol_step = getattr(sym_info, "volume_step", 0.01) or 0.01
         vol_min = getattr(sym_info, "volume_min", 0.01) or 0.01
@@ -324,10 +334,10 @@ class MT5Broker(LiveBroker):
         """Remove all pending working orders via TRADE_ACTION_REMOVE."""
         orders = self.client.orders_get()
         if orders is None:
+            # None is a failed call (an empty tuple means "no orders"). Abort the sync
+            # rather than size new orders against a book we could not read.
             err_code, err_msg = self.client.last_error()
-            if err_code != 0:
-                logger.error(f"MT5 orders_get failed: ({err_code}) {err_msg}")
-            return 0
+            raise RuntimeError(f"MT5 orders_get failed: ({err_code}) {err_msg}")
 
         cancelled_count = 0
         for order in orders:
@@ -344,7 +354,8 @@ class MT5Broker(LiveBroker):
             else:
                 retcode = getattr(res, "retcode", "None")
                 comment = getattr(res, "comment", "")
-                logger.warning(f"Failed to cancel order {ticket}: retcode={retcode}, comment='{comment}'")
+                # A working order we could not remove may still fill: abort, don't continue.
+                raise RuntimeError(f"MT5 failed to cancel order {ticket}: retcode={retcode}, comment='{comment}'")
         return cancelled_count
 
     def _resolve_symbol(self, yf_symbol: str) -> str | None:

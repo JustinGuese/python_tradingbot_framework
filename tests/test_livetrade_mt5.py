@@ -164,3 +164,34 @@ def test_cancel_open_orders_and_cash_proxy():
     assert cancelled == 1
     assert len(fake.orders_get() or ()) == 0
 
+
+
+def test_contract_size_other_than_one_is_refused():
+    """Copier quantities are shares; MT5 volume is lots. A contract size != 1 would mis-size
+    the order, so it must raise instead of trading."""
+    from types import SimpleNamespace
+
+    fake = FakeMT5(symbols={})
+    fake.add_symbol(name="FXLIKE", bid=1.1, ask=1.1)
+    broker = MT5Broker(fake)
+    real = fake.symbol_info("FXLIKE")
+    fake.symbol_info = lambda s: SimpleNamespace(**real._asdict(), trade_contract_size=100000.0)  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="contract size"):
+        broker.place_order("FXLIKE", 10, "BUY")
+    assert broker.get_positions() == {}
+
+
+def test_failed_order_listing_or_cancel_aborts_instead_of_returning_zero():
+    """A failed orders_get (None) or an order that will not cancel must raise; returning 0
+    would let the copier size new orders on top of working ones."""
+    fake = FakeMT5(symbols={})
+    broker = MT5Broker(fake)
+
+    fake.orders_get = lambda *a, **k: None  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="orders_get failed"):
+        broker.cancel_open_orders()
+
+    fake.orders_get = lambda *a, **k: (MagicMock(ticket=7),)  # type: ignore[method-assign]
+    fake.order_send = lambda req: MagicMock(retcode=10013, comment="invalid request")  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="failed to cancel order 7"):
+        broker.cancel_open_orders()
