@@ -282,3 +282,40 @@ def test_missing_credentials_name_the_variables(monkeypatch):
 
     with pytest.raises(ConfigError, match="COLLECTIVE2_API_KEY"):
         REGISTRY["collective2"].check_required_env()
+
+
+def test_mt5_mql5_missing_env_exits_2_with_nothing_sent(monkeypatch):
+    monkeypatch.setattr(runner_mod, "load_dotenv", lambda: None)
+    for key in REGISTRY["mt5_mql5"].required_env:
+        monkeypatch.delenv(key, raising=False)
+    copier = MagicMock()
+    monkeypatch.setattr(runner_mod, "LiveTradeCopier", lambda **kw: copier)
+
+    assert run(REGISTRY["mt5_mql5"]) == 2
+    copier.sync.assert_not_called()
+
+
+def test_mt5_mql5_spec_builds_mt5_broker(monkeypatch):
+    from tradingbot.livetrade.mt5.broker import MT5Broker
+
+    monkeypatch.setenv("MT5_MQL5_LOGIN", "12345678")
+    monkeypatch.setenv("MT5_MQL5_PASSWORD", "test-pass")
+    monkeypatch.setenv("MT5_MQL5_SERVER", "MetaQuotes-Demo")
+    monkeypatch.setenv("MT5_MQL5_DEMO", "true")
+
+    client_mock = MagicMock()
+    client_mock.login.return_value = True
+
+    connect_mock = MagicMock(return_value=client_mock)
+    monkeypatch.setattr("tradingbot.livetrade.mt5.client.connect_rpyc", connect_mock)
+
+    broker = REGISTRY["mt5_mql5"].build()
+
+    assert isinstance(broker, MT5Broker)
+    assert broker.name == "mt5_mql5"
+    assert broker.login == 12345678
+    assert broker.server == "MetaQuotes-Demo"
+    assert broker.is_sandbox is True
+    connect_mock.assert_called_once_with(host="mt5-bridge", port=8001)
+    client_mock.login.assert_called_once_with(login=12345678, password="test-pass", server="MetaQuotes-Demo")
+
