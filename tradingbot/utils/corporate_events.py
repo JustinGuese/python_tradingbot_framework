@@ -287,7 +287,8 @@ def refresh_corporate_events(symbols, today: date | None = None, delay: float = 
                     ea, eu = upsert_earnings(session, symbol, earnings or [])
                     da, du = upsert_dividends(session, symbol, dividends or [], today=today)
                     ref = session.get(CorporateEventRefresh, symbol) or CorporateEventRefresh(symbol=symbol)
-                    ref.refreshed_at = datetime.now(UTC).replace(tzinfo=None)
+                    now = datetime.now(UTC).replace(tzinfo=None)
+                    ref.refreshed_at = datetime.combine(today, now.time()) if today else now
                     ref.n_earnings = len(earnings or [])
                     ref.n_dividends = len(dividends or [])
                     session.add(ref)
