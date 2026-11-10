@@ -282,3 +282,62 @@ def test_missing_credentials_name_the_variables(monkeypatch):
 
     with pytest.raises(ConfigError, match="COLLECTIVE2_API_KEY"):
         REGISTRY["collective2"].check_required_env()
+
+
+def test_mt5_mql5_missing_env_exits_2_with_nothing_sent(monkeypatch):
+    monkeypatch.setattr(runner_mod, "load_dotenv", lambda: None)
+    for key in REGISTRY["mt5_mql5"].required_env:
+        monkeypatch.delenv(key, raising=False)
+    copier = MagicMock()
+    monkeypatch.setattr(runner_mod, "LiveTradeCopier", lambda **kw: copier)
+
+    assert run(REGISTRY["mt5_mql5"]) == 2
+    copier.sync.assert_not_called()
+
+
+def test_mt5_mql5_spec_builds_mt5_broker(monkeypatch):
+    from tradingbot.livetrade.mt5.broker import MT5Broker
+
+    monkeypatch.setenv("MT5_MQL5_LOGIN", "12345678")
+    monkeypatch.setenv("MT5_MQL5_PASSWORD", "test-pass")
+    monkeypatch.setenv("MT5_MQL5_SERVER", "MetaQuotes-Demo")
+    monkeypatch.setenv("MT5_MQL5_DEMO", "true")
+
+    client_mock = MagicMock()
+    client_mock.initialize.return_value = True
+
+    connect_mock = MagicMock(return_value=client_mock)
+    monkeypatch.setattr("tradingbot.livetrade.mt5.client.connect_rpyc", connect_mock)
+
+    broker = REGISTRY["mt5_mql5"].build()
+
+    assert isinstance(broker, MT5Broker)
+    assert broker.name == "mt5_mql5"
+    assert broker.login == 12345678
+    assert broker.server == "MetaQuotes-Demo"
+    assert broker.is_sandbox is True
+    connect_mock.assert_called_once_with(host="mt5-bridge", port=8001)
+    # initialize() with credentials attaches to the terminal and logs in; a bare login()
+    # would fail against the real bridge ("IPC initialize failed").
+    client_mock.initialize.assert_called_once_with(login=12345678, password="test-pass", server="MetaQuotes-Demo")
+    client_mock.login.assert_not_called()
+
+
+def test_mt5_mql5_failed_login_raises_config_error_without_leaking_the_password(monkeypatch):
+    monkeypatch.setenv("MT5_MQL5_LOGIN", "12345678")
+    monkeypatch.setenv("MT5_MQL5_PASSWORD", "s3cret-pw")
+    monkeypatch.setenv("MT5_MQL5_SERVER", "MetaQuotes-Demo")
+
+    for failure in ("returns_false", "raises"):
+        client_mock = MagicMock()
+        client_mock.last_error.return_value = (-6, "Authorization failed")
+        if failure == "returns_false":
+            client_mock.initialize.return_value = False
+        else:
+            client_mock.initialize.side_effect = RuntimeError("bad credentials s3cret-pw")
+        monkeypatch.setattr("tradingbot.livetrade.mt5.client.connect_rpyc", MagicMock(return_value=client_mock))
+
+        with pytest.raises(ConfigError) as exc:
+            REGISTRY["mt5_mql5"].build()
+        assert "s3cret-pw" not in str(exc.value)
+        assert exc.value.__cause__ is None

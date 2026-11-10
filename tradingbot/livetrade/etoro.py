@@ -44,6 +44,10 @@ class EtoroBroker(LiveBroker):
 
         # Caches
         self._instrument_cache: dict[str, str] = {}  # ticker -> instrument_id
+        # yfinance tickers eToro's search definitively returned nothing for. Only a clean
+        # empty result lands here, never an API error, so is_tradeable() can tell "not
+        # listed on eToro" (drop the weight to cash) from "lookup failed" (abort the sync).
+        self._unlisted: set[str] = set()
         # instrument_id -> [(positionId, units), ...]. eToro closes whole lots,
         # so a sized SELL needs every lot, not just the most recent one.
         self._position_lots: dict[str, list[tuple[str, float]]] = {}
@@ -74,6 +78,24 @@ class EtoroBroker(LiveBroker):
             logger.error(f"eToro POST {endpoint} -> {response.status_code}: {response.text}")
         response.raise_for_status()
         return response.json()
+
+    def _delete(self, endpoint: str, params: dict | None = None) -> dict:
+        url = f"{self.BASE_URL}/{endpoint}"
+        response = self.client.delete(url, params=params, headers=self._get_headers())
+        if response.status_code >= 400:
+            logger.error(f"eToro DELETE {endpoint} -> {response.status_code}: {getattr(response, 'text', '')}")
+            response.raise_for_status()
+            raise httpx.HTTPStatusError(
+                f"Client error {response.status_code}",
+                request=getattr(response, "request", None),
+                response=response,
+            )
+        if response.status_code == 204 or not getattr(response, "text", ""):
+            return {}
+        try:
+            return response.json()
+        except Exception:
+            return {}
 
     def _portfolio_endpoint(self) -> str:
         return f"api/v1/trading/info/{self._env}portfolio"
@@ -173,6 +195,28 @@ class EtoroBroker(LiveBroker):
             logger.debug(f"eToro native price fetch failed for {broker_symbol}: {e}")
         return 0.0
 
+    def get_latest_price(self, broker_symbol: str) -> float:
+        """Native eToro rate first. The yfinance fallback honours a symbol_map `price_symbol`
+        so a substitute instrument (PDBC standing in for DBC) is priced as itself: plain
+        unmapping would return the ORIGINAL ticker's price (DBC ~$31 vs PDBC ~$18) and
+        mis-size every order against it."""
+        try:
+            price = self._get_native_price(broker_symbol)
+            if price and price > 0:
+                return price
+        except Exception as e:
+            logger.debug(f"eToro native price fetch failed for {broker_symbol}: {e}")
+        yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
+        entry = self.symbol_mapper.overrides.get(yf_symbol, {}).get(self.name) or {}
+        price_symbol = entry.get("price_symbol")
+        if price_symbol:
+            try:
+                return float(self.data_service.get_latest_price(price_symbol))
+            except Exception as e:
+                logger.warning(f"yfinance fallback failed for {price_symbol}: {e}")
+                return 0.0
+        return super().get_latest_price(broker_symbol)
+
     def place_order(
         self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
     ) -> None:
@@ -256,6 +300,113 @@ class EtoroBroker(LiveBroker):
                 except Exception as e:
                     logger.error(f"eToro SELL order failed for position {pos_id} ({units} units): {e}")
 
+    def cancel_open_orders(self) -> int:
+        """
+        Cancel any orders this broker session has previously submitted that
+        are still open/pending. Lists pending open and close orders from the
+        portfolio, then cancels each via the v2 execution endpoint.
+
+        Returns:
+            int: Count of successfully cancelled orders.
+
+        Raises:
+            Exception: If listing pending orders fails, propagates the error
+                so the copier aborts rather than submitting on top of unknown
+                working orders.
+        """
+        p = self._portfolio()
+        order_ids: list[str] = []
+        seen = set()
+
+        def _collect(item: object) -> None:
+            oid = None
+            if isinstance(item, dict):
+                oid = item.get("orderID") or item.get("orderId") or item.get("OrderID") or item.get("id")
+            elif isinstance(item, (int, str)):
+                oid = item
+            if oid is not None:
+                s_oid = str(oid).strip()
+                if s_oid and s_oid not in seen:
+                    seen.add(s_oid)
+                    order_ids.append(s_oid)
+
+        # Pending orders in clientPortfolio can appear under various keys
+        for key in (
+            "orders",
+            # Seen in the real demo payload (2026-11-10) next to the keys below. Unleveraged
+            # stock/ETF orders are the likeliest to sit here after the close.
+            "stockOrders",
+            "ordersForOpen",
+            "ordersForClose",
+            "ordersForCloseMultiple",
+            "openOrders",
+            "closeOrders",
+            "entryOrders",
+            "exitOrders",
+        ):
+            for item in p.get(key, []) or []:
+                _collect(item)
+
+        # Positions can also hold attached pending orders (ordersForOpen, ordersForClose)
+        for pos in p.get("positions", []) or []:
+            if isinstance(pos, dict):
+                for key in ("ordersForOpen", "ordersForClose", "orders"):
+                    for item in pos.get(key, []) or []:
+                        _collect(item)
+
+        cancelled = 0
+        for order_id in order_ids:
+            endpoint = f"api/v2/trading/execution/{self._env}orders/{order_id}"
+            try:
+                self._delete(endpoint)
+                cancelled += 1
+                logger.info(f"Cancelled eToro pending order {order_id}")
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if status in (405, 501):
+                    # Fall back to v1 only where v2 has no equivalent
+                    v1_done = False
+                    for v1_type in ("market-open-orders", "market-close-orders"):
+                        v1_endpoint = f"api/v1/trading/execution/{self._env}{v1_type}/{order_id}"
+                        try:
+                            self._delete(v1_endpoint)
+                            cancelled += 1
+                            v1_done = True
+                            logger.info(f"Cancelled eToro order {order_id} via v1 {v1_type}")
+                            break
+                        except Exception:
+                            pass
+                    if not v1_done:
+                        # No endpoint accepted the cancel: the order may still be working,
+                        # so abort the sync instead of submitting on top of it.
+                        raise RuntimeError(f"eToro order {order_id} could not be cancelled via v2 or v1") from e
+                elif status in (404, 409, 410):
+                    # Gone already (filled or cancelled): the idempotent case.
+                    logger.info(f"eToro order {order_id} already cancelled or filled (status {status})")
+                else:
+                    # 400/422/401/403/429/5xx are NOT "already gone". 400 in particular
+                    # usually means a wrong path or payload, which would silently
+                    # leave every order working and re-create the overnight
+                    # double-submit this method exists to prevent.
+                    raise
+            # Transport errors (timeouts, connection resets) propagate for the same reason.
+
+        return cancelled
+
+    def is_tradeable(self, yf_symbol: str) -> bool:
+        """False only when eToro definitively does not list the symbol (e.g. DBC and the
+        FX* currency ETFs, found by `coverage --broker etoro` on 2026-11-10), so its weight
+        stays in cash instead of aborting the whole sync under strictMapping.
+
+        A failed lookup is NOT "not listed": it raises, because treating a transient search
+        error as unlisted would silently turn a held position into cash.
+        """
+        if self.map_symbol(yf_symbol):
+            return True
+        if yf_symbol in self._unlisted:
+            return False
+        raise RuntimeError(f"eToro instrument lookup failed for {yf_symbol}; not treating it as unlisted")
+
     def map_symbol(self, yf_symbol: str) -> dict | None:
         """
         Translate yfinance symbol to eToro instrument ID.
@@ -290,13 +441,20 @@ class EtoroBroker(LiveBroker):
                 items = data.get("items") or data.get("results") or []
                 if not items:
                     logger.warning(f"No eToro instrument found for ticker: {ticker}")
+                    self._unlisted.add(yf_symbol)
                     return None
 
-                # Prefer exact match on internalSymbolFull, else first result
+                # Exact match on internalSymbolFull ONLY. The search is a prefix search
+                # (BCI -> BCIC, DBE -> DBEF), so falling back to the first hit would
+                # silently trade a different fund. No exact match means "not listed".
                 match = next(
                     (i for i in items if str(i.get("internalSymbolFull", "")).upper() == query_ticker.upper()),
-                    items[0],
+                    None,
                 )
+                if match is None:
+                    logger.warning(f"eToro has hits for {query_ticker} but none match exactly; treating as unlisted")
+                    self._unlisted.add(yf_symbol)
+                    return None
                 instr_id = str(match.get("instrumentId"))
                 self._instrument_cache[ticker] = instr_id
             except Exception as e:

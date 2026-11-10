@@ -281,7 +281,7 @@ The framework supports eToro via their Public REST API.
 
 ### 1. Requirements
 - **eToro Public API Key & User Key**. Obtain them from the [eToro API Portal](https://api-portal.etoro.com/).
-- **Paper Account** (Virtual Portfolio) is strongly recommended. Set `ETORO_DEMO=true`.
+- **Paper Account** (Virtual Portfolio) is strongly recommended (`demo: true` / `ETORO_DEMO=true`). For real money, set `demo: false` and supply real-account credentials.
 
 ### 2. Configuration
 Set these environment variables:
@@ -293,13 +293,25 @@ Set these environment variables:
 | `ETORO_DEMO` | `true` for paper trading, `false` for live. | `true` |
 | `LIVETRADE_DRY_RUN` | Safety: defaults to `true`. | `true` |
 
-### 3. Order Model (USD Amount)
-eToro orders are placed using **USD Amount** (notional) for BUY orders, which allows for fractional shares automatically. For SELL orders, the framework closes existing positions by their `positionId`.
+### 3. Strategy Blend & Asset Substitutions
+The eToro copier runs the exact same low-beta multi-asset blend as the Collective2 strategy:
+```json
+{"TARegimeMultiAssetBot": 0.39, "TSMOMTrendBot": 0.24, "GoldenButterflyMomBot": 0.37}
+```
+Because not all US ETFs in the blend universe exist on eToro, the following asset substitutions and rules apply:
+- **Commodities:** `DBC` is substituted by `PDBC` (Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF, tradeable on eToro).
+- **Currencies:** Currency ETFs `FXE`, `FXA`, and `FXB` are substituted by direct long FX spot/CFD pairs (`EURUSD`, `AUDUSD`, `GBPUSD`).
+- **Untradeable legs:** `FXF` and `FXY` are not tradeable on eToro; their allocated weight is not redistributed but is instead held in cash via the `SHV` short-term treasury cash proxy.
 
-### 4. Ticker Mapping
-eToro uses numeric **Instrument IDs**. The framework automatically resolves these via the eToro search API during the mapping phase.
+### 4. Order Model & `cancel_open_orders`
+- **BUY Orders:** Placed using **USD Amount** (notional), enabling fractional shares automatically.
+- **SELL Orders:** The framework closes existing positions by their `positionId`.
+- **`cancel_open_orders()`:** Before computing target rebalances, `copier.sync()` calls `broker.cancel_open_orders()`. For eToro, this queries pending open and close orders in the portfolio and cancels each via the v2 execution endpoint. If this step fails, the sync safely aborts to prevent stacking new orders on top of unconfirmed pending trades.
 
-### 5. Usage
+### 5. Ticker Mapping
+eToro uses numeric **Instrument IDs**. The framework automatically resolves these via the eToro search API during the mapping phase (`tradingbot/livetrade/symbol_map.json`).
+
+### 6. Usage
 ```bash
 uv run python -m tradingbot.livetrade_etoro
 ```
@@ -444,6 +456,99 @@ generator reads this table via `generator/vault.py`.
 ```bash
 uv run python -m tradingbot.livetrade_hyperliquid
 ```
+
+---
+
+## 🖥️ MetaTrader 5 & MQL5 Signals
+
+The framework supports MetaTrader 5 via an in-cluster Wine bridge running the `mt5linux` RPyC server, enabling automated trading and MQL5 signal publishing.
+
+### 1. Architecture & Cluster Wiring
+- **MT5 Bridge Deployment (`mt5Bridge`):** Runs a pinned third-party image (`gmag11/metatrader5_vnc:2.3`) containing Wine, MetaTrader 5, and the `mt5linux` RPyC server.
+- **Persistent Volume:** A 5Gi PVC (`mt5-bridge-config`) persists Wine configuration, MetaTrader 5 terminal state, and broker logins across pod restarts.
+- **Network Security:** RPyC (port 8001) is an unauthenticated RPC protocol. Ingress to `mt5-bridge:8001` is strictly restricted by a dedicated Kubernetes `NetworkPolicy` to pods labelled `app.kubernetes.io/component=livetrade`.
+- **CronJob:** `livetrade-mt5-mql5` carries the required pod label, connects to `mt5-bridge:8001`, logs into the MT5 account, and syncs positions.
+
+### 2. Execution Timing & Market Hours
+- **Schedule:** `0 15 * * 1-5` (15:00 UTC).
+- **In-Session Trading:** MT5 rejects market orders with retcode `10018` (`TRADE_RETCODE_MARKET_CLOSED`) when the market is closed. Therefore, this copier runs in US market hours in both EST (10:00 AM) and EDT (11:00 AM), trading the target weights computed by the blend the previous night.
+
+### 3. Picking an MT5 Broker (`coverage` tool)
+MT5 brokers differ substantially in the assets they list. Many retail MT5 brokers only carry FX and index CFDs, with no US ETFs (for example, Darwinex Zero and MetaQuotes-Demo lack US ETFs). To verify whether an MT5 broker supports the strategy blend:
+
+1. Open a demo account with the broker (e.g. IC Markets or another multi-asset MT5 broker).
+2. Set `MT5_MQL5_LOGIN`, `MT5_MQL5_PASSWORD`, and `MT5_MQL5_SERVER` in your environment.
+3. Run the coverage check tool:
+   ```bash
+   python -m tradingbot.livetrade.coverage --broker mt5_mql5
+   ```
+4. The tool tests resolution for every ticker in the blend universe. Keep the broker only if all ETF legs required by the blend resolve.
+
+### 4. Manual MQL5 Signal Registration
+MQL5 signals cannot be created through an API; the account must be registered once manually on the MQL5 community website:
+1. Log into your account at [mql5.com](https://www.mql5.com/) and navigate to **Signals** -> **Create Signal**.
+2. Enter your MT5 Account Login, select your broker server, and provide the **read-only investor password** (never enter your master trading password).
+3. **Account & Pricing Rules:**
+   - **Free Signal:** Can be registered from a **demo account**. A free signal from a demo account is the recommended starting point for establishing a public, audited track record without capital risk.
+   - **Paid Signal:** Requires a **real account** with real funds and completed MQL5 Seller verification (photo ID, address verification, and account validation per MQL5's current rules).
+
+### 5. Configuration & Usage
+Environment variables for the MT5 copier:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `MT5_MQL5_LOGIN` | MT5 account login number | **Required** |
+| `MT5_MQL5_PASSWORD` | MT5 master trading password | **Required** |
+| `MT5_MQL5_SERVER` | MT5 broker server name | **Required** |
+| `MT5_MQL5_DEMO` | `true` for demo account, `false` for live | `true` |
+| `MT5_BRIDGE_HOST` | Hostname of the MT5 bridge | `mt5-bridge` |
+| `MT5_BRIDGE_PORT` | Port of the MT5 bridge RPyC server | `8001` |
+
+Local testing:
+```bash
+python -m tradingbot.livetrade_mt5_mql5
+```
+
+---
+
+## 🧠 Numerai Signals
+
+The framework submits daily tournament predictions to **Numerai Signals**.
+
+### 1. Architecture & Model
+- **Module:** `tradingbot.numerai_signals_submit` calculates 12-1 momentum scores across the eligible equity universe, applies cross-sectional ranking, and uploads predictions via the Numerai API.
+- **CronJob:** `numerai-signals` runs post-market at `0 22 * * 1-5` (10:00 PM UTC).
+
+### 2. Unproven Signal & Unstaked Submissions
+- Submissions are made strictly **unstaked** (`stake: 0 NMR`).
+- The 12-1 momentum signal is **unproven**; Numerai's weekly tournament scoring (correlation, MMC, FNC) acts as the empirical validation.
+- Staking NMR involves real financial risk and is a separate manual decision to be made only after tournament scores demonstrate sustained positive performance.
+
+### 3. Configuration
+Set these credentials in your secret store:
+
+| Variable | Description |
+| --- | --- |
+| `NUMERAI_PUBLIC_ID` | Numerai API public ID |
+| `NUMERAI_SECRET_KEY` | Numerai API secret key |
+| `NUMERAI_MODEL_NAME` | Numerai model slot name (e.g., `datafortress`) |
+
+---
+
+## 📅 Venue Schedule Overview
+
+The table below summarizes all supported live-trading, signal-publishing, and tournament venues across the platform:
+
+| Venue / Strategy | Type | Schedule (Cron) | Time (UTC) | Description / Notes | Status in `values.yaml` |
+| --- | --- | --- | --- | --- | --- |
+| `collective2` | Mirror Copier | `10 21 * * 1-5` | 21:10 UTC | Shared default blend; superseded by XAUZerifine | Disabled |
+| `interactiveBrokers` | Paper (DU) / Live | `20 21 * * 1-5` | 21:20 UTC | TWS socket API (`ib_async`), C2 blend (0.5 portfolio fraction) | Enabled (Paper) |
+| `etoro` | Demo / Real | `30 21 * * 1-5` | 21:30 UTC | Public REST API, C2 blend with asset substitutions (PDBC, long FX, SHV) | Enabled (Demo) |
+| `darwinex` | Demo / Real | `40 21 * * 1-5` | 21:40 UTC | DXtrade REST API (forex/CFDs only, lacks US ETFs) | Disabled |
+| `collective2XauZerifine` | Signal Provider | `50 21 * * 1-5` | 21:50 UTC | C2 Strategy 155809898, low-beta multi-asset blend | Enabled |
+| `hyperliquid` | Perps Vault | `5 0 * * *` | 00:05 UTC | Hyperliquid perps vault copier (`AdaptiveMeanReversionBTCBot`) | Disabled |
+| `mt5Mql5` | Signal Provider | `0 15 * * 1-5` | 15:00 UTC | MT5 via Wine bridge, US session execution, C2 blend | Enabled (Demo) |
+| `numerai` | Tournament Signals | `0 22 * * 1-5` | 22:00 UTC | Numerai Signals 12-1 momentum tournament submission (unstaked) | Enabled |
 
 ---
 

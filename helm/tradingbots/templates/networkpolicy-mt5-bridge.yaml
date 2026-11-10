@@ -1,0 +1,29 @@
+{{- $bridge := .Values.mt5Bridge | default dict -}}
+{{- if $bridge.enabled }}
+# NetworkPolicy for MT5 Bridge: RPyC is an unauthenticated remote code execution protocol.
+# Ingress to the RPyC port is restricted strictly to pods labelled app.kubernetes.io/component=livetrade.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $bridge.networkPolicyName | default "mt5-bridge" }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mt5-bridge
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: livetrade
+    ports:
+    - protocol: TCP
+      port: {{ $bridge.port | default 8001 }}
+{{- end }}

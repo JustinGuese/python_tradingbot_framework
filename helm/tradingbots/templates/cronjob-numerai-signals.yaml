@@ -1,0 +1,22 @@
+{{- $numerai := .Values.numerai | default dict }}
+{{- if $numerai.enabled }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "numerai-signals" "schedule" ($numerai.schedule | default "0 22 * * 1-5") "module" "tradingbot.numerai_signals_submit") }}
+{{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
+            # Numerai Signals credentials (from secret)
+            - name: NUMERAI_PUBLIC_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: NUMERAI_PUBLIC_ID
+            - name: NUMERAI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: NUMERAI_SECRET_KEY
+            - name: NUMERAI_MODEL_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: NUMERAI_MODEL_NAME
+          restartPolicy: OnFailure
+{{- end }}

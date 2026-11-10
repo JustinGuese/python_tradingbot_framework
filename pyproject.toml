@@ -43,6 +43,9 @@ dependencies = [
     # Hyperliquid perps DEX SDK (Info/Exchange). Pure-Python + eth-account.
     "hyperliquid-python-sdk>=0.24.0",
     "exchange-calendars>=4.5",
+    "mt5linux>=0.1.7",
+    "rpyc>=6.0.0",
+    "numerapi>=2.18.0",
 ]
 [project.optional-dependencies]
 dev = [

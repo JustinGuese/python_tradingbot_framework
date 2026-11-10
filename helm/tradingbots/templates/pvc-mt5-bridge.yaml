@@ -1,0 +1,24 @@
+{{- $bridge := .Values.mt5Bridge | default dict -}}
+{{- if $bridge.enabled }}
+# Persistent storage for MetaTrader 5 terminal state, Wine prefix, and downloaded updates.
+# Persisting /config allows terminal login sessions to survive pod restarts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $bridge.pvcName | default "mt5-bridge-config" }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $bridge.pvcSize | default $bridge.storage | default "5Gi" | quote }}
+  {{- if $bridge.storageClassName }}
+  storageClassName: {{ $bridge.storageClassName | quote }}
+  {{- end }}
+{{- end }}

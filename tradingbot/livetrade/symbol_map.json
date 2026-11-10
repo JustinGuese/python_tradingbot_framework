@@ -49,6 +49,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares Core S&P 500 UCITS"
+    },
+    "etoro": {
+      "symbol": "3000",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "BTC-USD": {
@@ -78,6 +84,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "Vanguard S&P 500 UCITS Acc (no US total-market UCITS; closest)"
+    },
+    "etoro": {
+      "symbol": "4237",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "IWM": {
@@ -91,6 +103,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "Xtrackers Russell 2000 UCITS"
+    },
+    "etoro": {
+      "symbol": "3005",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "IJS": {
@@ -104,6 +122,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "Xtrackers Russell 2000 UCITS (no S&P 600 Value UCITS found; shares IWM's line)"
+    },
+    "etoro": {
+      "symbol": "1394",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "EFA": {
@@ -117,6 +141,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "Xtrackers MSCI World ex USA UCITS"
+    },
+    "etoro": {
+      "symbol": "3009",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "EEM": {
@@ -130,6 +160,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares Core MSCI EM IMI UCITS"
+    },
+    "etoro": {
+      "symbol": "3001",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "TLT": {
@@ -143,6 +179,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares $ Treasury Bond 20+yr UCITS"
+    },
+    "etoro": {
+      "symbol": "3020",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "IEF": {
@@ -156,6 +198,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares $ Treasury Bond 7-10yr UCITS"
+    },
+    "etoro": {
+      "symbol": "3101",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "SHY": {
@@ -169,6 +217,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares $ Treasury Bond 1-3yr UCITS Acc"
+    },
+    "etoro": {
+      "symbol": "3100",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "SHV": {
@@ -182,6 +236,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares $ Treasury Bond 0-1yr UCITS Acc (cash proxy)"
+    },
+    "etoro": {
+      "symbol": "4321",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "GLD": {
@@ -195,6 +255,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares Physical Gold ETC"
+    },
+    "etoro": {
+      "symbol": "3025",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "SLV": {
@@ -208,6 +274,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares Physical Silver ETC"
+    },
+    "etoro": {
+      "symbol": "4430",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "DBC": {
@@ -221,6 +293,14 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "iShares Diversified Commodity Swap UCITS"
+    },
+    "etoro": {
+      "symbol": "1099",
+      "type": "stock",
+      "price_symbol": "PDBC",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: DBC is not listed on eToro. PDBC (id 1099) tracks it: daily corr 0.993, tracking error 2.0%/yr over 3y (2026-11-10)"
     }
   },
   "DBA": {
@@ -234,6 +314,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "WisdomTree Agriculture ETC"
+    },
+    "etoro": {
+      "symbol": "3102",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "USO": {
@@ -247,6 +333,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "WisdomTree WTI Crude Oil ETC"
+    },
+    "etoro": {
+      "symbol": "3007",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "UUP": {
@@ -255,6 +347,12 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "no UCITS equivalent (USD index fund)"
+    },
+    "etoro": {
+      "symbol": "8749",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
     }
   },
   "FXA": {
@@ -263,6 +361,14 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "no UCITS equivalent (AUD currency fund)"
+    },
+    "etoro": {
+      "symbol": "7",
+      "type": "forex",
+      "price_symbol": "AUDUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXA is not listed on eToro. Long AUDUSD CFD (leverage 1) is the same exposure, priced as AUDUSD=X."
     }
   },
   "FXB": {
@@ -271,6 +377,32 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "no UCITS equivalent (GBP currency fund)"
+    },
+    "etoro": {
+      "symbol": "2",
+      "type": "forex",
+      "price_symbol": "GBPUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXB is not listed on eToro. Long GBPUSD CFD (leverage 1) is the same exposure, priced as GBPUSD=X."
+    }
+  },
+  "IAU": {
+    "etoro": {
+      "symbol": "4365",
+      "type": "stock",
+      "verified": "2026-11-10",
+      "source": "etoro-search-exact"
+    }
+  },
+  "FXE": {
+    "etoro": {
+      "symbol": "1",
+      "type": "forex",
+      "price_symbol": "EURUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXE is not listed on eToro. Long EURUSD CFD (leverage 1) is the same exposure, priced as EURUSD=X."
     }
   }
 }
