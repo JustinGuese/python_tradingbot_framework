@@ -361,6 +361,14 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "no UCITS equivalent (AUD currency fund)"
+    },
+    "etoro": {
+      "symbol": "7",
+      "type": "forex",
+      "price_symbol": "AUDUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXA is not listed on eToro. Long AUDUSD CFD (leverage 1) is the same exposure, priced as AUDUSD=X."
     }
   },
   "FXB": {
@@ -369,6 +377,14 @@
       "verified": "2026-11-03",
       "source": "human",
       "note": "no UCITS equivalent (GBP currency fund)"
+    },
+    "etoro": {
+      "symbol": "2",
+      "type": "forex",
+      "price_symbol": "GBPUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXB is not listed on eToro. Long GBPUSD CFD (leverage 1) is the same exposure, priced as GBPUSD=X."
     }
   },
   "IAU": {
@@ -377,6 +393,16 @@
       "type": "stock",
       "verified": "2026-11-10",
       "source": "etoro-search-exact"
+    }
+  },
+  "FXE": {
+    "etoro": {
+      "symbol": "1",
+      "type": "forex",
+      "price_symbol": "EURUSD=X",
+      "verified": "2026-11-10",
+      "source": "human",
+      "note": "substitute: FXE is not listed on eToro. Long EURUSD CFD (leverage 1) is the same exposure, priced as EURUSD=X."
     }
   }
 }

@@ -348,7 +348,7 @@ def test_etoro_is_tradeable_drops_unlisted_but_aborts_on_lookup_error(broker):
         assert broker.is_tradeable("SPY") is True
 
         mock_get.return_value = _response({"items": []})
-        assert broker.is_tradeable("FXE") is False
+        assert broker.is_tradeable("FXF") is False  # no eToro listing and no pair mapping
 
         mock_get.side_effect = RuntimeError("eToro 503")
         with pytest.raises(RuntimeError, match="lookup failed"):
@@ -392,3 +392,17 @@ def test_symbol_map_etoro_entries_round_trip_and_are_unique():
         seen[slot["symbol"]] = yf_symbol
         assert mapper.unmap_symbol(slot["symbol"], broker_name="etoro") == yf_symbol
     assert {"SPY", "TLT", "GLD", "SHV", "DBC"} <= set(seen.values())
+
+
+def test_symbol_map_currency_etfs_use_fx_pairs_priced_as_the_pair_not_the_etf():
+    """FXE/FXA/FXB are not on eToro, so they map to the long FX pair. The fallback price MUST
+    be the pair's rate (~1.12), never the ETF's (~$100), or every order is sized ~90x wrong.
+    FXF/FXY need a short USDCHF/USDJPY, which the adapter cannot open, so they stay unmapped."""
+    from tradingbot.livetrade.symbol_map import SymbolMapper
+
+    ov = SymbolMapper().overrides
+    expected = {"FXE": ("1", "EURUSD=X"), "FXA": ("7", "AUDUSD=X"), "FXB": ("2", "GBPUSD=X")}
+    for etf, (iid, price_symbol) in expected.items():
+        slot = ov[etf]["etoro"]
+        assert (slot["symbol"], slot["price_symbol"]) == (iid, price_symbol)
+    assert "etoro" not in ov.get("FXF", {}) and "etoro" not in ov.get("FXY", {})
