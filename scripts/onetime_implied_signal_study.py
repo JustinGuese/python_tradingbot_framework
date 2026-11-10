@@ -44,6 +44,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+def load_daily_prices(names: list[str], start: str, end: str, cache_dir: str) -> pd.DataFrame:
+    """Split/dividend-adjusted daily closes (yfinance), cached. option_quotes spots are not adjusted."""
+    import yfinance as yf
+
+    cache = Path(cache_dir) / f"daily_px_{start}_{end}_{len(names)}.pkl"
+    if cache.exists():
+        return pd.read_pickle(cache)
+    raw = yf.download(sorted(names), start=start, end=end, auto_adjust=True, progress=False)["Close"]
+    raw = raw.dropna(how="all")
+    raw.index = pd.to_datetime(raw.index).tz_localize(None)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    raw.to_pickle(cache)
+    return raw
+
+
 def compute_ic_table(
     signals_df: pd.DataFrame,
     px_df: pd.DataFrame,
@@ -121,63 +136,66 @@ def compute_ic_table(
     return pd.DataFrame(rows)
 
 
+COST_BPS = 5.0  # one-way, per unit of weight traded
+
+
 def run_strategy_simulation(
     params: dict[str, Any],
     signals_df: pd.DataFrame,
     px_df: pd.DataFrame,
     qqq_px: pd.Series,
 ) -> tuple[pd.Series, int, pd.Series]:
-    """Simulate weekly/biweekly rebalancing equity curve for given hyperparameters."""
+    """Daily equity curve: weights set on each rebalance snapshot, held to the next one.
+
+    px_df and qqq_px are DAILY adjusted closes. A signal read on snapshot day dt trades from
+    the next session's return on, so there is no look-ahead. alpha_stats drops day-pairs more
+    than 4 days apart, so the curve has to be daily, not one point per snapshot.
+    """
     sig_name = params["signal"]
     smoothing = params["smoothing"]
     top_n = params["top_n"]
     rebalance = params["rebalance"]
 
     enriched = compute_cross_sectional_signals(signals_df, signal_name=sig_name, smoothing=smoothing)
-    sig_col = f"{sig_name}_smooth" if smoothing > 1 else sig_name
-
     snapshots = sorted(enriched["snapshot_at"].unique())
+    empty = pd.Series([1.0], index=[pd.Timestamp("2000-01-03")])
     if len(snapshots) < 2:
-        empty = pd.Series([1.0], index=[pd.Timestamp.now()])
         return empty, 0, empty
 
-    # Filter to rebalance dates
     step = 1 if rebalance == "weekly" else 2
     reb_snapshots = set(snapshots[::step])
-
-    # Pre-compute weekly stock returns
-    weekly_rets = px_df.pct_change(fill_method=None)
+    rets = px_df.drop(columns=["QQQ"], errors="ignore").pct_change(fill_method=None)
     qqq_rets = qqq_px.pct_change(fill_method=None)
+    days = rets.index
 
-    portfolio_rets = []
-    dates = []
-    current_weights = pd.Series(dtype=float)
+    port, idx = [], []
+    current = pd.Series(dtype=float)
     trade_count = 0
-
     for i in range(len(snapshots) - 1):
-        dt = snapshots[i]
-        next_dt = snapshots[i + 1]
+        dt, next_dt = pd.Timestamp(snapshots[i]), pd.Timestamp(snapshots[i + 1])
+        cost = 0.0
+        if dt in reb_snapshots or current.empty:
+            ranks = enriched[enriched["snapshot_at"] == snapshots[i]].set_index("underlying")["rank"]
+            new = compute_portfolio_weights(ranks, top_n=top_n)
+            turnover = float(new.reindex(new.index.union(current.index)).fillna(0.0).sub(
+                current.reindex(new.index.union(current.index)).fillna(0.0)).abs().sum())
+            cost = turnover * COST_BPS / 1e4
+            trade_count += int((new > 0).sum())
+            current = new
+        window = days[(days > dt) & (days <= next_dt)]
+        for j, d in enumerate(window):
+            r_vec = rets.loc[d]
+            w = current.reindex(r_vec.index).fillna(0.0)
+            r = float((w * r_vec.fillna(0.0)).sum())
+            if j == 0:
+                r -= cost
+            port.append(r)
+            idx.append(d)
 
-        if dt in reb_snapshots or current_weights.empty:
-            sub = enriched[enriched["snapshot_at"] == dt].set_index("underlying")
-            ranks = sub["rank"]
-            current_weights = compute_portfolio_weights(ranks, top_n=top_n)
-            trade_count += int((current_weights > 0).sum())
-
-        # Portfolio return from dt to next_dt
-        if next_dt in weekly_rets.index:
-            r_vec = weekly_rets.loc[next_dt]
-            w_aligned = current_weights.reindex(r_vec.index).fillna(0.0)
-            port_r = float((w_aligned * r_vec.fillna(0.0)).sum())
-        else:
-            port_r = 0.0
-
-        portfolio_rets.append(port_r)
-        dates.append(next_dt)
-
-    curve = pd.Series(1.0 + np.array(portfolio_rets), index=dates).cumprod()
-    bench = (1.0 + qqq_rets.reindex(dates).fillna(0.0)).cumprod()
-
+    if not idx:
+        return empty, 0, empty
+    curve = pd.Series(1.0 + np.array(port), index=idx).cumprod()
+    bench = (1.0 + qqq_rets.reindex(idx).fillna(0.0)).cumprod()
     return curve, trade_count, bench
 
 
@@ -248,15 +266,12 @@ def main():
 
     logger.info("Loaded %d signal rows across %d snapshots", len(signals_df), signals_df["snapshot_at"].nunique())
 
-    # Build price table
-    px_pivot = signals_df.pivot(index="snapshot_at", columns="underlying", values="spot").sort_index()
-
-    if "QQQ" in px_pivot.columns:
-        qqq_px = px_pivot["QQQ"].dropna()
-    else:
-        # Fallback to equal-weight if QQQ missing
-        logger.warning("QQQ not found in quotes, using equal-weight universe as proxy benchmark")
-        qqq_px = px_pivot.mean(axis=1).dropna()
+    # Daily adjusted closes (the curve must be daily for alpha_stats); weekly view for the IC table
+    daily_px = load_daily_prices(fetch_names, start_date, end_date, args.cache_dir)
+    qqq_px = daily_px["QQQ"].dropna()
+    snap_index = pd.DatetimeIndex(sorted(pd.to_datetime(signals_df["snapshot_at"].unique())))
+    px_pivot = daily_px.reindex(daily_px.index.union(snap_index)).ffill().reindex(snap_index)
+    px_pivot.index = sorted(signals_df["snapshot_at"].unique())
 
     # 1. Compute Information Coefficient table
     logger.info("Computing Rank IC and Quintile Spreads...")
@@ -291,11 +306,13 @@ def main():
 
     # Split date: halfway or 2023-01-01
     snaps = sorted(signals_df["snapshot_at"].unique())
-    split_date = snaps[len(snaps) // 2]
+    # Split by calendar time (midpoint of the window), not by snapshot count: snapshots are denser later.
+    first, last = pd.Timestamp(snaps[0]), pd.Timestamp(snaps[-1])
+    split_date = first + (last - first) / 2
     logger.info("Walk-forward split date: %s", split_date)
 
     def run_fn(combo: dict[str, Any]):
-        return run_strategy_simulation(combo, signals_df, px_pivot, qqq_px)
+        return run_strategy_simulation(combo, signals_df, daily_px, qqq_px)
 
     wf_results = walk_forward(grid, run_fn, split=split_date, rank_key="alpha_t")
 
@@ -311,7 +328,7 @@ def main():
 
     # Summary table
     defaults_row = wf_results.iloc[0]
-    h1_col = "H1_t" if "H1_t" in wf_results.columns else "t"
+    h1_col = "H1_alpha_t"
     h1_winner_idx = wf_results[h1_col].astype(float).idxmax()
     h1_winner_row = wf_results.loc[h1_winner_idx]
 
@@ -327,7 +344,7 @@ def main():
     shipped_params = h1_winner_row if decision == "winner" else defaults_row
 
     # Baseline Equal-Weight Universe Curve
-    ew_rets = px_pivot.drop(columns=["QQQ"], errors="ignore").pct_change(fill_method=None).mean(axis=1)
+    ew_rets = daily_px.drop(columns=["QQQ"], errors="ignore").pct_change(fill_method=None).mean(axis=1)
     ew_curve = (1.0 + ew_rets.fillna(0.0)).cumprod()
     defaults_curve, _, _ = run_fn(defaults_params)
     winner_curve, _, _ = run_fn(dict(h1_winner_row))
@@ -336,7 +353,12 @@ def main():
         from scripts.option_tune_common import compute_max_dd, compute_sharpe, true_cagr
         from tradingbot.utils.alpha_report import alpha_stats
 
-        stats_obj = alpha_stats(c, qqq_px.reindex(c.index).ffill().bfill())
+        r_c = c.pct_change().dropna()
+        stats_obj = alpha_stats(r_c, qqq_px.pct_change().reindex(r_c.index))
+        # The universe is today's 50 megacaps (survivorship), so the honest bar for a stock
+        # picker is the equal-weight universe, not QQQ.
+        ew_stats = None if name.startswith("Equal-Weight") or name.startswith("Benchmark") else alpha_stats(
+            r_c, ew_rets.reindex(r_c.index))
         return {
             "Strategy": name,
             "CAGR": f"{true_cagr(curve=c):.1%}",
@@ -345,6 +367,8 @@ def main():
             "Beta vs QQQ": f"{stats_obj.beta:.2f}" if np.isfinite(stats_obj.beta) else "NaN",
             "Alpha/yr vs QQQ": f"{stats_obj.alpha:.1%}" if np.isfinite(stats_obj.alpha) else "NaN",
             "Alpha t": f"{stats_obj.t:.2f}" if np.isfinite(stats_obj.t) else "NaN",
+            "Alpha/yr vs EW": f"{ew_stats.alpha:.1%}" if ew_stats and np.isfinite(ew_stats.alpha) else "n/a",
+            "Alpha t vs EW": f"{ew_stats.t:.2f}" if ew_stats and np.isfinite(ew_stats.t) else "n/a",
         }
 
     perf_df = pd.DataFrame(
@@ -352,7 +376,7 @@ def main():
             _curve_metrics("Defaults (Composite, 5-sm, Top 5, W)", defaults_curve),
             _curve_metrics(f"H1 Winner ({h1_winner_row.get('signal')}, {h1_winner_row.get('smoothing')}, Top {h1_winner_row.get('top_n')}, {h1_winner_row.get('rebalance')})", winner_curve),
             _curve_metrics("Equal-Weight Universe", ew_curve),
-            _curve_metrics("Benchmark QQQ", qqq_px / qqq_px.iloc[0]),
+            _curve_metrics("Benchmark QQQ", qqq_px.dropna() / qqq_px.dropna().iloc[0]),
         ]
     )
 
