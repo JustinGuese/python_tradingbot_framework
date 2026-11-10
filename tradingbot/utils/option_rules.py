@@ -846,6 +846,8 @@ class CrossVolRules:
     exit_dte: int = 7
     max_vix: float = 35.0
     shortlist: int = 12  # names whose live chain is loaded, by yesterday's vrp_30
+    rank_metric: str | None = None  # candidate ranking filter: None (default gap), "vol_of_vol", "idio_vol"
+    structure: str | None = None  # None (default condor), "delta_hedged_call"
 
 
 def cross_vol_candidates(names: Sequence[NameVol], held: set[str], rules: CrossVolRules) -> list[NameVol]:
