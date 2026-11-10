@@ -11,10 +11,18 @@ Working file, deleted after merge. Ideas come from the 2026-11-10 option-strateg
   values only if the H1 winner beats the a-priori defaults on H2. Otherwise defaults ship.
 - **Grid cap: at most ~300 combinations per bot**, economically motivated levers only.
   The data windows are short; a big grid just finds noise.
-- Real option data: DoltHub backfill in `option_quotes` (SPY + AAPL 2019-05 → 2026-09, 25 names
-  2025-01 → 2026-09, sampled ~3 expiries/day). Needs a read-only port-forward to the cluster DB
+- Real option data: `option_quotes` in the cluster DB holds **~50 underlyings from 2019-05-10 to
+  2026-11-09** (about 1,200 sampled days each; verified 2026-11-10), not just SPY/AAPL plus 25 names.
+  Sampled ~3 expiries/day, ~22 strikes each. This makes S1 (7 years × ~50 names) and C1 testable
+  far beyond what was assumed below; where a step says "25 names 2025-2026" use the full history. Needs a read-only port-forward to the cluster DB
   (`kubectl port-forward -n tradingbots-2025 svc/psql-service 5432:5432`, `POSTGRES_URI` set).
-  The orchestrator starts it before Batch 1. Never `pkill -f`.
+  The orchestrator has it running on localhost:5432 (read-only use only: SELECTs, never write to
+  production tables). `.env.secret` is copied into your worktree (gitignored): never print, log or
+  commit it. Run DB-backed scripts from the worktree root as
+  `/home/jguese/code/tradingbot/python_tradingbot_framework/.venv/bin/python /home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt/withenv.py scripts/<script>.py ...`
+  (it loads `.env.secret` via python-dotenv and puts the worktree first on sys.path; do NOT
+  `source` .env.secret in a shell, the password has special characters). Never `pkill -f`.
+  Pass `POSTGRES_URI` is already inside `.env.secret`.
 - New logic goes in NEW modules, so steps never share a file. Only R1 touches helm/README/mkdocs.
 - A bot whose out-of-sample result is negative still gets built and registered, but with
   `suspend: true` and the reason in the helm comment (the CrossVol precedent).
