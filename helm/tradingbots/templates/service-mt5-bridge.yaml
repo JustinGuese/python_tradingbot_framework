@@ -1,0 +1,24 @@
+{{- $bridge := .Values.mt5Bridge | default dict -}}
+{{- if $bridge.enabled }}
+# RPyC port is exposed ONLY via ClusterIP to the internal cluster network.
+# Access is restricted by NetworkPolicy to pods labelled app.kubernetes.io/component=livetrade.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $bridge.serviceName | default "mt5-bridge" }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: {{ $.Release.Name }}
+    meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: mt5-bridge
+  ports:
+  - name: rpyc
+    protocol: TCP
+    port: {{ $bridge.port | default 8001 }}
+    targetPort: {{ $bridge.port | default 8001 }}
+{{- end }}
