@@ -195,6 +195,28 @@ class EtoroBroker(LiveBroker):
             logger.debug(f"eToro native price fetch failed for {broker_symbol}: {e}")
         return 0.0
 
+    def get_latest_price(self, broker_symbol: str) -> float:
+        """Native eToro rate first. The yfinance fallback honours a symbol_map `price_symbol`
+        so a substitute instrument (PDBC standing in for DBC) is priced as itself: plain
+        unmapping would return the ORIGINAL ticker's price (DBC ~$31 vs PDBC ~$18) and
+        mis-size every order against it."""
+        try:
+            price = self._get_native_price(broker_symbol)
+            if price and price > 0:
+                return price
+        except Exception as e:
+            logger.debug(f"eToro native price fetch failed for {broker_symbol}: {e}")
+        yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
+        entry = self.symbol_mapper.overrides.get(yf_symbol, {}).get(self.name) or {}
+        price_symbol = entry.get("price_symbol")
+        if price_symbol:
+            try:
+                return float(self.data_service.get_latest_price(price_symbol))
+            except Exception as e:
+                logger.warning(f"yfinance fallback failed for {price_symbol}: {e}")
+                return 0.0
+        return super().get_latest_price(broker_symbol)
+
     def place_order(
         self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
     ) -> None:
@@ -422,11 +444,17 @@ class EtoroBroker(LiveBroker):
                     self._unlisted.add(yf_symbol)
                     return None
 
-                # Prefer exact match on internalSymbolFull, else first result
+                # Exact match on internalSymbolFull ONLY. The search is a prefix search
+                # (BCI -> BCIC, DBE -> DBEF), so falling back to the first hit would
+                # silently trade a different fund. No exact match means "not listed".
                 match = next(
                     (i for i in items if str(i.get("internalSymbolFull", "")).upper() == query_ticker.upper()),
-                    items[0],
+                    None,
                 )
+                if match is None:
+                    logger.warning(f"eToro has hits for {query_ticker} but none match exactly; treating as unlisted")
+                    self._unlisted.add(yf_symbol)
+                    return None
                 instr_id = str(match.get("instrumentId"))
                 self._instrument_cache[ticker] = instr_id
             except Exception as e:

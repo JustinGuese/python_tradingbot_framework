@@ -203,7 +203,10 @@ def test_etoro_full_exit_closes_every_lot(broker):
 def test_etoro_map_symbol(broker):
     with patch.object(broker.client, "get") as mock_get:
         mock_get.return_value = MagicMock(
-            status_code=200, json=lambda: {"results": [{"instrumentId": 1001, "instrumentDisplayName": "Apple"}]}
+            status_code=200,
+            json=lambda: {
+                "results": [{"instrumentId": 1001, "internalSymbolFull": "AAPL", "instrumentDisplayName": "Apple"}]
+            },
         )
 
         meta = broker.map_symbol("AAPL")
@@ -345,8 +348,47 @@ def test_etoro_is_tradeable_drops_unlisted_but_aborts_on_lookup_error(broker):
         assert broker.is_tradeable("SPY") is True
 
         mock_get.return_value = _response({"items": []})
-        assert broker.is_tradeable("DBC") is False
+        assert broker.is_tradeable("FXE") is False
 
         mock_get.side_effect = RuntimeError("eToro 503")
         with pytest.raises(RuntimeError, match="lookup failed"):
-            broker.is_tradeable("TLT")
+            broker.is_tradeable("QQQ")  # no eToro override, so it must hit the (failing) API
+
+
+def test_etoro_map_symbol_requires_an_exact_match_not_the_first_prefix_hit(broker):
+    """eToro's search is a prefix search (DBE -> DBEF). Taking the first hit would trade a
+    different fund, so no exact match must mean "unlisted", never a guess."""
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response({"items": [{"instrumentId": 10810, "internalSymbolFull": "DBEF"}]})
+        assert broker.map_symbol("DBE") is None
+        assert broker.is_tradeable("DBE") is False
+
+
+def test_etoro_price_fallback_uses_price_symbol_for_a_substitute(broker):
+    """DBC -> PDBC on eToro: when the native rate fails, price the line as PDBC, not DBC."""
+    broker.symbol_mapper.overrides = {
+        "DBC": {"etoro": {"symbol": "1099", "type": "stock", "price_symbol": "PDBC", "source": "human"}}
+    }
+    broker.data_service = MagicMock()
+    broker.data_service.get_latest_price.return_value = 18.47
+    with patch.object(broker, "_get_native_price", return_value=0.0):
+        assert broker.get_latest_price("1099") == 18.47
+    broker.data_service.get_latest_price.assert_called_once_with("PDBC")
+
+
+def test_symbol_map_etoro_entries_round_trip_and_are_unique():
+    """Every eToro entry must be a numeric instrument id that unmaps back to its yfinance
+    ticker (the copier prices and reconciles positions through that), with no id shared."""
+    from tradingbot.livetrade.symbol_map import SymbolMapper
+
+    mapper = SymbolMapper()
+    seen: dict[str, str] = {}
+    for yf_symbol, entry in mapper.overrides.items():
+        slot = entry.get("etoro")
+        if not slot:
+            continue
+        assert str(slot["symbol"]).isdigit(), (yf_symbol, slot)
+        assert slot["symbol"] not in seen, f"{slot['symbol']} used by {seen[slot['symbol']]} and {yf_symbol}"
+        seen[slot["symbol"]] = yf_symbol
+        assert mapper.unmap_symbol(slot["symbol"], broker_name="etoro") == yf_symbol
+    assert {"SPY", "TLT", "GLD", "SHV", "DBC"} <= set(seen.values())
