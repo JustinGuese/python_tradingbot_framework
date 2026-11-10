@@ -25,9 +25,10 @@ import os
 import pickle
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 os.environ.setdefault("POSTGRES_URI", "stub:stub@localhost:5432/stub")
 
@@ -40,14 +41,24 @@ import scripts.onetime_event_buyback_study as st
 import scripts.onetime_lift_study as lift
 from tradingbot import (
     quantsmd_monthly_rotation as mr,
+)
+from tradingbot import (
     quantsmd_quarterly_te_cost_gate as qte,
+)
+from tradingbot import (
     quantsmd_risk_parity_capped as rpc,
+)
+from tradingbot import (
     quantsmd_sma_daily as sma,
+)
+from tradingbot import (
     quantsmd_sma_daily_gated as smag,
+)
+from tradingbot import (
     quantsmd_vol_target_momentum as vtm,
 )
 from tradingbot.tsmomtrendbot import UNIVERSE as TSMOM_UNIVERSE
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.vol_target import inverse_vol_weights
 
 OUT_DOC = Path("docs/backtests/sleeve-correlation-2026-11.md")
@@ -193,7 +204,7 @@ def simulate_event_streams() -> dict[str, pd.Series]:
     meta = pickle.loads((lib.BROAD_DIR / "candidates.pkl").read_bytes())
     uni = meta["universe"]
     prices = lib.load_prices(sorted(uni))
-    syms, idx, R, q = lib.build_matrix(prices)
+    syms, idx, R, _q = lib.build_matrix(prices)
     col = {s: i for i, s in enumerate(syms)}
 
     bb, d13 = lift.load_events(uni)
@@ -363,13 +374,15 @@ def generate_report(
             f"{m.max_dd:.1f}% | {m.h1_alpha:+.1f}% ({m.h1_t:.2f}) | {m.h2_alpha:+.1f}% ({m.h2_t:.2f}) | `{m.verdict}` |"
         )
 
-    lines.extend([
-        "",
-        "### Full Available History per Stream",
-        "",
-        "| Stream | Start | End | Obs | Alpha/yr | t-stat | Beta | Corr (QQQ) | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Full Available History per Stream",
+            "",
+            "| Stream | Start | End | Obs | Alpha/yr | t-stat | Beta | Corr (QQQ) | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for m in full_metrics:
         lines.append(
@@ -377,44 +390,48 @@ def generate_report(
             f"{m.max_dd:.1f}% | {m.h1_alpha:+.1f}% ({m.h1_t:.2f}) | {m.h2_alpha:+.1f}% ({m.h2_t:.2f}) | `{m.verdict}` |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## (d) Equal-Weight Blend of Six Survivors vs Best Member",
-        "",
-        "Equal-weight 1/6 blend of the six surviving quants.md books evaluated over the common window (2010–2026):",
-        "",
-        "| Series | Alpha/yr | t-stat | Beta | Corr (QQQ) | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|",
-        f"| **Equal-Weight 6-Survivor Blend** | {blend_metrics.alpha:+.1f}% | {blend_metrics.t:.2f} | "
-        f"{blend_metrics.beta:.2f} | {blend_metrics.corr:.2f} | {blend_metrics.max_dd:.1f}% | "
-        f"{blend_metrics.h1_alpha:+.1f}% ({blend_metrics.h1_t:.2f}) | {blend_metrics.h2_alpha:+.1f}% ({blend_metrics.h2_t:.2f}) | `{blend_metrics.verdict}` |",
-        f"| **Best Survivor ({best_survivor_metrics.name})** | {best_survivor_metrics.alpha:+.1f}% | {best_survivor_metrics.t:.2f} | "
-        f"{best_survivor_metrics.beta:.2f} | {best_survivor_metrics.corr:.2f} | {best_survivor_metrics.max_dd:.1f}% | "
-        f"{best_survivor_metrics.h1_alpha:+.1f}% ({best_survivor_metrics.h1_t:.2f}) | {best_survivor_metrics.h2_alpha:+.1f}% ({best_survivor_metrics.h2_t:.2f}) | `{best_survivor_metrics.verdict}` |",
-        "",
-        "**Dilution vs Diversification Analysis:**",
-        f"- The equal-weight blend produces **alpha of {blend_metrics.alpha:+.1f}%/yr (t = {blend_metrics.t:.2f})**, compared to the best standalone survivor **{best_survivor_metrics.name} ({best_survivor_metrics.alpha:+.1f}%/yr, t = {best_survivor_metrics.t:.2f})**.",
-        f"- Blending achieves modest risk reduction (Max DD {blend_metrics.max_dd:.1f}% vs {best_survivor_metrics.max_dd:.1f}%), but severely dilutes alpha (reducing annual alpha by {best_survivor_metrics.alpha - blend_metrics.alpha:.1f}%/yr).",
-        f"- Because the ETF8 rotation books correlate heavily among themselves (residual correlation ~0.76–0.93), averaging them does not produce an independent statistical boost to t-stat.",
-        "",
-        "---",
-        "",
-        "## (e) Reading and Interpretation",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## (d) Equal-Weight Blend of Six Survivors vs Best Member",
+            "",
+            "Equal-weight 1/6 blend of the six surviving quants.md books evaluated over the common window (2010–2026):",
+            "",
+            "| Series | Alpha/yr | t-stat | Beta | Corr (QQQ) | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|",
+            f"| **Equal-Weight 6-Survivor Blend** | {blend_metrics.alpha:+.1f}% | {blend_metrics.t:.2f} | "
+            f"{blend_metrics.beta:.2f} | {blend_metrics.corr:.2f} | {blend_metrics.max_dd:.1f}% | "
+            f"{blend_metrics.h1_alpha:+.1f}% ({blend_metrics.h1_t:.2f}) | {blend_metrics.h2_alpha:+.1f}% ({blend_metrics.h2_t:.2f}) | `{blend_metrics.verdict}` |",
+            f"| **Best Survivor ({best_survivor_metrics.name})** | {best_survivor_metrics.alpha:+.1f}% | {best_survivor_metrics.t:.2f} | "
+            f"{best_survivor_metrics.beta:.2f} | {best_survivor_metrics.corr:.2f} | {best_survivor_metrics.max_dd:.1f}% | "
+            f"{best_survivor_metrics.h1_alpha:+.1f}% ({best_survivor_metrics.h1_t:.2f}) | {best_survivor_metrics.h2_alpha:+.1f}% ({best_survivor_metrics.h2_t:.2f}) | `{best_survivor_metrics.verdict}` |",
+            "",
+            "**Dilution vs Diversification Analysis:**",
+            f"- The equal-weight blend produces **alpha of {blend_metrics.alpha:+.1f}%/yr (t = {blend_metrics.t:.2f})**, compared to the best standalone survivor **{best_survivor_metrics.name} ({best_survivor_metrics.alpha:+.1f}%/yr, t = {best_survivor_metrics.t:.2f})**.",
+            f"- Blending achieves modest risk reduction (Max DD {blend_metrics.max_dd:.1f}% vs {best_survivor_metrics.max_dd:.1f}%), but severely dilutes alpha (reducing annual alpha by {best_survivor_metrics.alpha - blend_metrics.alpha:.1f}%/yr).",
+            "- Because the ETF8 rotation books correlate heavily among themselves (residual correlation ~0.76–0.93), averaging them does not produce an independent statistical boost to t-stat.",
+            "",
+            "---",
+            "",
+            "## (e) Reading and Interpretation",
+            "",
+        ]
+    )
 
     # Three lines of reading
     redundant_str = ", ".join(f"`{a}`–`{b}` ({c:.2f})" for a, b, c in redundant_pairs) if redundant_pairs else "None"
     independent_str = ", ".join(f"`{name}` (avg |resid corr| = {avg_c:.2f})" for name, avg_c in independent_streams[:3])
 
-    lines.extend([
-        f"1. **Redundant Pairs (residual correlation > 0.70):** {redundant_str}. The ETF8 momentum variations (`MonthlyRotation`, `VolTargetMomentum`, `QuarterlyTeCostGate`) and the two sector trend books (`SmaDaily`, `SmaDailyGated`) share the vast majority of their alpha variance and offer no mutual diversification.",
-        f"2. **Most Independent Streams:** {independent_str}. The corporate event books (`activist_13d`, `buyback_sp100`) and the macro trend sleeve (`TSMOM`) have near-zero residual correlation with the equity rotation and sector trend strategies.",
-        "3. **Verdict:** **No bot is promoted.** Every stream and the 6-survivor blend remain `unproven` under the project bar (t >= 2 and alpha > 0 in both halves).",
-        "",
-    ])
+    lines.extend(
+        [
+            f"1. **Redundant Pairs (residual correlation > 0.70):** {redundant_str}. The ETF8 momentum variations (`MonthlyRotation`, `VolTargetMomentum`, `QuarterlyTeCostGate`) and the two sector trend books (`SmaDaily`, `SmaDailyGated`) share the vast majority of their alpha variance and offer no mutual diversification.",
+            f"2. **Most Independent Streams:** {independent_str}. The corporate event books (`activist_13d`, `buyback_sp100`) and the macro trend sleeve (`TSMOM`) have near-zero residual correlation with the equity rotation and sector trend strategies.",
+            "3. **Verdict:** **No bot is promoted.** Every stream and the 6-survivor blend remain `unproven` under the project bar (t >= 2 and alpha > 0 in both halves).",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -481,7 +498,7 @@ def main() -> int:
     # Slice common window starting from COMMON_START to min of last available bar
     start_ts = pd.Timestamp(COMMON_START)
     common_idx = qqq_ret.loc[start_ts:].index
-    for k, s in norm_streams.items():
+    for s in norm_streams.values():
         s_sub = s.loc[start_ts:]
         common_idx = common_idx.intersection(s_sub.index)
 
@@ -568,9 +585,13 @@ def main() -> int:
     print("COMMON WINDOW PERFORMANCE (2010-02 to 2026-11)")
     print("=" * 80)
     for m in common_metrics:
-        print(f"{m.name:20s}: Alpha {m.alpha:+5.1f}% | t {m.t:4.2f} | Beta {m.beta:4.2f} | Corr {m.corr:4.2f} | MaxDD {m.max_dd:5.1f}% | H1 t {m.h1_t:4.2f} | H2 t {m.h2_t:4.2f} | {m.verdict}")
+        print(
+            f"{m.name:20s}: Alpha {m.alpha:+5.1f}% | t {m.t:4.2f} | Beta {m.beta:4.2f} | Corr {m.corr:4.2f} | MaxDD {m.max_dd:5.1f}% | H1 t {m.h1_t:4.2f} | H2 t {m.h2_t:4.2f} | {m.verdict}"
+        )
     print("-" * 80)
-    print(f"{blend_metrics.name:20s}: Alpha {blend_metrics.alpha:+5.1f}% | t {blend_metrics.t:4.2f} | Beta {blend_metrics.beta:4.2f} | Corr {blend_metrics.corr:4.2f} | MaxDD {blend_metrics.max_dd:5.1f}% | H1 t {blend_metrics.h1_t:4.2f} | H2 t {blend_metrics.h2_t:4.2f} | {blend_metrics.verdict}")
+    print(
+        f"{blend_metrics.name:20s}: Alpha {blend_metrics.alpha:+5.1f}% | t {blend_metrics.t:4.2f} | Beta {blend_metrics.beta:4.2f} | Corr {blend_metrics.corr:4.2f} | MaxDD {blend_metrics.max_dd:5.1f}% | H1 t {blend_metrics.h1_t:4.2f} | H2 t {blend_metrics.h2_t:4.2f} | {blend_metrics.verdict}"
+    )
     print("=" * 80)
     return 0
 

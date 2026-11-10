@@ -15,8 +15,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
-from tradingbot.utils.market_calendar import is_session, next_session, session_close_utc
+from tradingbot.utils.alpha_report import alpha_stats
+from tradingbot.utils.market_calendar import session_close_utc
 
 NEW_YORK = ZoneInfo("America/New_York")
 FALLBACK_CLOSE_TIME = time(16, 0)
@@ -80,7 +80,7 @@ def forward_returns(
     entry = first daily close STRICTLY AFTER the event timestamp's session (no look-ahead).
     return from entry close to close `h` sessions later; NaN if not enough bars.
     """
-    out: dict[int, float] = {h: np.nan for h in horizons_days}
+    out: dict[int, float] = dict.fromkeys(horizons_days, np.nan)
     if prices is None or prices.empty:
         return out
 
@@ -189,24 +189,22 @@ def abnormal_returns(
         label_val = ev["label"] if has_label else None
 
         stock_prices = prices.get(symbol)
-        stock_fwd = forward_returns(stock_prices, ev_ts, horizons) if stock_prices is not None else {h: np.nan for h in horizons}
-        bench_fwd = forward_returns(bench, ev_ts, horizons) if bench is not None else {h: np.nan for h in horizons}
+        stock_fwd = (
+            forward_returns(stock_prices, ev_ts, horizons)
+            if stock_prices is not None
+            else dict.fromkeys(horizons, np.nan)
+        )
+        bench_fwd = forward_returns(bench, ev_ts, horizons) if bench is not None else dict.fromkeys(horizons, np.nan)
 
         ev_ts_utc = _to_utc_timestamp(ev_ts)
         ev_date = ev_ts_utc.astimezone(NEW_YORK).date()
 
-        if stock_prices is not None and bench is not None:
-            beta = _calc_beta(stock_prices, bench, ev_date)
-        else:
-            beta = 1.0
+        beta = _calc_beta(stock_prices, bench, ev_date) if stock_prices is not None and bench is not None else 1.0
 
         for h in horizons:
             raw_ret = stock_fwd.get(h, np.nan)
             bench_ret = bench_fwd.get(h, np.nan)
-            if np.isnan(raw_ret) or np.isnan(bench_ret):
-                abnormal_ret = np.nan
-            else:
-                abnormal_ret = float(raw_ret - beta * bench_ret)
+            abnormal_ret = np.nan if np.isnan(raw_ret) or np.isnan(bench_ret) else float(raw_ret - beta * bench_ret)
 
             row_data = {
                 "ts": ev_ts,
@@ -251,11 +249,7 @@ def event_strategy_returns(
     if prices is None or not prices:
         return pd.Series(dtype=float)
 
-    clean_prices = {
-        sym: _normalize_price_series(p)
-        for sym, p in prices.items()
-        if p is not None and not p.empty
-    }
+    clean_prices = {sym: _normalize_price_series(p) for sym, p in prices.items() if p is not None and not p.empty}
     clean_prices = {sym: p for sym, p in clean_prices.items() if len(p) >= 2}
     if not clean_prices:
         return pd.Series(dtype=float)
@@ -379,12 +373,7 @@ def judge(strategy_returns: pd.Series, bench_returns: pd.Series) -> dict:
 
     passes = False
     if stats_h1 is not None and stats_h2 is not None:
-        passes = bool(
-            full_stats.t >= 2.0
-            and stats_h1.alpha > 0.0
-            and stats_h2.alpha > 0.0
-            and full_stats.beta < 0.5
-        )
+        passes = bool(full_stats.t >= 2.0 and stats_h1.alpha > 0.0 and stats_h2.alpha > 0.0 and full_stats.beta < 0.5)
 
     return {
         "passes": passes,

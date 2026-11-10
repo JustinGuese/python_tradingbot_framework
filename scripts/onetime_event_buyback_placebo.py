@@ -39,7 +39,9 @@ def load_inputs():
 
 def build_matrix(prices):
     syms = [s for s in prices if s != "QQQ" and prices[s] is not None and len(prices[s]) > 50]
-    df = pd.DataFrame({s: prices[s].dropna()[~prices[s].dropna().index.duplicated(keep="last")] for s in syms}).sort_index()
+    df = pd.DataFrame(
+        {s: prices[s].dropna()[~prices[s].dropna().index.duplicated(keep="last")] for s in syms}
+    ).sort_index()
     qqq = prices["QQQ"].dropna()
     qqq = qqq[~qqq.index.duplicated(keep="last")].sort_index()
     idx = df.index.union(qqq.index)
@@ -92,7 +94,9 @@ def main():
     ev = events[events["symbol"].isin(col)]
     # entry bar = first daily close strictly after acceptance time (UTC close approximated by date + 21:00 UTC)
     close_utc = (idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")) + pd.Timedelta(hours=21)
-    ent = np.searchsorted(close_utc.values, ev["acceptance_dt"].dt.tz_convert("UTC").dt.tz_localize(None).values, side="right")
+    ent = np.searchsorted(
+        close_utc.values, ev["acceptance_dt"].dt.tz_convert("UTC").dt.tz_localize(None).values, side="right"
+    )
     keep = ent < len(idx)
     entry = ent[keep].astype(int)
     sidx = np.array([col[s] for s in ev["symbol"].to_numpy()[keep]], dtype=int)
@@ -100,7 +104,9 @@ def main():
     cost = 0.0002
     p = book_returns(entry, sidx, a.hold, R, cost)
     t_obs, alpha_obs, beta_obs = t_alpha(p[1:], q[1:])
-    print(f"events used {len(entry)}; observed (vectorised) t {t_obs:.2f}, alpha {alpha_obs * 100:+.2f}%/yr, beta {beta_obs:.2f}")
+    print(
+        f"events used {len(entry)}; observed (vectorised) t {t_obs:.2f}, alpha {alpha_obs * 100:+.2f}%/yr, beta {beta_obs:.2f}"
+    )
     print("(study reported t 2.56 / +10.00% for hold 10d, all events; these should be close)")
 
     rng = np.random.default_rng(a.seed)
@@ -116,7 +122,9 @@ def main():
         exceed += t >= t_obs
     ts = np.array(ts)
     p_ref = float((ts >= 2.56).mean())
-    print(f"placebo draws {a.draws}: mean t {ts.mean():.2f}, sd {ts.std():.2f}, 95th pct {np.percentile(ts, 95):.2f}, p(t>=obs) = {exceed / a.draws:.4f}, p(t>=2.56, the study's value) = {p_ref:.4f}")
+    print(
+        f"placebo draws {a.draws}: mean t {ts.mean():.2f}, sd {ts.std():.2f}, 95th pct {np.percentile(ts, 95):.2f}, p(t>=obs) = {exceed / a.draws:.4f}, p(t>=2.56, the study's value) = {p_ref:.4f}"
+    )
 
 
 if __name__ == "__main__":

@@ -12,17 +12,15 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
-import numpy as np
+from datetime import UTC
+
 import pandas as pd
 import pytest
 
 from scripts.onetime_event_buyback_study import (
     classify_market_cap_bucket,
-    clean_html,
     compute_announcement_abnormal_return,
     dedupe_events_by_symbol,
-    has_item_801_or_701,
     matches_buyback_regex,
     parse_acceptance_datetime,
     strategy_returns_with_costs,
@@ -91,12 +89,14 @@ def test_deduplication_within_30_days_per_company():
     - Filings >= 30 days apart are preserved.
     - Different companies are kept independently.
     """
-    raw_events = pd.DataFrame([
-        {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-01-10 15:00:00", tz=UTC)},
-        {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-01-20 15:00:00", tz=UTC)},  # +10d: drop
-        {"symbol": "MSFT", "acceptance_dt": pd.Timestamp("2024-01-20 15:00:00", tz=UTC)},  # Different sym: keep
-        {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-02-15 15:00:00", tz=UTC)},  # +36d: keep
-    ])
+    raw_events = pd.DataFrame(
+        [
+            {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-01-10 15:00:00", tz=UTC)},
+            {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-01-20 15:00:00", tz=UTC)},  # +10d: drop
+            {"symbol": "MSFT", "acceptance_dt": pd.Timestamp("2024-01-20 15:00:00", tz=UTC)},  # Different sym: keep
+            {"symbol": "AAPL", "acceptance_dt": pd.Timestamp("2024-02-15 15:00:00", tz=UTC)},  # +36d: keep
+        ]
+    )
 
     deduped = dedupe_events_by_symbol(raw_events, window_days=30)
     assert len(deduped) == 3

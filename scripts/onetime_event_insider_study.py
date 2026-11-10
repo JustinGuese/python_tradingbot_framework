@@ -21,18 +21,18 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
 import io
-import os
-from pathlib import Path
+import json
 import pickle
 import sys
 import time
 import urllib.request
 import warnings
 import xml.etree.ElementTree as ET
-from zoneinfo import ZoneInfo
+import zipfile
+from dataclasses import dataclass
+from datetime import date, datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -40,18 +40,15 @@ import yfinance as yf
 
 import tradingbot.utils.event_study as es
 from tradingbot.utils.event_study import (
-    _bar_close_utc,
-    _find_entry_bar_idx,
     _normalize_price_series,
     _to_utc_timestamp,
     abnormal_returns,
-    forward_returns,
     judge,
 )
-from tradingbot.utils.market_calendar import is_session, next_session
 from tradingbot.utils.universes import SP100
 
 warnings.filterwarnings("ignore")
+
 
 # Binary search acceleration for event_study._find_entry_bar_idx
 def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> int | None:
@@ -66,6 +63,7 @@ def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> i
         else:
             lo = mid + 1
     return lo if lo < n else None
+
 
 es._find_entry_bar_idx = _fast_find_entry_bar_idx
 _find_entry_bar_idx = _fast_find_entry_bar_idx
@@ -178,18 +176,20 @@ def parse_form4_xml(xml_content: str) -> list[dict]:
                     if adv is not None and adv.text:
                         acq_disp = adv.text.strip().upper()
 
-            records.append({
-                "symbol": symbol,
-                "issuer_cik": issuer_cik,
-                "insider": insider_id,
-                "trans_date": trans_date_str or period_of_report,
-                "filing_date": period_of_report or trans_date_str,
-                "trans_code": trans_code,
-                "shares": shares,
-                "price": price,
-                "total_usd": shares * price,
-                "acquired_disposed": acq_disp,
-            })
+            records.append(
+                {
+                    "symbol": symbol,
+                    "issuer_cik": issuer_cik,
+                    "insider": insider_id,
+                    "trans_date": trans_date_str or period_of_report,
+                    "filing_date": period_of_report or trans_date_str,
+                    "trans_code": trans_code,
+                    "shares": shares,
+                    "price": price,
+                    "total_usd": shares * price,
+                    "acquired_disposed": acq_disp,
+                }
+            )
 
     return records
 
@@ -208,7 +208,11 @@ def get_sp100_cik_mapping() -> dict[str, str]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8")) if "json" in sys.modules else __import__("json").loads(resp.read().decode("utf-8"))
+            data = (
+                json.loads(resp.read().decode("utf-8"))
+                if "json" in sys.modules
+                else __import__("json").loads(resp.read().decode("utf-8"))
+            )
         sp100_set = set(SP100)
         out = {
             item["ticker"].upper(): str(item["cik_str"])
@@ -314,17 +318,19 @@ def load_sp100_insider_trades(
                                 except ValueError:
                                     shares, price = 0.0, 0.0
 
-                                all_trades.append({
-                                    "symbol": sym,
-                                    "filing_date": filing_date,
-                                    "trans_date": r.get("TRANS_DATE", ""),
-                                    "insider": owner,
-                                    "shares": shares,
-                                    "price": price,
-                                    "total_usd": shares * price,
-                                    "trans_code": "P",
-                                    "accession_number": acc,
-                                })
+                                all_trades.append(
+                                    {
+                                        "symbol": sym,
+                                        "filing_date": filing_date,
+                                        "trans_date": r.get("TRANS_DATE", ""),
+                                        "insider": owner,
+                                        "shares": shares,
+                                        "price": price,
+                                        "total_usd": shares * price,
+                                        "trans_code": "P",
+                                        "accession_number": acc,
+                                    }
+                                )
 
                 quarters_processed += 1
             except Exception as e:
@@ -429,16 +435,20 @@ def find_insider_clusters(
                     # Deduplication guard per symbol
                     if last_cluster_event_date is None or (event_date - last_cluster_event_date).days >= dedupe_days:
                         # Timestamp at end of event day (23:59:59 UTC) so look-ahead enters next session close
-                        ev_ts = pd.Timestamp(datetime.combine(event_date, datetime.min.time()), tz="UTC") + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                        ev_ts = pd.Timestamp(
+                            datetime.combine(event_date, datetime.min.time()), tz="UTC"
+                        ) + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
-                        cluster_events.append({
-                            "ts": ev_ts,
-                            "symbol": sym,
-                            "event_date": event_date,
-                            "cluster_size": len(distinct_insiders),
-                            "total_usd": window_usd,
-                            "insiders": list(distinct_insiders),
-                        })
+                        cluster_events.append(
+                            {
+                                "ts": ev_ts,
+                                "symbol": sym,
+                                "event_date": event_date,
+                                "cluster_size": len(distinct_insiders),
+                                "total_usd": window_usd,
+                                "insiders": list(distinct_insiders),
+                            }
+                        )
                         last_cluster_event_date = event_date
 
                     break  # Move to next candidate cluster
@@ -466,11 +476,7 @@ def event_strategy_returns_with_costs(
     if prices is None or not prices:
         return pd.Series(dtype=float)
 
-    clean_prices = {
-        sym: _normalize_price_series(p)
-        for sym, p in prices.items()
-        if p is not None and not p.empty
-    }
+    clean_prices = {sym: _normalize_price_series(p) for sym, p in prices.items() if p is not None and not p.empty}
     clean_prices = {sym: p for sym, p in clean_prices.items() if len(p) >= 2}
     if not clean_prices:
         return pd.Series(dtype=float)
@@ -591,7 +597,7 @@ def run_placebo(
         return 1.0
 
     # Common dates
-    all_dates = bench_rets.index[100:-hold_days - 5]
+    all_dates = bench_rets.index[100 : -hold_days - 5]
     if len(all_dates) < n_events:
         return 1.0
 
@@ -602,10 +608,16 @@ def run_placebo(
         rand_dates = rng.choice(all_dates, size=n_events, replace=True)
         rand_syms = rng.choice(valid_symbols, size=n_events, replace=True)
 
-        pseudo_signals = pd.DataFrame({
-            "symbol": rand_syms,
-            "ts": [pd.Timestamp(datetime.combine(d.date(), datetime.min.time()), tz="UTC") + pd.Timedelta(hours=23, minutes=59) for d in rand_dates],
-        })
+        pseudo_signals = pd.DataFrame(
+            {
+                "symbol": rand_syms,
+                "ts": [
+                    pd.Timestamp(datetime.combine(d.date(), datetime.min.time()), tz="UTC")
+                    + pd.Timedelta(hours=23, minutes=59)
+                    for d in rand_dates
+                ],
+            }
+        )
 
         strat_rets = event_strategy_returns_with_costs(pseudo_signals, prices, hold_days, cost_per_side)
         res = judge(strat_rets, bench_rets)
@@ -673,11 +685,13 @@ def run_insider_study(
 
     # 1. Fetch Form 4 insider purchases
     print("Loading Form 4 Code P trades from SEC EDGAR / DERA...")
-    trades_df = load_sp100_insider_trades(start_year=2006, end_year=2026, use_cache=not no_cache, cap_quarters=cap_quarters)
+    trades_df = load_sp100_insider_trades(
+        start_year=2006, end_year=2026, use_cache=not no_cache, cap_quarters=cap_quarters
+    )
     print(f"Total S&P 100 Code P transactions loaded: {len(trades_df)}")
 
     # 2. Fetch prices
-    symbols = list(SP100) + ["QQQ"]
+    symbols = [*list(SP100), "QQQ"]
     print("Loading daily close price data...")
     prices = load_prices(symbols, start="2005-01-01", use_cache=not no_cache)
     bench = prices.get("QQQ")
@@ -719,28 +733,30 @@ def run_insider_study(
         n_clusters = len(clusters)
 
         if n_clusters < 6:
-            results.append(VariantResult(
-                name=var_name,
-                hold_days=hold_days,
-                min_size=min_size,
-                min_usd=min_usd,
-                n_clusters=n_clusters,
-                ar_mean=0.0,
-                ar_t=0.0,
-                win_pct=0.0,
-                gross_alpha=None,
-                gross_t=None,
-                net_2bp_alpha=None,
-                net_2bp_t=None,
-                net_5bp_alpha=None,
-                net_5bp_t=None,
-                beta=None,
-                h1_alpha=None,
-                h1_t=None,
-                h2_alpha=None,
-                h2_t=None,
-                passes=False,
-            ))
+            results.append(
+                VariantResult(
+                    name=var_name,
+                    hold_days=hold_days,
+                    min_size=min_size,
+                    min_usd=min_usd,
+                    n_clusters=n_clusters,
+                    ar_mean=0.0,
+                    ar_t=0.0,
+                    win_pct=0.0,
+                    gross_alpha=None,
+                    gross_t=None,
+                    net_2bp_alpha=None,
+                    net_2bp_t=None,
+                    net_5bp_alpha=None,
+                    net_5bp_t=None,
+                    beta=None,
+                    h1_alpha=None,
+                    h1_t=None,
+                    h2_alpha=None,
+                    h2_t=None,
+                    passes=False,
+                )
+            )
             continue
 
         # Event-level abnormal returns from precomputed cache
@@ -766,7 +782,9 @@ def run_insider_study(
 
         if passes and n_placebo > 0:
             observed_t = float(judge_net2["t"])
-            placebo_p = run_placebo(clusters, prices, bench, hold_days, cost_per_side=0.0002, observed_t=observed_t, n_draws=n_placebo)
+            placebo_p = run_placebo(
+                clusters, prices, bench, hold_days, cost_per_side=0.0002, observed_t=observed_t, n_draws=n_placebo
+            )
             if placebo_p >= 0.05:
                 passes = False  # Failed placebo test
 
@@ -794,7 +812,9 @@ def run_insider_study(
             placebo_p=placebo_p,
         )
         results.append(vr)
-        print(f"[{vr.name:28s}] N={vr.n_clusters:3d} | AR Mean={vr.ar_mean:+5.2f}% (t={vr.ar_t:4.2f}) | Net2bp Alpha={(vr.net_2bp_alpha or 0.0) * 100:+5.2f}% (t={vr.net_2bp_t if vr.net_2bp_t is not None else 0.0:4.2f}) | Pass={vr.passes}")
+        print(
+            f"[{vr.name:28s}] N={vr.n_clusters:3d} | AR Mean={vr.ar_mean:+5.2f}% (t={vr.ar_t:4.2f}) | Net2bp Alpha={(vr.net_2bp_alpha or 0.0) * 100:+5.2f}% (t={vr.net_2bp_t if vr.net_2bp_t is not None else 0.0:4.2f}) | Pass={vr.passes}"
+        )
 
     # Determine final study verdict
     passing_variants = [r for r in results if r.passes]
@@ -858,15 +878,17 @@ def generate_markdown_report(results: list[VariantResult], verdict: str, total_c
     best_t = best.net_2bp_t if best else 0.0
     n_both_pos = sum(1 for r in results if (r.h1_alpha or 0) > 0 and (r.h2_alpha or 0) > 0)
 
-    lines.extend([
-        "",
-        "## Key Findings",
-        "",
-        f"1. **Cluster Frequency in Large-Cap Equities:** Insider open-market purchases (Code `P`) in S&P 100 companies are relatively rare compared to stock awards or option exercises. Over the 20-year sample (2006-2026), {total_clusters} multi-insider cluster events were identified.",
-        f"2. **Best variant by net-2bp t:** {best_name} (alpha {best_alpha:+.2f}%/yr, t {best_t:.2f}).",
-        f"3. **Variants with positive alpha in both halves:** {n_both_pos} of {len(results)}.",
-        f"4. **Verdict Assessment:** Final study verdict is `{verdict}` against the pre-registered acceptance criteria.",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Key Findings",
+            "",
+            f"1. **Cluster Frequency in Large-Cap Equities:** Insider open-market purchases (Code `P`) in S&P 100 companies are relatively rare compared to stock awards or option exercises. Over the 20-year sample (2006-2026), {total_clusters} multi-insider cluster events were identified.",
+            f"2. **Best variant by net-2bp t:** {best_name} (alpha {best_alpha:+.2f}%/yr, t {best_t:.2f}).",
+            f"3. **Variants with positive alpha in both halves:** {n_both_pos} of {len(results)}.",
+            f"4. **Verdict Assessment:** Final study verdict is `{verdict}` against the pre-registered acceptance criteria.",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -876,7 +898,9 @@ def main():
     parser.add_argument("--cap", type=int, default=None, help="Cap number of quarters for smoke run")
     parser.add_argument("--no-cache", action="store_true", help="Bypass cached files")
     parser.add_argument("--placebo-draws", type=int, default=2000, help="Number of placebo draws (default 2000)")
-    parser.add_argument("--output-doc", type=str, default="docs/backtests/event-insider-2026-11.md", help="Output Markdown doc path")
+    parser.add_argument(
+        "--output-doc", type=str, default="docs/backtests/event-insider-2026-11.md", help="Output Markdown doc path"
+    )
     args = parser.parse_args()
 
     results, verdict, total_clusters = run_insider_study(

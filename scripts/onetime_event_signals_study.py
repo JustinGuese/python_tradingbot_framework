@@ -22,12 +22,8 @@ from __future__ import annotations
 
 import os
 import re
-import sys
-from collections.abc import Sequence
-from dataclasses import dataclass
 
 import dotenv
-import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -248,7 +244,7 @@ def load_signals_from_db(channel: str = CHANNEL_ID) -> pd.DataFrame:
 
     df = pd.DataFrame(records)
     print(f"Total rows queried: {total_rows}")
-    print(f"Successfully mapped to yfinance ticker: {len(df)} ({len(df)/total_rows:.1%})")
+    print(f"Successfully mapped to yfinance ticker: {len(df)} ({len(df) / total_rows:.1%})")
     print(f"Unmapped / dropped rows: {unmapped_count}")
     return df
 
@@ -279,7 +275,7 @@ def run_signals_study() -> dict:
     print(f"\nSignal date range: {min_ts} to {max_ts}")
 
     # Unique tickers needed + benchmark
-    unique_tickers = sorted(df_signals["symbol"].unique().tolist() + ["QQQ"])
+    unique_tickers = sorted([*df_signals["symbol"].unique().tolist(), "QQQ"])
     print(f"Downloading daily price history for {len(unique_tickers)} tickers...")
     px_df = yf.download(unique_tickers, start="2025-01-01", auto_adjust=True, progress=False)["Close"]
 
@@ -295,8 +291,12 @@ def run_signals_study() -> dict:
     ar_df["signed_abnormal"] = ar_df["abnormal"] * ar_df["direction"]
 
     fwd_stats_all = ar_df.groupby("horizon")[["raw", "signed_raw", "abnormal", "signed_abnormal"]].mean()
-    fwd_stats_long = ar_df[ar_df["direction"] == 1].groupby("horizon")[["raw", "signed_raw", "abnormal", "signed_abnormal"]].mean()
-    fwd_stats_short = ar_df[ar_df["direction"] == -1].groupby("horizon")[["raw", "signed_raw", "abnormal", "signed_abnormal"]].mean()
+    fwd_stats_long = (
+        ar_df[ar_df["direction"] == 1].groupby("horizon")[["raw", "signed_raw", "abnormal", "signed_abnormal"]].mean()
+    )
+    fwd_stats_short = (
+        ar_df[ar_df["direction"] == -1].groupby("horizon")[["raw", "signed_raw", "abnormal", "signed_abnormal"]].mean()
+    )
 
     # 2. Portfolio Strategy backtest across pre-registered variants
     # Slice the evaluation window to start at the first event's date
@@ -305,7 +305,9 @@ def run_signals_study() -> dict:
 
     print("\nEvaluating Pre-registered Strategy Variants:")
     print("-" * 105)
-    print(f"{'Variant':<16} | {'Alpha':<8} | {'t-stat':<7} | {'Beta':<7} | {'Corr':<6} | {'n':<5} | {'Alpha H1':<9} | {'Alpha H2':<9} | {'Passes':<6}")
+    print(
+        f"{'Variant':<16} | {'Alpha':<8} | {'t-stat':<7} | {'Beta':<7} | {'Corr':<6} | {'n':<5} | {'Alpha H1':<9} | {'Alpha H2':<9} | {'Passes':<6}"
+    )
     print("-" * 105)
 
     for var in PRE_REGISTERED_VARIANTS:
@@ -344,16 +346,18 @@ def run_signals_study() -> dict:
         }
         variant_results.append(var_res)
 
-        alpha_str = f"{var_res['alpha']:.4f}" if var_res['alpha'] is not None else "None"
-        t_str = f"{var_res['t']:.2f}" if var_res['t'] is not None else "None"
-        beta_str = f"{var_res['beta']:.4f}" if var_res['beta'] is not None else "None"
-        corr_str = f"{var_res['corr']:.4f}" if var_res['corr'] is not None else "None"
+        alpha_str = f"{var_res['alpha']:.4f}" if var_res["alpha"] is not None else "None"
+        t_str = f"{var_res['t']:.2f}" if var_res["t"] is not None else "None"
+        beta_str = f"{var_res['beta']:.4f}" if var_res["beta"] is not None else "None"
+        corr_str = f"{var_res['corr']:.4f}" if var_res["corr"] is not None else "None"
         n_str = str(var_res["n"])
-        h1_str = f"{var_res['alpha_h1']:.4f}" if var_res['alpha_h1'] is not None else "None"
-        h2_str = f"{var_res['alpha_h2']:.4f}" if var_res['alpha_h2'] is not None else "None"
+        h1_str = f"{var_res['alpha_h1']:.4f}" if var_res["alpha_h1"] is not None else "None"
+        h2_str = f"{var_res['alpha_h2']:.4f}" if var_res["alpha_h2"] is not None else "None"
         pass_str = "YES" if var_res["passes"] else "NO"
 
-        print(f"{name:<16} | {alpha_str:<8} | {t_str:<7} | {beta_str:<7} | {corr_str:<6} | {n_str:<5} | {h1_str:<9} | {h2_str:<9} | {pass_str:<6}")
+        print(
+            f"{name:<16} | {alpha_str:<8} | {t_str:<7} | {beta_str:<7} | {corr_str:<6} | {n_str:<5} | {h1_str:<9} | {h2_str:<9} | {pass_str:<6}"
+        )
 
     print("-" * 105)
 

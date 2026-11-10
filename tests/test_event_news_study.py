@@ -6,7 +6,6 @@ No DB access, no network access.
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from scripts.onetime_event_news_study import (
     assign_terciles,
@@ -57,13 +56,10 @@ def test_dedupe_identical_titles_per_symbol_per_day():
         # Same symbol, same day, identical title -> duplicate
         {"symbol": "AAPL", "published_at": "2026-03-01 10:00:00+00:00", "title": "Apple surges on AI"},
         {"symbol": "AAPL", "published_at": "2026-03-01 14:30:00+00:00", "title": "Apple surges on AI  "},
-
         # Same symbol, different day, identical title -> keep both
         {"symbol": "AAPL", "published_at": "2026-03-02 10:00:00+00:00", "title": "Apple surges on AI"},
-
         # Different symbol, same day, identical title -> keep both
         {"symbol": "MSFT", "published_at": "2026-03-01 10:00:00+00:00", "title": "Apple surges on AI"},
-
         # Same symbol, same day, different title -> keep both
         {"symbol": "AAPL", "published_at": "2026-03-01 11:00:00+00:00", "title": "Apple announces buyback"},
     ]
@@ -81,10 +77,12 @@ def test_dedupe_identical_titles_per_symbol_per_day():
 
 def test_assign_terciles():
     """Verify headlines are split into terciles by score."""
-    df = pd.DataFrame({
-        "score": [-3, -1, 0, 0, 1, 3],
-        "title": ["t1", "t2", "t3", "t4", "t5", "t6"],
-    })
+    df = pd.DataFrame(
+        {
+            "score": [-3, -1, 0, 0, 1, 3],
+            "title": ["t1", "t2", "t3", "t4", "t5", "t6"],
+        }
+    )
     res = assign_terciles(df)
     assert "tercile" in res.columns
     counts = res["tercile"].value_counts()

@@ -29,7 +29,9 @@ def test_parse_direction_four_fixed_summaries():
     assert parse_direction(s3) == -1
 
     # 4. SHORT limit order
-    s4 = "A short limit order on gold (XAU/USD) is placed at 5,180 with a stop-loss at 5,202 and a take-profit at 5,129."
+    s4 = (
+        "A short limit order on gold (XAU/USD) is placed at 5,180 with a stop-loss at 5,202 and a take-profit at 5,129."
+    )
     assert parse_direction(s4) == -1
 
 

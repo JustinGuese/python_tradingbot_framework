@@ -38,10 +38,9 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import warnings
-from datetime import UTC, datetime
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC
 
 import dotenv
 
@@ -56,7 +55,6 @@ from tradingbot.utils.db import StockNews, get_db_session
 from tradingbot.utils.event_study import (
     abnormal_returns,
     event_strategy_returns,
-    forward_returns,
     judge,
 )
 
@@ -64,78 +62,235 @@ warnings.filterwarnings("ignore")
 
 # Finance sentiment lexicon (positive / negative word lists, deterministic, no LLM)
 POSITIVE_WORDS = {
-    "advance", "advances", "advanced", "advancing",
-    "beat", "beats", "beating",
-    "boom", "booming",
-    "boost", "boosts", "boosted", "boosting",
+    "advance",
+    "advances",
+    "advanced",
+    "advancing",
+    "beat",
+    "beats",
+    "beating",
+    "boom",
+    "booming",
+    "boost",
+    "boosts",
+    "boosted",
+    "boosting",
     "breakout",
     "bullish",
-    "buy", "buys", "buying", "buyback", "buybacks",
-    "climb", "climbs", "climbed", "climbing",
-    "crush", "crushes", "crushed", "crushing",
-    "exceed", "exceeds", "exceeded", "exceeding",
-    "gain", "gains", "gained", "gaining",
+    "buy",
+    "buys",
+    "buying",
+    "buyback",
+    "buybacks",
+    "climb",
+    "climbs",
+    "climbed",
+    "climbing",
+    "crush",
+    "crushes",
+    "crushed",
+    "crushing",
+    "exceed",
+    "exceeds",
+    "exceeded",
+    "exceeding",
+    "gain",
+    "gains",
+    "gained",
+    "gaining",
     "growth",
-    "high", "higher", "highest",
-    "jump", "jumps", "jumped", "jumping",
-    "optimism", "optimistic",
-    "outperform", "outperformed", "outperforms", "outperforming",
-    "profit", "profitable", "profitability",
-    "rally", "rallies", "rallied", "rallying",
-    "rebound", "rebounds", "rebounded", "rebounding",
+    "high",
+    "higher",
+    "highest",
+    "jump",
+    "jumps",
+    "jumped",
+    "jumping",
+    "optimism",
+    "optimistic",
+    "outperform",
+    "outperformed",
+    "outperforms",
+    "outperforming",
+    "profit",
+    "profitable",
+    "profitability",
+    "rally",
+    "rallies",
+    "rallied",
+    "rallying",
+    "rebound",
+    "rebounds",
+    "rebounded",
+    "rebounding",
     "record",
     "recovery",
-    "rise", "rises", "rising", "rose",
-    "soar", "soars", "soared", "soaring",
-    "strength", "strong", "stronger", "strongest",
-    "surge", "surges", "surged", "surging",
-    "surpass", "surpasses", "surpassed", "surpassing",
-    "top", "tops", "topped", "topping",
-    "upgrade", "upgrades", "upgraded", "upgrading",
+    "rise",
+    "rises",
+    "rising",
+    "rose",
+    "soar",
+    "soars",
+    "soared",
+    "soaring",
+    "strength",
+    "strong",
+    "stronger",
+    "strongest",
+    "surge",
+    "surges",
+    "surged",
+    "surging",
+    "surpass",
+    "surpasses",
+    "surpassed",
+    "surpassing",
+    "top",
+    "tops",
+    "topped",
+    "topping",
+    "upgrade",
+    "upgrades",
+    "upgraded",
+    "upgrading",
     "upside",
-    "winner", "winners", "winning",
+    "winner",
+    "winners",
+    "winning",
 }
 
 NEGATIVE_WORDS = {
     "bearish",
-    "crash", "crashes", "crashed", "crashing",
-    "cut", "cuts", "cutting",
-    "decline", "declines", "declined", "declining",
-    "default", "defaults",
+    "crash",
+    "crashes",
+    "crashed",
+    "crashing",
+    "cut",
+    "cuts",
+    "cutting",
+    "decline",
+    "declines",
+    "declined",
+    "declining",
+    "default",
+    "defaults",
     "deficit",
-    "downgrade", "downgrades", "downgraded", "downgrading",
+    "downgrade",
+    "downgrades",
+    "downgraded",
+    "downgrading",
     "downside",
-    "drop", "drops", "dropped", "dropping",
-    "fail", "fails", "failed", "failing", "failure",
-    "fall", "falls", "fallen", "falling", "fell",
+    "drop",
+    "drops",
+    "dropped",
+    "dropping",
+    "fail",
+    "fails",
+    "failed",
+    "failing",
+    "failure",
+    "fall",
+    "falls",
+    "fallen",
+    "falling",
+    "fell",
     "fraud",
-    "investigation", "investigations",
-    "lawsuit", "lawsuits",
-    "layoff", "layoffs",
-    "loss", "losses", "lost", "losing",
-    "low", "lower", "lowest",
-    "miss", "misses", "missed", "missing",
-    "pessimism", "pessimistic",
-    "plunge", "plunges", "plunged", "plunging",
-    "probe", "probes", "probed",
-    "risk", "risks", "risky",
-    "scandal", "scandals",
-    "sink", "sinks", "sank", "sunk", "sinking",
-    "slump", "slumps", "slumped", "slumping",
-    "struggle", "struggles", "struggled", "struggling",
-    "sue", "sued", "sues", "suing",
-    "tumble", "tumbles", "tumbled", "tumbling",
-    "underperform", "underperformed", "underperforms", "underperforming",
-    "warn", "warns", "warned", "warning", "warnings",
-    "weak", "weaker", "weakest", "weakness",
+    "investigation",
+    "investigations",
+    "lawsuit",
+    "lawsuits",
+    "layoff",
+    "layoffs",
+    "loss",
+    "losses",
+    "lost",
+    "losing",
+    "low",
+    "lower",
+    "lowest",
+    "miss",
+    "misses",
+    "missed",
+    "missing",
+    "pessimism",
+    "pessimistic",
+    "plunge",
+    "plunges",
+    "plunged",
+    "plunging",
+    "probe",
+    "probes",
+    "probed",
+    "risk",
+    "risks",
+    "risky",
+    "scandal",
+    "scandals",
+    "sink",
+    "sinks",
+    "sank",
+    "sunk",
+    "sinking",
+    "slump",
+    "slumps",
+    "slumped",
+    "slumping",
+    "struggle",
+    "struggles",
+    "struggled",
+    "struggling",
+    "sue",
+    "sued",
+    "sues",
+    "suing",
+    "tumble",
+    "tumbles",
+    "tumbled",
+    "tumbling",
+    "underperform",
+    "underperformed",
+    "underperforms",
+    "underperforming",
+    "warn",
+    "warns",
+    "warned",
+    "warning",
+    "warnings",
+    "weak",
+    "weaker",
+    "weakest",
+    "weakness",
 }
 
 NEGATIONS = {
-    "not", "no", "never", "without", "hardly", "barely",
-    "unable", "neither", "nor", "cannot", "cant", "can't",
-    "dont", "don't", "doesnt", "doesn't", "didnt", "didn't",
-    "wont", "won't", "isnt", "isn't", "arent", "aren't",
-    "fail", "fails", "failed", "failing",
+    "not",
+    "no",
+    "never",
+    "without",
+    "hardly",
+    "barely",
+    "unable",
+    "neither",
+    "nor",
+    "cannot",
+    "cant",
+    "can't",
+    "dont",
+    "don't",
+    "doesnt",
+    "doesn't",
+    "didnt",
+    "didn't",
+    "wont",
+    "won't",
+    "isnt",
+    "isn't",
+    "arent",
+    "aren't",
+    "fail",
+    "fails",
+    "failed",
+    "failing",
 }
 
 # Pre-registered variants
@@ -178,7 +333,7 @@ def score_headline(title: str) -> int:
                 val = -1
 
             if val != 0:
-                lookback = tokens[max(0, i - 3):i]
+                lookback = tokens[max(0, i - 3) : i]
                 if any(w in NEGATIONS for w in lookback):
                     val = -val
                 total_score += val
@@ -202,7 +357,9 @@ def dedupe_headlines(df: pd.DataFrame) -> pd.DataFrame:
         dates = pd.Series(["1970-01-01"] * len(out), index=out.index)
 
     clean_titles = out["title"].astype(str).str.strip().str.lower()
-    mask = ~pd.Series(list(zip(out["symbol"], dates, clean_titles)), index=out.index).duplicated(keep="first")
+    mask = ~pd.Series(list(zip(out["symbol"], dates, clean_titles, strict=False)), index=out.index).duplicated(
+        keep="first"
+    )
     return out[mask].copy()
 
 
@@ -224,11 +381,15 @@ def assign_terciles(df: pd.DataFrame) -> pd.DataFrame:
 def load_news_from_db() -> pd.DataFrame:
     """Fetch all rows from stock_news table."""
     with get_db_session() as session:
-        rows = session.query(
-            StockNews.symbol,
-            StockNews.title,
-            StockNews.published_at,
-        ).order_by(StockNews.published_at.asc()).all()
+        rows = (
+            session.query(
+                StockNews.symbol,
+                StockNews.title,
+                StockNews.published_at,
+            )
+            .order_by(StockNews.published_at.asc())
+            .all()
+        )
 
     df = pd.DataFrame(rows, columns=["symbol", "title", "published_at"])
     # Ensure UTC timezone awareness
@@ -252,7 +413,11 @@ def load_prices(symbols: Sequence[str], start_date: str = "2023-01-01") -> tuple
     if os.path.exists(cache_path):
         try:
             cached_df = pd.read_pickle(cache_path)
-            if isinstance(cached_df, pd.DataFrame) and set(symbols).issubset(set(cached_df.columns)) and "QQQ" in cached_df.columns:
+            if (
+                isinstance(cached_df, pd.DataFrame)
+                and set(symbols).issubset(set(cached_df.columns))
+                and "QQQ" in cached_df.columns
+            ):
                 prices = {s: cached_df[s].dropna() for s in symbols if s in cached_df.columns}
                 bench = cached_df["QQQ"].dropna()
                 return prices, bench
@@ -282,11 +447,9 @@ def run_event_news_study() -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """
     # 1. Load data
     raw_news = load_news_from_db()
-    n_raw = len(raw_news)
 
     # 2. Dedupe
     deduped = dedupe_headlines(raw_news)
-    n_deduped = len(deduped)
 
     # 3. Score
     deduped["score"] = deduped["title"].apply(score_headline)
@@ -348,18 +511,20 @@ def run_event_news_study() -> tuple[pd.DataFrame, pd.DataFrame, str]:
 
             flag = "too few" if n_full < 30 else "ok"
 
-            summary_rows.append({
-                "bucket": bucket_name,
-                "horizon": f"+{h}d",
-                "n": n_full,
-                "mean_abn_pct": mean_full * 100.0,
-                "t_stat": t_full,
-                "h1_mean_pct": mean_h1 * 100.0,
-                "h1_t": t_h1,
-                "h2_mean_pct": mean_h2 * 100.0,
-                "h2_t": t_h2,
-                "flag": flag,
-            })
+            summary_rows.append(
+                {
+                    "bucket": bucket_name,
+                    "horizon": f"+{h}d",
+                    "n": n_full,
+                    "mean_abn_pct": mean_full * 100.0,
+                    "t_stat": t_full,
+                    "h1_mean_pct": mean_h1 * 100.0,
+                    "h1_t": t_h1,
+                    "h2_mean_pct": mean_h2 * 100.0,
+                    "h2_t": t_h2,
+                    "flag": flag,
+                }
+            )
 
     # Add Top - Bottom tercile spread
     for h in horizons:
@@ -373,34 +538,44 @@ def run_event_news_study() -> tuple[pd.DataFrame, pd.DataFrame, str]:
         se_diff = np.sqrt(se_top**2 + se_bot**2)
         t_diff = (top_h.mean() - bot_h.mean()) / se_diff if se_diff > 0 else 0.0
 
-        top_h1 = abn_df[(abn_df["tercile"] == "top") & (abn_df["horizon"] == h) & (abn_df["is_h1"])]["abnormal"].dropna()
-        bot_h1 = abn_df[(abn_df["tercile"] == "bottom") & (abn_df["horizon"] == h) & (abn_df["is_h1"])]["abnormal"].dropna()
+        top_h1 = abn_df[(abn_df["tercile"] == "top") & (abn_df["horizon"] == h) & (abn_df["is_h1"])][
+            "abnormal"
+        ].dropna()
+        bot_h1 = abn_df[(abn_df["tercile"] == "bottom") & (abn_df["horizon"] == h) & (abn_df["is_h1"])][
+            "abnormal"
+        ].dropna()
         diff_h1 = (top_h1.mean() - bot_h1.mean()) * 100.0
         se_top_h1 = top_h1.std() / np.sqrt(len(top_h1)) if len(top_h1) > 1 else 0
         se_bot_h1 = bot_h1.std() / np.sqrt(len(bot_h1)) if len(bot_h1) > 1 else 0
         se_diff_h1 = np.sqrt(se_top_h1**2 + se_bot_h1**2)
         t_h1 = (top_h1.mean() - bot_h1.mean()) / se_diff_h1 if se_diff_h1 > 0 else 0.0
 
-        top_h2 = abn_df[(abn_df["tercile"] == "top") & (abn_df["horizon"] == h) & (~abn_df["is_h1"])]["abnormal"].dropna()
-        bot_h2 = abn_df[(abn_df["tercile"] == "bottom") & (abn_df["horizon"] == h) & (~abn_df["is_h1"])]["abnormal"].dropna()
+        top_h2 = abn_df[(abn_df["tercile"] == "top") & (abn_df["horizon"] == h) & (~abn_df["is_h1"])][
+            "abnormal"
+        ].dropna()
+        bot_h2 = abn_df[(abn_df["tercile"] == "bottom") & (abn_df["horizon"] == h) & (~abn_df["is_h1"])][
+            "abnormal"
+        ].dropna()
         diff_h2 = (top_h2.mean() - bot_h2.mean()) * 100.0
         se_top_h2 = top_h2.std() / np.sqrt(len(top_h2)) if len(top_h2) > 1 else 0
         se_bot_h2 = bot_h2.std() / np.sqrt(len(bot_h2)) if len(bot_h2) > 1 else 0
         se_diff_h2 = np.sqrt(se_top_h2**2 + se_bot_h2**2)
         t_h2 = (top_h2.mean() - bot_h2.mean()) / se_diff_h2 if se_diff_h2 > 0 else 0.0
 
-        summary_rows.append({
-            "bucket": "top_minus_bottom",
-            "horizon": f"+{h}d",
-            "n": min(len(top_h), len(bot_h)),
-            "mean_abn_pct": diff_mean,
-            "t_stat": t_diff,
-            "h1_mean_pct": diff_h1,
-            "h1_t": t_h1,
-            "h2_mean_pct": diff_h2,
-            "h2_t": t_h2,
-            "flag": "ok",
-        })
+        summary_rows.append(
+            {
+                "bucket": "top_minus_bottom",
+                "horizon": f"+{h}d",
+                "n": min(len(top_h), len(bot_h)),
+                "mean_abn_pct": diff_mean,
+                "t_stat": t_diff,
+                "h1_mean_pct": diff_h1,
+                "h1_t": t_h1,
+                "h2_mean_pct": diff_h2,
+                "h2_t": t_h2,
+                "flag": "ok",
+            }
+        )
 
     abn_summary_df = pd.DataFrame(summary_rows)
 
@@ -424,20 +599,22 @@ def run_event_news_study() -> tuple[pd.DataFrame, pd.DataFrame, str]:
         strat_returns = event_strategy_returns(sigs, prices, hold_days=hold_days)
         j = judge(strat_returns, bench_returns)
 
-        portfolio_rows.append({
-            "variant": var_name,
-            "hold_days": hold_days,
-            "direction": "long" if direction > 0 else "short",
-            "passes": j["passes"],
-            "alpha": j["alpha"],
-            "t": j["t"],
-            "beta": j["beta"],
-            "n": j["n"],
-            "h1_alpha": j["h1_alpha"],
-            "h1_t": j["h1_t"],
-            "h2_alpha": j["h2_alpha"],
-            "h2_t": j["h2_t"],
-        })
+        portfolio_rows.append(
+            {
+                "variant": var_name,
+                "hold_days": hold_days,
+                "direction": "long" if direction > 0 else "short",
+                "passes": j["passes"],
+                "alpha": j["alpha"],
+                "t": j["t"],
+                "beta": j["beta"],
+                "n": j["n"],
+                "h1_alpha": j["h1_alpha"],
+                "h1_t": j["h1_t"],
+                "h2_alpha": j["h2_alpha"],
+                "h2_t": j["h2_t"],
+            }
+        )
 
     portfolio_df = pd.DataFrame(portfolio_rows)
 
@@ -446,7 +623,9 @@ def run_event_news_study() -> tuple[pd.DataFrame, pd.DataFrame, str]:
     # Also check if any abnormal return t >= 2 with positive in both halves
     any_abn_edge = any(
         row["t_stat"] >= 2.0 and row["h1_mean_pct"] > 0 and row["h2_mean_pct"] > 0
-        for _, row in abn_summary_df[abn_summary_df["bucket"].isin(["positive", "top_tercile", "top_minus_bottom"])].iterrows()
+        for _, row in abn_summary_df[
+            abn_summary_df["bucket"].isin(["positive", "top_tercile", "top_minus_bottom"])
+        ].iterrows()
     )
 
     if any_pass:

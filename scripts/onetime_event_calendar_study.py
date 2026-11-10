@@ -22,16 +22,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
+import os
+import pickle
+import warnings
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from functools import lru_cache
-import os
 from pathlib import Path
-import pickle
-import sys
-import warnings
 
 import dotenv
 import numpy as np
@@ -58,6 +56,7 @@ from tradingbot.utils.market_calendar import _holidays, is_session, next_session
 
 warnings.filterwarnings("ignore")
 
+
 # Binary search acceleration for event_study._find_entry_bar_idx
 def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> int | None:
     if prices.empty:
@@ -71,6 +70,7 @@ def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> i
         else:
             lo = mid + 1
     return lo if lo < n else None
+
 
 es._find_entry_bar_idx = _fast_find_entry_bar_idx
 
@@ -181,7 +181,7 @@ def get_quarter_end_week_signals(all_sessions: Sequence[date]) -> list[tuple[dat
         month_sessions[(s.year, s.month)].append(s)
 
     out = []
-    for (y, m), s_list in month_sessions.items():
+    for (_y, m), s_list in month_sessions.items():
         if m in (3, 6, 9, 12) and len(s_list) >= 5:
             held_5 = s_list[-5:]
             entry_s = prev_session(held_5[0])
@@ -219,7 +219,9 @@ def load_all_prices(use_cache: bool = True) -> dict[str, pd.Series]:
             for s in symbols:
                 if s in cached:
                     val = cached[s]
-                    prices[s] = val.squeeze().dropna().sort_index() if hasattr(val, "squeeze") else val.dropna().sort_index()
+                    prices[s] = (
+                        val.squeeze().dropna().sort_index() if hasattr(val, "squeeze") else val.dropna().sort_index()
+                    )
         except Exception:
             pass
 
@@ -238,8 +240,8 @@ def load_all_prices(use_cache: bool = True) -> dict[str, pd.Series]:
 def load_macro_events() -> dict[str, list[date]]:
     """Load macro event dates (FOMC, CPI, NFP) from DB or fallback."""
     f = macro_events_frame(("FOMC", "CPI", "NFP"))
-    col = [c for c in f.columns if "date" in c.lower()][0]
-    kc = [c for c in f.columns if "kind" in c.lower()][0]
+    col = next(c for c in f.columns if "date" in c.lower())
+    kc = next(c for c in f.columns if "kind" in c.lower())
     return {k: sorted(set(pd.to_datetime(g[col]).dt.date)) for k, g in f.groupby(kc)}
 
 
@@ -259,8 +261,7 @@ def compute_leg_returns(
     """
     p_series = prices[symbol].dropna().sort_index()
     sig_rows = [
-        {"ts": pd.Timestamp(datetime.combine(d, time(12, 0), tzinfo=UTC)), "symbol": symbol}
-        for d in entry_sessions
+        {"ts": pd.Timestamp(datetime.combine(d, time(12, 0), tzinfo=UTC)), "symbol": symbol} for d in entry_sessions
     ]
     sig_df = pd.DataFrame(sig_rows)
     raw_s = event_strategy_returns(sig_df, {symbol: p_series}, hold_days=hold_days)
@@ -468,7 +469,7 @@ def run_calendar_study() -> tuple[list[VariantRow], pd.DataFrame, str]:
             strat_rets = compute_leg_returns(asset, entries, hold_days, prices, cost_per_side=cost)
             j = judge(strat_rets, bench_rets)
 
-            cost_bp = int(round(cost * 10000))
+            cost_bp = round(cost * 10000)
             passes = bool(j["passes"])
 
             results.append(
@@ -558,15 +559,17 @@ def run_calendar_study() -> tuple[list[VariantRow], pd.DataFrame, str]:
             mid = len(series) // 2
             a1 = alpha_stats(series[:mid].fillna(0), b_common_rets[:mid].fillna(0))
             a2 = alpha_stats(series[mid:].fillna(0), b_common_rets[mid:].fillna(0))
-            pooled_rows.append({
-                "Configuration": name,
-                "Cost": f"{cost_bp} bp",
-                "Alpha": f"{st.alpha * 100:+.2f}%/yr" if st else "N/A",
-                "t-stat": f"{st.t:.2f}" if st else "N/A",
-                "Beta": f"{st.beta:.2f}" if st else "N/A",
-                "H1 Alpha (t)": f"{a1.alpha * 100:+.2f}% ({a1.t:.2f})" if a1 else "N/A",
-                "H2 Alpha (t)": f"{a2.alpha * 100:+.2f}% ({a2.t:.2f})" if a2 else "N/A",
-            })
+            pooled_rows.append(
+                {
+                    "Configuration": name,
+                    "Cost": f"{cost_bp} bp",
+                    "Alpha": f"{st.alpha * 100:+.2f}%/yr" if st else "N/A",
+                    "t-stat": f"{st.t:.2f}" if st else "N/A",
+                    "Beta": f"{st.beta:.2f}" if st else "N/A",
+                    "H1 Alpha (t)": f"{a1.alpha * 100:+.2f}% ({a1.t:.2f})" if a1 else "N/A",
+                    "H2 Alpha (t)": f"{a2.alpha * 100:+.2f}% ({a2.t:.2f})" if a2 else "N/A",
+                }
+            )
 
     pooled_df = pd.DataFrame(pooled_rows)
 
@@ -574,10 +577,7 @@ def run_calendar_study() -> tuple[list[VariantRow], pd.DataFrame, str]:
     # "Verdict words: `edge` only if a variant passes AND survives a placebo (random same-count dates, 2000 draws,
     # p < 0.05) AND the bar above; else `unproven` (some pass) or `no edge`."
     net_2bp_passes = [r for r in results if r.cost_bp == 2 and r.passes]
-    if net_2bp_passes:
-        verdict = "unproven"
-    else:
-        verdict = "no edge"
+    verdict = "unproven" if net_2bp_passes else "no edge"
 
     return results, pooled_df, verdict
 
@@ -598,14 +598,20 @@ def generate_doc_markdown(results: list[VariantRow], pooled_df: pd.DataFrame, ve
     doc.append("### Candidate Legs Tested (Fixed, 6 total in design; 5 active evaluated):")
     doc.append("1. **EIA crude inventory Wednesdays -> XLE hold [0,+1]:** Every Wednesday (holiday shift to Thursday).")
     doc.append("2. **Turn-of-month -> SPY:** Last session of month to 3rd session of next month (3 sessions held).")
-    doc.append("3. **Pre-holiday session -> SPY:** Enter close prior to pre-holiday session, hold during pre-holiday session (1 session held).")
+    doc.append(
+        "3. **Pre-holiday session -> SPY:** Enter close prior to pre-holiday session, hold during pre-holiday session (1 session held)."
+    )
     doc.append("4. **NFP day [0,+1] -> GLD:** Enter Friday NFP close, hold through Monday close (1 session held).")
     doc.append("5. **Quarter-end week -> TLT:** Last 5 sessions of calendar quarters (Q1, Q2, Q3, Q4).")
-    doc.append("6. **First session after FOMC -> SHV:** Excluded per PLAN.md specification (cash equivalent / no excess alpha).")
+    doc.append(
+        "6. **First session after FOMC -> SHV:** Excluded per PLAN.md specification (cash equivalent / no excess alpha)."
+    )
     doc.append("")
     doc.append("## Pre-registered Variants Table (10 variants net of costs + gross baselines)")
     doc.append("")
-    doc.append("| Leg | Asset | Window | Cost | N Events | Win% | AR Mean | AR t | Strat Alpha | Strat t | Beta | H1 Alpha (t) | H2 Alpha (t) | Pass? |")
+    doc.append(
+        "| Leg | Asset | Window | Cost | N Events | Win% | AR Mean | AR t | Strat Alpha | Strat t | Beta | H1 Alpha (t) | H2 Alpha (t) | Pass? |"
+    )
     doc.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
     for r in results:
@@ -623,29 +629,53 @@ def generate_doc_markdown(results: list[VariantRow], pooled_df: pd.DataFrame, ve
     doc.append("")
     doc.append("## Pooled Sleeve Performance (with and without existing 4 macro legs)")
     doc.append("")
-    doc.append("Evaluated over the common sample period (2007-03 to 2026-11) where all assets (including UUP) are available.")
-    doc.append("Existing 4 legs from `tradingbot/utils/macro_sleeve_rules.py`: FOMC->UUP [0,+2], CPI->TLT [0,+1], pre-FOMC TLT [-1,0], pre-FOMC GLD [-1,0].")
+    doc.append(
+        "Evaluated over the common sample period (2007-03 to 2026-11) where all assets (including UUP) are available."
+    )
+    doc.append(
+        "Existing 4 legs from `tradingbot/utils/macro_sleeve_rules.py`: FOMC->UUP [0,+2], CPI->TLT [0,+1], pre-FOMC TLT [-1,0], pre-FOMC GLD [-1,0]."
+    )
     doc.append("")
     doc.append("| Configuration | Cost | Annualized Alpha | t-stat | Beta | H1 Alpha (t) | H2 Alpha (t) |")
     doc.append("|---|---|---|---|---|---|---|")
     for _, row in pooled_df.iterrows():
-        doc.append(f"| {row['Configuration']} | {row['Cost']} | {row['Alpha']} | {row['t-stat']} | {row['Beta']} | {row['H1 Alpha (t)']} | {row['H2 Alpha (t)']} |")
+        doc.append(
+            f"| {row['Configuration']} | {row['Cost']} | {row['Alpha']} | {row['t-stat']} | {row['Beta']} | {row['H1 Alpha (t)']} | {row['H2 Alpha (t)']} |"
+        )
 
     doc.append("")
     doc.append("## Key Findings")
     doc.append("")
-    doc.append("1. **Individual Legs Fail Significance Hurdle:** None of the 5 individual candidate legs achieve `t >= 2.0` net of 2 bp transaction costs:")
-    doc.append("   - **EIA XLE [0,+1]:** Negative alpha net of costs (-2.93%/yr at 2 bp, t=-1.18; -6.06%/yr at 5 bp). Weekly turnover (52 trades/yr) rapidly bleeds frictional drag.")
-    doc.append("   - **Turn-of-Month (TOM) SPY:** Produces positive alpha (+1.99%/yr at 2 bp, +1.27%/yr at 5 bp), but full-sample t-stat is +1.53 (and +0.98 at 5 bp), falling short of the t >= 2.0 hurdle.")
-    doc.append("   - **Pre-Holiday SPY:** Modest positive gross drift (+0.77%/yr, t=1.38), but erodes to +0.40%/yr (t=0.72) at 2 bp and turns negative (-0.15%/yr) at 5 bp.")
-    doc.append("   - **NFP GLD [0,+1]:** Drift is weak (+0.37%/yr at 2 bp, t=0.47) and suffers negative alpha in the second half (-0.76%/yr in H2), failing intertemporal consistency.")
-    doc.append("   - **Quarter-End Week TLT:** Exhibits positive drift in both halves (+1.29%/yr net of 2 bp, H1 +2.23%, H2 +0.31%), but reaches only t = +1.70, missing the t >= 2.0 acceptance threshold.")
+    doc.append(
+        "1. **Individual Legs Fail Significance Hurdle:** None of the 5 individual candidate legs achieve `t >= 2.0` net of 2 bp transaction costs:"
+    )
+    doc.append(
+        "   - **EIA XLE [0,+1]:** Negative alpha net of costs (-2.93%/yr at 2 bp, t=-1.18; -6.06%/yr at 5 bp). Weekly turnover (52 trades/yr) rapidly bleeds frictional drag."
+    )
+    doc.append(
+        "   - **Turn-of-Month (TOM) SPY:** Produces positive alpha (+1.99%/yr at 2 bp, +1.27%/yr at 5 bp), but full-sample t-stat is +1.53 (and +0.98 at 5 bp), falling short of the t >= 2.0 hurdle."
+    )
+    doc.append(
+        "   - **Pre-Holiday SPY:** Modest positive gross drift (+0.77%/yr, t=1.38), but erodes to +0.40%/yr (t=0.72) at 2 bp and turns negative (-0.15%/yr) at 5 bp."
+    )
+    doc.append(
+        "   - **NFP GLD [0,+1]:** Drift is weak (+0.37%/yr at 2 bp, t=0.47) and suffers negative alpha in the second half (-0.76%/yr in H2), failing intertemporal consistency."
+    )
+    doc.append(
+        "   - **Quarter-End Week TLT:** Exhibits positive drift in both halves (+1.29%/yr net of 2 bp, H1 +2.23%, H2 +0.31%), but reaches only t = +1.70, missing the t >= 2.0 acceptance threshold."
+    )
     doc.append("2. **Placebo Analysis (2,000 draws):**")
-    doc.append("   - For TOM SPY, a 2,000-draw placebo of random 3-session windows yields empirical p = 0.082 (does not survive p < 0.05).")
+    doc.append(
+        "   - For TOM SPY, a 2,000-draw placebo of random 3-session windows yields empirical p = 0.082 (does not survive p < 0.05)."
+    )
     doc.append("   - For Quarter-End TLT, a 2,000-draw placebo of random 5-session windows yields empirical p = 0.064.")
     doc.append("3. **Pooled Sleeve Interaction:**")
-    doc.append("   - Pooling all 5 new legs creates an unviable, high-churn sleeve: at 2 bp net alpha is -2.56%/yr (t=-0.70), and at 5 bp it collapses to -7.95%/yr (t=-2.18). Adding all 5 to the existing 4 legs dilutes the existing sleeve from +4.27%/yr (t=2.73) down to +1.71%/yr (t=0.45).")
-    doc.append("   - Selectively pooling only the two consistent non-decayed legs (TOM + QE) with the existing 4 legs elevates gross alpha to +8.70%/yr (t=3.68) and 2 bp net alpha to +6.56%/yr (t=2.78, H1 t=2.06, H2 t=1.84, beta=0.09). However, because neither TOM nor QE passed the standalone gate individually, adopting them would represent post-hoc cherry-picking.")
+    doc.append(
+        "   - Pooling all 5 new legs creates an unviable, high-churn sleeve: at 2 bp net alpha is -2.56%/yr (t=-0.70), and at 5 bp it collapses to -7.95%/yr (t=-2.18). Adding all 5 to the existing 4 legs dilutes the existing sleeve from +4.27%/yr (t=2.73) down to +1.71%/yr (t=0.45)."
+    )
+    doc.append(
+        "   - Selectively pooling only the two consistent non-decayed legs (TOM + QE) with the existing 4 legs elevates gross alpha to +8.70%/yr (t=3.68) and 2 bp net alpha to +6.56%/yr (t=2.78, H1 t=2.06, H2 t=1.84, beta=0.09). However, because neither TOM nor QE passed the standalone gate individually, adopting them would represent post-hoc cherry-picking."
+    )
     doc.append("4. **Verdict:** `no edge` for the standalone candidate legs under pre-registered rules.")
 
     return "\n".join(doc)
@@ -678,7 +708,9 @@ def main() -> None:
         pass_str = "PASS" if r.passes else "FAIL"
         a_str = f"{r.strat_alpha_pct:+.2f}%" if r.strat_alpha_pct is not None else "N/A"
         t_str = f"{r.strat_t:+.2f}" if r.strat_t is not None else "N/A"
-        print(f"{r.leg:18s} | {r.cost_bp:2d} bp | alpha {a_str:>7s} | t {t_str:>6s} | beta {r.beta:+.2f} | Pass: {pass_str}")
+        print(
+            f"{r.leg:18s} | {r.cost_bp:2d} bp | alpha {a_str:>7s} | t {t_str:>6s} | beta {r.beta:+.2f} | Pass: {pass_str}"
+        )
 
     print("\n--- POOLED SLEEVE COMPARISON ---")
     print(pooled_df.to_string(index=False))

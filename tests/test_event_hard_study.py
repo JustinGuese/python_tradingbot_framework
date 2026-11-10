@@ -6,7 +6,8 @@ No DB access, no network access.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
+
 import pandas as pd
 import pytest
 
@@ -109,10 +110,14 @@ def test_window_math_and_cost_application():
 
     # Event timestamp: 2026-03-02 10:00 UTC (during session, before 16:00 close)
     # First close strictly after is 2026-03-02 close -> entry is 2026-03-02 close
-    sig_df = pd.DataFrame([{
-        "ts": pd.Timestamp("2026-03-02 10:00:00", tz=UTC),
-        "symbol": "XLE",
-    }])
+    sig_df = pd.DataFrame(
+        [
+            {
+                "ts": pd.Timestamp("2026-03-02 10:00:00", tz=UTC),
+                "symbol": "XLE",
+            }
+        ]
+    )
 
     cost_per_side = 0.0005  # 5 bp
 

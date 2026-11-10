@@ -9,10 +9,10 @@ Acceptance:
 - Net costs correctly apply 2 bp and 5 bp per side.
 """
 
-from datetime import date, datetime
+from datetime import date
+
 import numpy as np
 import pandas as pd
-import pytest
 
 from scripts.onetime_event_insider_study import (
     event_strategy_returns_with_costs,
@@ -138,28 +138,30 @@ def test_cluster_detection_two_distinct_insiders_within_10_days():
     Cluster requires >= 2 distinct insiders buying within 10 days.
     Event day must be the filing date of the second insider.
     """
-    trades = pd.DataFrame([
-        {
-            "symbol": "JPM",
-            "insider": "Alice Director",
-            "trans_date": date(2024, 3, 1),
-            "filing_date": date(2024, 3, 3),
-            "shares": 1000,
-            "price": 100.0,
-            "total_usd": 100000.0,
-            "trans_code": "P",
-        },
-        {
-            "symbol": "JPM",
-            "insider": "Bob Officer",
-            "trans_date": date(2024, 3, 6),
-            "filing_date": date(2024, 3, 8),
-            "shares": 500,
-            "price": 102.0,
-            "total_usd": 51000.0,
-            "trans_code": "P",
-        },
-    ])
+    trades = pd.DataFrame(
+        [
+            {
+                "symbol": "JPM",
+                "insider": "Alice Director",
+                "trans_date": date(2024, 3, 1),
+                "filing_date": date(2024, 3, 3),
+                "shares": 1000,
+                "price": 100.0,
+                "total_usd": 100000.0,
+                "trans_code": "P",
+            },
+            {
+                "symbol": "JPM",
+                "insider": "Bob Officer",
+                "trans_date": date(2024, 3, 6),
+                "filing_date": date(2024, 3, 8),
+                "shares": 500,
+                "price": 102.0,
+                "total_usd": 51000.0,
+                "trans_code": "P",
+            },
+        ]
+    )
 
     clusters = find_insider_clusters(trades, min_cluster_size=2, min_total_usd=50000.0, window_days=10)
     assert len(clusters) == 1
@@ -172,28 +174,30 @@ def test_cluster_detection_two_distinct_insiders_within_10_days():
 
 def test_cluster_detection_same_insider_does_not_form_cluster():
     """Multiple buys by the same insider do NOT satisfy distinct insiders requirement."""
-    trades = pd.DataFrame([
-        {
-            "symbol": "MSFT",
-            "insider": "Solo Executive",
-            "trans_date": date(2024, 3, 1),
-            "filing_date": date(2024, 3, 3),
-            "shares": 1000,
-            "price": 400.0,
-            "total_usd": 400000.0,
-            "trans_code": "P",
-        },
-        {
-            "symbol": "MSFT",
-            "insider": "Solo Executive",  # Same insider!
-            "trans_date": date(2024, 3, 5),
-            "filing_date": date(2024, 3, 7),
-            "shares": 1000,
-            "price": 405.0,
-            "total_usd": 405000.0,
-            "trans_code": "P",
-        },
-    ])
+    trades = pd.DataFrame(
+        [
+            {
+                "symbol": "MSFT",
+                "insider": "Solo Executive",
+                "trans_date": date(2024, 3, 1),
+                "filing_date": date(2024, 3, 3),
+                "shares": 1000,
+                "price": 400.0,
+                "total_usd": 400000.0,
+                "trans_code": "P",
+            },
+            {
+                "symbol": "MSFT",
+                "insider": "Solo Executive",  # Same insider!
+                "trans_date": date(2024, 3, 5),
+                "filing_date": date(2024, 3, 7),
+                "shares": 1000,
+                "price": 405.0,
+                "total_usd": 405000.0,
+                "trans_code": "P",
+            },
+        ]
+    )
 
     clusters = find_insider_clusters(trades, min_cluster_size=2, min_total_usd=50000.0, window_days=10)
     assert len(clusters) == 0
@@ -205,45 +209,49 @@ def test_cluster_detection_dollar_threshold_and_window_filter():
     must NOT trigger a cluster.
     """
     # Case 1: Insiders separated by 15 days (> 10 days)
-    trades_separated = pd.DataFrame([
-        {
-            "symbol": "AAPL",
-            "insider": "Insider 1",
-            "trans_date": date(2024, 1, 1),
-            "filing_date": date(2024, 1, 2),
-            "total_usd": 100000.0,
-            "trans_code": "P",
-        },
-        {
-            "symbol": "AAPL",
-            "insider": "Insider 2",
-            "trans_date": date(2024, 1, 18),  # 17 days later
-            "filing_date": date(2024, 1, 19),
-            "total_usd": 100000.0,
-            "trans_code": "P",
-        },
-    ])
+    trades_separated = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "insider": "Insider 1",
+                "trans_date": date(2024, 1, 1),
+                "filing_date": date(2024, 1, 2),
+                "total_usd": 100000.0,
+                "trans_code": "P",
+            },
+            {
+                "symbol": "AAPL",
+                "insider": "Insider 2",
+                "trans_date": date(2024, 1, 18),  # 17 days later
+                "filing_date": date(2024, 1, 19),
+                "total_usd": 100000.0,
+                "trans_code": "P",
+            },
+        ]
+    )
     assert len(find_insider_clusters(trades_separated, min_cluster_size=2, min_total_usd=50000.0, window_days=10)) == 0
 
     # Case 2: 2 insiders within 5 days, but total $ = 30k < 50k
-    trades_small = pd.DataFrame([
-        {
-            "symbol": "AAPL",
-            "insider": "Insider 1",
-            "trans_date": date(2024, 2, 1),
-            "filing_date": date(2024, 2, 2),
-            "total_usd": 15000.0,
-            "trans_code": "P",
-        },
-        {
-            "symbol": "AAPL",
-            "insider": "Insider 2",
-            "trans_date": date(2024, 2, 4),
-            "filing_date": date(2024, 2, 5),
-            "total_usd": 15000.0,
-            "trans_code": "P",
-        },
-    ])
+    trades_small = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "insider": "Insider 1",
+                "trans_date": date(2024, 2, 1),
+                "filing_date": date(2024, 2, 2),
+                "total_usd": 15000.0,
+                "trans_code": "P",
+            },
+            {
+                "symbol": "AAPL",
+                "insider": "Insider 2",
+                "trans_date": date(2024, 2, 4),
+                "filing_date": date(2024, 2, 5),
+                "total_usd": 15000.0,
+                "trans_code": "P",
+            },
+        ]
+    )
     assert len(find_insider_clusters(trades_small, min_cluster_size=2, min_total_usd=50000.0, window_days=10)) == 0
 
 

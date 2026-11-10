@@ -39,10 +39,20 @@ import yfinance as yf
 
 from tradingbot import (
     quantsmd_monthly_rotation as mr,
+)
+from tradingbot import (
     quantsmd_quarterly_te_cost_gate as qte,
+)
+from tradingbot import (
     quantsmd_risk_parity_capped as rpc,
+)
+from tradingbot import (
     quantsmd_sma_daily as sma,
+)
+from tradingbot import (
     quantsmd_sma_daily_gated as smag,
+)
+from tradingbot import (
     quantsmd_vol_target_momentum as vtm,
 )
 from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
@@ -54,11 +64,7 @@ FETCH_START = "2000-01-01"
 SPLIT_DATE = "2013-01-01"
 COST_PER_TURNOVER = 0.0005  # 5 bps
 
-ALL_SYMBOLS = sorted(
-    set(mr.ETF8)
-    | set(rpc.UNIVERSE)
-    | {"SPY", "QQQ", "^IRX"}
-)
+ALL_SYMBOLS = sorted(set(mr.ETF8) | set(rpc.UNIVERSE) | {"SPY", "QQQ", "^IRX"})
 
 
 def load_cached_prices(refresh: bool = False) -> pd.DataFrame:
@@ -194,6 +200,7 @@ def eval_weights_curve(
 # Simulation functions per bot
 # ==============================================================================
 
+
 def sim_monthly_rotation(closes: pd.DataFrame, p: dict[str, Any]) -> pd.DataFrame:
     records = []
     curr_w: dict[str, float] = {}
@@ -299,6 +306,7 @@ def sim_sma_daily_gated_vectorized(closes: pd.DataFrame, p: dict[str, Any]) -> p
 # Worker wrappers for multiprocessing
 # ==============================================================================
 
+
 def _worker_sim_mr(args: tuple[pd.DataFrame, list[str], pd.Series, dict[str, Any]]) -> ComboResult:
     closes, trade_syms, qqq_close, p = args
     w_df = sim_monthly_rotation(closes, p)
@@ -331,6 +339,7 @@ def _worker_sim_rpc(args: tuple[pd.DataFrame, list[str], pd.Series, dict[str, An
 # Bot orchestration
 # ==============================================================================
 
+
 def run_grid_for_bot(
     name: str,
     universe_name: str,
@@ -348,7 +357,7 @@ def run_grid_for_bot(
     start_date = closes.index[0].strftime("%Y-%m-%d")
     end_date = closes.index[-1].strftime("%Y-%m-%d")
 
-    grid_combos = [dict(zip(param_grid.keys(), v)) for v in itertools.product(*param_grid.values())]
+    grid_combos = [dict(zip(param_grid.keys(), v, strict=False)) for v in itertools.product(*param_grid.values())]
     print(f"Running grid for {name} ({len(grid_combos)} combos, {start_date} to {end_date})...", file=sys.stderr)
 
     if worker_fn == "sma_daily_vec":
@@ -391,8 +400,8 @@ def run_grid_for_bot(
 
     # Project verdict: say 'unproven' unless t >= 2 in both halves
     # Check if either default or best reaches t >= 2 in both halves
-    best_proven = (best_res.h1.t >= 2.0 and best_res.h2.t >= 2.0)
-    default_proven = (default_res.h1.t >= 2.0 and default_res.h2.t >= 2.0)
+    best_proven = best_res.h1.t >= 2.0 and best_res.h2.t >= 2.0
+    default_proven = default_res.h1.t >= 2.0 and default_res.h2.t >= 2.0
     verdict = "proven" if (best_proven or default_proven) else "unproven"
 
     # Conclusion line per bot
@@ -409,7 +418,7 @@ def run_grid_for_bot(
         )
 
     print(
-        f"Completed {name} in {time.time()-t0:.2f}s | "
+        f"Completed {name} in {time.time() - t0:.2f}s | "
         f"Best H1: {best_params} (H1 t={best_res.h1.t:.2f}, H2 t={best_res.h2.t:.2f}) | "
         f"Default: (H1 t={default_res.h1.t:.2f}, H2 t={default_res.h2.t:.2f}) | "
         f"Verdict: {verdict}",
@@ -435,6 +444,7 @@ def run_grid_for_bot(
 # ==============================================================================
 # Markdown report generation
 # ==============================================================================
+
 
 def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
     lines: list[str] = [
@@ -474,31 +484,39 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
         w_h2 = f"{s.best_res.h2.alpha:+.1f}% ({s.best_res.h2.t:.2f}, {s.best_res.h2.beta:.2f})"
         delta_alpha = s.best_res.h2.alpha - s.default_res.h2.alpha
         delta_t = s.best_res.h2.t - s.default_res.h2.t
-        oos_status = "BEATS default" if s.h2_beats_default else ("TIED with default" if s.best_params == s.default_params else "FAILS to beat default")
+        oos_status = (
+            "BEATS default"
+            if s.h2_beats_default
+            else ("TIED with default" if s.best_params == s.default_params else "FAILS to beat default")
+        )
         lines.append(
             f"| **{s.name}** | {s.universe_name} | `{b_p_str}` | `{d_p_str}` | "
             f"{d_h2} | {w_h2} | {delta_alpha:+.1f}% | {delta_t:+.2f} | {oos_status} | **{s.verdict}** |"
         )
 
-    lines.extend([
-        "",
-        "## Conclusion Per Bot",
-        "",
-        "Per the project bar rule (say `unproven` unless t >= 2 in both halves):",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Conclusion Per Bot",
+            "",
+            "Per the project bar rule (say `unproven` unless t >= 2 in both halves):",
+            "",
+        ]
+    )
     for s in summaries:
         lines.append(f"- {s.conclusion}")
 
-    lines.extend([
-        "",
-        "## Detailed Comparison: Default vs In-Sample H1 Winner",
-        "",
-        "### In-Sample (H1: Inception to 2012)",
-        "",
-        "| Bot | Inception | Default H1 Alpha | Default H1 t | Default H1 Beta | Winner H1 Alpha | Winner H1 t | Winner H1 Beta | H1 t Lift |",
-        "|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Detailed Comparison: Default vs In-Sample H1 Winner",
+            "",
+            "### In-Sample (H1: Inception to 2012)",
+            "",
+            "| Bot | Inception | Default H1 Alpha | Default H1 t | Default H1 Beta | Winner H1 Alpha | Winner H1 t | Winner H1 Beta | H1 t Lift |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for s in summaries:
         h1_t_lift = s.best_res.h1.t - s.default_res.h1.t
         lines.append(
@@ -508,13 +526,15 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
             f"{h1_t_lift:+.2f} |"
         )
 
-    lines.extend([
-        "",
-        "### Out-of-Sample (H2: 2013 to 2026)",
-        "",
-        "| Bot | Default H2 Alpha | Default H2 t | Default H2 Beta | Default H2 CAGR | Default H2 MaxDD | Winner H2 Alpha | Winner H2 t | Winner H2 Beta | Winner H2 CAGR | Winner H2 MaxDD |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Out-of-Sample (H2: 2013 to 2026)",
+            "",
+            "| Bot | Default H2 Alpha | Default H2 t | Default H2 Beta | Default H2 CAGR | Default H2 MaxDD | Winner H2 Alpha | Winner H2 t | Winner H2 Beta | Winner H2 CAGR | Winner H2 MaxDD |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for s in summaries:
         lines.append(
             f"| {s.name} | "
@@ -522,13 +542,15 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
             f"{s.best_res.h2.alpha:+.1f}% | {s.best_res.h2.t:.2f} | {s.best_res.h2.beta:.2f} | {s.best_res.h2.cagr:.1f}% | {s.best_res.h2.maxdd:.1f}% |"
         )
 
-    lines.extend([
-        "",
-        "### Full Window (2000/2006 to 2026)",
-        "",
-        "| Bot | Default Full Alpha | Default Full t | Default Full Beta | Default CAGR | Default MaxDD | Winner Full Alpha | Winner Full t | Winner Full Beta | Winner CAGR | Winner MaxDD |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Full Window (2000/2006 to 2026)",
+            "",
+            "| Bot | Default Full Alpha | Default Full t | Default Full Beta | Default CAGR | Default MaxDD | Winner Full Alpha | Winner Full t | Winner Full Beta | Winner CAGR | Winner MaxDD |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for s in summaries:
         lines.append(
             f"| {s.name} | "
@@ -536,21 +558,25 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
             f"{s.best_res.full.alpha:+.1f}% | {s.best_res.full.t:.2f} | {s.best_res.full.beta:.2f} | {s.best_res.full.cagr:.1f}% | {s.best_res.full.maxdd:.1f}% |"
         )
 
-    lines.extend([
-        "",
-        "## Grid Search Results By Strategy Book",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Grid Search Results By Strategy Book",
+            "",
+        ]
+    )
 
     for s in summaries:
-        lines.extend([
-            f"### {s.name} (`{s.universe_name}`, start {s.start_date})",
-            "",
-            f"Tested {len(s.all_combos)} parameter combinations from `{s.name}.param_grid`. Ranked by in-sample H1 `alpha_t` vs QQQ:",
-            "",
-            "| Rank | Parameters | H1 Alpha | H1 t | H1 Beta | H2 Alpha | H2 t | H2 Beta | Full Alpha | Full t | Status |",
-            "|---|---|---|---|---|---|---|---|---|---|---|",
-        ])
+        lines.extend(
+            [
+                f"### {s.name} (`{s.universe_name}`, start {s.start_date})",
+                "",
+                f"Tested {len(s.all_combos)} parameter combinations from `{s.name}.param_grid`. Ranked by in-sample H1 `alpha_t` vs QQQ:",
+                "",
+                "| Rank | Parameters | H1 Alpha | H1 t | H1 Beta | H2 Alpha | H2 t | H2 Beta | Full Alpha | Full t | Status |",
+                "|---|---|---|---|---|---|---|---|---|---|---|",
+            ]
+        )
         for idx, c in enumerate(s.all_combos, 1):
             p_str = ", ".join(f"{k}={v}" for k, v in c.params.items())
             status = []
@@ -567,23 +593,25 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
             )
         lines.append("")
 
-    lines.extend([
-        "## Cross-Study Synthesis & Interpretation",
-        "",
-        "Across the three follow-up investigations completed in Batch 1 and Batch 2:",
-        "1. **Walk-Forward In-Sample Overfitting (this study):**",
-        "   - Tuning on pre-2013 data does **not** solve the post-2013 alpha collapse. For five of the six books, optimizing on H1 either slightly degrades out-of-sample H2 performance (e.g. `VolTargetMomentum` H2 t drops from 0.58 to 0.40; `RiskParityCapped` H2 t drops from 0.78 to 0.76; `SmaDaily` H2 t flips negative from +0.22 to -0.18) or selects the default parameters exactly (`QuarterlyTeCostGate`).",
-        "   - Only `MonthlyRotation` achieves a minor out-of-sample lift (H2 t moves from 0.26 to 0.47 with `lookback=63`), but 0.47 remains drastically below the project edge bar of 2.0.",
-        "   - **Conclusion:** The post-2013 performance deterioration across all quants.md models is a macro-regime shift (the massive secular mega-cap tech rally dominating equal-weight and cross-asset rotations), not a sub-optimal choice of hyperparameters.",
-        "",
-        "2. **Cash-Yield Lever ([quantsmd-cash-yield-2026-11.md](docs/backtests/quantsmd-cash-yield-2026-11.md)):**",
-        "   - Crediting 13-week Treasury yield on uninvested cash provides a modest level shift proportional to cash share (+0.7%/yr for `SmaDailyGated`, negligible +0.1% for rotation/parity), but fails to lift any strategy's H2 t-stat above 1.62. All six remain unproven under cash yield.",
-        "",
-        "3. **SPY 200-day Trend Gate ([quantsmd-gate-more-2026-11.md](docs/backtests/quantsmd-gate-more-2026-11.md)):**",
-        "   - Gating via SPY SMA200 is an effective drawdown and beta suppressor (cutting `RiskParityCapped` max drawdown from -49% to -19% and beta to 0.15), passing the project bar on full-window RiskParityCapped (t = 2.99). However, it functions as a risk shield during equity bear markets, not an engine of persistent out-of-sample positive alpha.",
-        "",
-        "**Overall Takeaway:** Default parameters chosen upstream were already well-centered; automated retuning on historical data offers no free lunch. All quantsmd CronJobs continue running unmodified in live tracking.",
-    ])
+    lines.extend(
+        [
+            "## Cross-Study Synthesis & Interpretation",
+            "",
+            "Across the three follow-up investigations completed in Batch 1 and Batch 2:",
+            "1. **Walk-Forward In-Sample Overfitting (this study):**",
+            "   - Tuning on pre-2013 data does **not** solve the post-2013 alpha collapse. For five of the six books, optimizing on H1 either slightly degrades out-of-sample H2 performance (e.g. `VolTargetMomentum` H2 t drops from 0.58 to 0.40; `RiskParityCapped` H2 t drops from 0.78 to 0.76; `SmaDaily` H2 t flips negative from +0.22 to -0.18) or selects the default parameters exactly (`QuarterlyTeCostGate`).",
+            "   - Only `MonthlyRotation` achieves a minor out-of-sample lift (H2 t moves from 0.26 to 0.47 with `lookback=63`), but 0.47 remains drastically below the project edge bar of 2.0.",
+            "   - **Conclusion:** The post-2013 performance deterioration across all quants.md models is a macro-regime shift (the massive secular mega-cap tech rally dominating equal-weight and cross-asset rotations), not a sub-optimal choice of hyperparameters.",
+            "",
+            "2. **Cash-Yield Lever ([quantsmd-cash-yield-2026-11.md](docs/backtests/quantsmd-cash-yield-2026-11.md)):**",
+            "   - Crediting 13-week Treasury yield on uninvested cash provides a modest level shift proportional to cash share (+0.7%/yr for `SmaDailyGated`, negligible +0.1% for rotation/parity), but fails to lift any strategy's H2 t-stat above 1.62. All six remain unproven under cash yield.",
+            "",
+            "3. **SPY 200-day Trend Gate ([quantsmd-gate-more-2026-11.md](docs/backtests/quantsmd-gate-more-2026-11.md)):**",
+            "   - Gating via SPY SMA200 is an effective drawdown and beta suppressor (cutting `RiskParityCapped` max drawdown from -49% to -19% and beta to 0.15), passing the project bar on full-window RiskParityCapped (t = 2.99). However, it functions as a risk shield during equity bear markets, not an engine of persistent out-of-sample positive alpha.",
+            "",
+            "**Overall Takeaway:** Default parameters chosen upstream were already well-centered; automated retuning on historical data offers no free lunch. All quantsmd CronJobs continue running unmodified in live tracking.",
+        ]
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -591,6 +619,7 @@ def generate_report(summaries: list[BotWalkforwardSummary]) -> str:
 # ==============================================================================
 # Main entrypoint
 # ==============================================================================
+
 
 def main() -> None:
     t_global_start = time.time()
@@ -680,7 +709,7 @@ def main() -> None:
     doc_content = generate_report(summaries)
     OUT_DOC.parent.mkdir(parents=True, exist_ok=True)
     OUT_DOC.write_text(doc_content, encoding="utf-8")
-    print(f"\nWrote walk-forward report to {OUT_DOC} in {time.time()-t_global_start:.2f}s", file=sys.stderr)
+    print(f"\nWrote walk-forward report to {OUT_DOC} in {time.time() - t_global_start:.2f}s", file=sys.stderr)
 
 
 if __name__ == "__main__":

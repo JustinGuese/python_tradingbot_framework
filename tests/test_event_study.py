@@ -3,8 +3,6 @@ Tests for event study utilities (tradingbot/utils/event_study.py).
 Focus: look-ahead guard, judge criteria, flat returns on cash days, and edge cases.
 """
 
-from datetime import date, datetime, time
-
 import numpy as np
 import pandas as pd
 import pytest

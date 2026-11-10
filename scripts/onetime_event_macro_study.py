@@ -20,15 +20,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import pickle
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
-import os
 from pathlib import Path
-import pickle
-import sys
-import warnings
 
 import dotenv
 import numpy as np
@@ -39,12 +38,13 @@ import yfinance as yf
 if not os.environ.get("POSTGRES_URI"):
     dotenv.load_dotenv(".env.secret")
 
-from tradingbot.utils.db import MacroEvent, get_db_session
 import tradingbot.utils.event_study as es
-from tradingbot.utils.event_study import abnormal_returns, event_strategy_returns, forward_returns, judge
+from tradingbot.utils.db import MacroEvent, get_db_session
+from tradingbot.utils.event_study import event_strategy_returns, judge
 from tradingbot.utils.market_calendar import _holidays, is_session, next_session
 
 warnings.filterwarnings("ignore")
+
 
 # Binary search acceleration for event_study._find_entry_bar_idx
 def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> int | None:
@@ -60,6 +60,7 @@ def _fast_find_entry_bar_idx(prices: pd.Series, event_ts_utc: pd.Timestamp) -> i
             lo = mid + 1
     return lo if lo < n else None
 
+
 es._find_entry_bar_idx = _fast_find_entry_bar_idx
 
 # ---------------------------------------------------------------------------
@@ -70,9 +71,7 @@ ASSETS: tuple[str, ...] = ("SPY", "QQQ", "TLT", "GLD", "UUP")
 WINDOWS: tuple[str, ...] = ("[-1,0]", "[0,+1]", "[0,+2]")
 
 # Full 3 kinds x 5 assets x 3 windows = 45 variants
-ALL_VARIANTS: list[tuple[str, str, str]] = [
-    (k, a, w) for k in KINDS for a in ASSETS for w in WINDOWS
-]
+ALL_VARIANTS: list[tuple[str, str, str]] = [(k, a, w) for k in KINDS for a in ASSETS for w in WINDOWS]
 
 # Primary pre-registered grid capped at 40 variants per PLAN.md specification
 DEFAULT_CAP: int = 40
@@ -209,9 +208,9 @@ def load_price_data(
         try:
             with open(cache_file, "rb") as f:
                 cached = pickle.load(f)
-            if isinstance(cached, dict) and set(symbols).issubset(cached.keys()):
-                return {s: cached[s].dropna().sort_index() for s in symbols}
-            elif isinstance(cached, pd.DataFrame) and set(symbols).issubset(cached.columns):
+            if (isinstance(cached, dict) and set(symbols).issubset(cached.keys())) or (
+                isinstance(cached, pd.DataFrame) and set(symbols).issubset(cached.columns)
+            ):
                 return {s: cached[s].dropna().sort_index() for s in symbols}
         except Exception:
             pass
@@ -304,23 +303,35 @@ def evaluate_variant(
     kind_events = events[events["kind"] == kind].copy()
     if asset not in prices or prices[asset].empty:
         return VariantResult(
-            kind, asset, window, 0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            None, None, None, None, None, None, None, None, False
+            kind, asset, window, 0, 0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, None, None, None, None, None, False
         )
 
     asset_prices = prices[asset]
     min_date = asset_prices.index[0].date()
     max_date = asset_prices.index[-1].date()
 
-    valid_events = [
-        d for d in kind_events["event_date"]
-        if min_date <= d <= max_date
-    ]
+    valid_events = [d for d in kind_events["event_date"] if min_date <= d <= max_date]
     n_events = len(valid_events)
     if n_events < 6:
         return VariantResult(
-            kind, asset, window, n_events, 0.0, 0.0, 0.0, 0.0, 0.0,
-            None, None, None, None, None, None, None, None, False
+            kind,
+            asset,
+            window,
+            n_events,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            False,
         )
 
     # Fast date-to-index mapping for asset and bench
@@ -358,7 +369,9 @@ def evaluate_variant(
             beta = 1.0
         elif beta_series is not None:
             t0_ts = pd.Timestamp(sessions["T0"])
-            beta = float(beta_series.asof(t0_ts)) if t0_ts in beta_series.index or t0_ts >= beta_series.index[0] else 1.0
+            beta = (
+                float(beta_series.asof(t0_ts)) if t0_ts in beta_series.index or t0_ts >= beta_series.index[0] else 1.0
+            )
             if not np.isfinite(beta):
                 beta = 1.0
         else:
@@ -443,7 +456,9 @@ def run_macro_study(
 
     results: list[VariantResult] = []
     for kind, asset, window in variants:
-        res = evaluate_variant(kind, asset, window, past_events, prices, qqq_prices, precomputed_betas=precomputed_betas)
+        res = evaluate_variant(
+            kind, asset, window, past_events, prices, qqq_prices, precomputed_betas=precomputed_betas
+        )
         results.append(res)
 
     # Determine overall verdict
@@ -499,21 +514,27 @@ def format_markdown_report(results: list[VariantResult], verdict: str) -> str:
         strat_t_str = f"{r.strat_t:.2f}" if r.strat_t is not None else "N/A"
         beta_str = f"{r.strat_beta:.2f}" if r.strat_beta is not None else "N/A"
 
-        h1_str = f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f})" if r.h1_alpha_pct is not None and r.h1_t is not None else "N/A"
-        h2_str = f"{r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f})" if r.h2_alpha_pct is not None and r.h2_t is not None else "N/A"
+        h1_str = (
+            f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f})" if r.h1_alpha_pct is not None and r.h1_t is not None else "N/A"
+        )
+        h2_str = (
+            f"{r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f})" if r.h2_alpha_pct is not None and r.h2_t is not None else "N/A"
+        )
         pass_str = "**PASS**" if r.passes else "FAIL"
 
         lines.append(
             f"| {r.kind} | {r.asset} | {r.window} | {r.n_events} | {ar_mean_str} | {ar_t_str} | {win_str} | {h1_ar_str} | {h2_ar_str} | {strat_alpha_str} | {strat_t_str} | {beta_str} | {h1_str} | {h2_str} | {pass_str} |"
         )
 
-    lines.extend([
-        "",
-        "## Key Findings",
-        "",
-        "1. **Pre-FOMC Equity Drift Decay:** The classic pre-FOMC announcement drift (`FOMC SPY [-1,0]` and `FOMC QQQ [-1,0]`) was strong and statistically positive in the first half of the sample (H1 2006-2015, alpha ~+2.4% to +2.8%, t > 2.5). However, in H2 (2016-2026), the drift decayed and turned negative, causing the full sample t-statistic to fall below the acceptance bar of 2.0.",
-        "2. **Post-Announcement Reversal / Choppiness:** Post-event windows (`[0,+1]` and `[0,+2]`) for equities around FOMC, CPI, and NFP exhibit negative alpha with elevated volatility, failing the consistency check across sample halves.",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Key Findings",
+            "",
+            "1. **Pre-FOMC Equity Drift Decay:** The classic pre-FOMC announcement drift (`FOMC SPY [-1,0]` and `FOMC QQQ [-1,0]`) was strong and statistically positive in the first half of the sample (H1 2006-2015, alpha ~+2.4% to +2.8%, t > 2.5). However, in H2 (2016-2026), the drift decayed and turned negative, causing the full sample t-statistic to fall below the acceptance bar of 2.0.",
+            "2. **Post-Announcement Reversal / Choppiness:** Post-event windows (`[0,+1]` and `[0,+2]`) for equities around FOMC, CPI, and NFP exhibit negative alpha with elevated volatility, failing the consistency check across sample halves.",
+        ]
+    )
 
     if passing_variants:
         pass_details = []
@@ -521,16 +542,20 @@ def format_markdown_report(results: list[VariantResult], verdict: str) -> str:
             pass_details.append(
                 f"- **{pv.kind} {pv.asset} {pv.window}:** Strategy alpha {pv.strat_alpha_pct:+.2f}% (t={pv.strat_t:.2f}), beta={pv.strat_beta:.2f}, H1 alpha={pv.h1_alpha_pct:+.2f}% (t={pv.h1_t:.2f}), H2 alpha={pv.h2_alpha_pct:+.2f}% (t={pv.h2_t:.2f})."
             )
-        lines.extend([
-            f"3. **Passing Variants ({len(passing_variants)} of {len(results)}):**",
-            *pass_details,
-            "4. **Verdict Assessment:** While isolated non-equity variants pass the nominal statistical thresholds (e.g. post-FOMC dollar drift in UUP or post-CPI Treasuries in TLT), across 40 tested variants with family-wise discovery risk, evidence for an actionable stand-alone equity edge remains narrow.",
-        ])
+        lines.extend(
+            [
+                f"3. **Passing Variants ({len(passing_variants)} of {len(results)}):**",
+                *pass_details,
+                "4. **Verdict Assessment:** While isolated non-equity variants pass the nominal statistical thresholds (e.g. post-FOMC dollar drift in UUP or post-CPI Treasuries in TLT), across 40 tested variants with family-wise discovery risk, evidence for an actionable stand-alone equity edge remains narrow.",
+            ]
+        )
     else:
-        lines.extend([
-            "3. **Fixed Income and Dollar Reactions:** TLT and UUP reactions exhibit small abnormal returns with t-stats below 2.0 or inconsistent signs across sample halves.",
-            "4. **Verdict Conclusion:** With zero variants meeting the acceptance criteria (`t >= 2.0`, `H1 > 0`, `H2 > 0`, `beta < 0.5`), the macro calendar drift provides **no edge** vs the buy-and-hold benchmark QQQ.",
-        ])
+        lines.extend(
+            [
+                "3. **Fixed Income and Dollar Reactions:** TLT and UUP reactions exhibit small abnormal returns with t-stats below 2.0 or inconsistent signs across sample halves.",
+                "4. **Verdict Conclusion:** With zero variants meeting the acceptance criteria (`t >= 2.0`, `H1 > 0`, `H2 > 0`, `beta < 0.5`), the macro calendar drift provides **no edge** vs the buy-and-hold benchmark QQQ.",
+            ]
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -545,7 +570,7 @@ def main() -> None:
     if args.all:
         variants = ALL_VARIANTS
     elif args.cap is not None:
-        variants = ALL_VARIANTS[:args.cap]
+        variants = ALL_VARIANTS[: args.cap]
     else:
         variants = VARIANTS
 
@@ -553,16 +578,24 @@ def main() -> None:
     results, verdict = run_macro_study(variants, use_cache=not args.no_cache)
 
     print("\n" + "=" * 105)
-    print(f"{'Kind':<6} {'Asset':<6} {'Window':<8} {'N':<5} {'AR Mean':<9} {'AR t':<7} {'Strat Alpha':<12} {'Strat t':<8} {'Beta':<6} {'H1 Alpha (t)':<16} {'H2 Alpha (t)':<16} {'Pass'}")
+    print(
+        f"{'Kind':<6} {'Asset':<6} {'Window':<8} {'N':<5} {'AR Mean':<9} {'AR t':<7} {'Strat Alpha':<12} {'Strat t':<8} {'Beta':<6} {'H1 Alpha (t)':<16} {'H2 Alpha (t)':<16} {'Pass'}"
+    )
     print("=" * 105)
     for r in results:
         alpha_str = f"{r.strat_alpha_pct:+.2f}%" if r.strat_alpha_pct is not None else "N/A"
         t_str = f"{r.strat_t:.2f}" if r.strat_t is not None else "N/A"
         beta_str = f"{r.strat_beta:.2f}" if r.strat_beta is not None else "N/A"
-        h1_str = f"{r.h1_alpha_pct:+.1f}% ({r.h1_t:.1f})" if r.h1_alpha_pct is not None and r.h1_t is not None else "N/A"
-        h2_str = f"{r.h2_alpha_pct:+.1f}% ({r.h2_t:.1f})" if r.h2_alpha_pct is not None and r.h2_t is not None else "N/A"
+        h1_str = (
+            f"{r.h1_alpha_pct:+.1f}% ({r.h1_t:.1f})" if r.h1_alpha_pct is not None and r.h1_t is not None else "N/A"
+        )
+        h2_str = (
+            f"{r.h2_alpha_pct:+.1f}% ({r.h2_t:.1f})" if r.h2_alpha_pct is not None and r.h2_t is not None else "N/A"
+        )
         p_str = "PASS" if r.passes else "FAIL"
-        print(f"{r.kind:<6} {r.asset:<6} {r.window:<8} {r.n_events:<5} {r.ar_mean_pct:+.2f}%{'':<3} {r.ar_t:<7.2f} {alpha_str:<12} {t_str:<8} {beta_str:<6} {h1_str:<16} {h2_str:<16} {p_str}")
+        print(
+            f"{r.kind:<6} {r.asset:<6} {r.window:<8} {r.n_events:<5} {r.ar_mean_pct:+.2f}%{'':<3} {r.ar_t:<7.2f} {alpha_str:<12} {t_str:<8} {beta_str:<6} {h1_str:<16} {h2_str:<16} {p_str}"
+        )
 
     print("=" * 105)
     print(f"Overall Verdict: {verdict}")

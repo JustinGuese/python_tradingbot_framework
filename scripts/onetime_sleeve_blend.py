@@ -29,7 +29,6 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 os.environ.setdefault("POSTGRES_URI", "stub:stub@localhost:5432/stub")
 
@@ -42,10 +41,14 @@ import scripts.onetime_sleeve_correlation as corr_lib
 from scripts.onetime_cft_longhistory import PROXIES_6, load_cached_prices, simulate_cft
 from tradingbot import (
     quantsmd_monthly_rotation as mr,
+)
+from tradingbot import (
     quantsmd_quarterly_te_cost_gate as qte,
+)
+from tradingbot import (
     quantsmd_sma_daily_gated as smag,
 )
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.utils.alpha_report import alpha_stats
 
 OUT_DOC = Path("docs/backtests/sleeve-blend-2026-11.md")
 COMMON_START = "2010-02-01"
@@ -150,7 +153,7 @@ def build_streams() -> tuple[pd.DataFrame, pd.Series]:
     meta = pickle.loads((lib.BROAD_DIR / "candidates.pkl").read_bytes())
     uni = meta["universe"]
     ev_prices = lib.load_prices(sorted(uni))
-    syms, idx, R, q = lib.build_matrix(ev_prices)
+    syms, idx, R, _q = lib.build_matrix(ev_prices)
     col = {s: i for i, s in enumerate(syms)}
     bb, d13 = lift.load_events(uni)
 
@@ -265,26 +268,28 @@ def format_doc(
 
     for col in df.columns:
         lines.append(
-            f"| **`{col}`** | {cluster_roles.get(col, '')} | {h1_vol[col]*100:.1f}% | "
-            f"**{w_iv[col]:.3f} ({w_iv[col]*100:.1f}%)** | {w_ew[col]:.3f} ({w_ew[col]*100:.1f}%) |"
+            f"| **`{col}`** | {cluster_roles.get(col, '')} | {h1_vol[col] * 100:.1f}% | "
+            f"**{w_iv[col]:.3f} ({w_iv[col] * 100:.1f}%)** | {w_ew[col]:.3f} ({w_ew[col] * 100:.1f}%) |"
         )
 
-    lines.extend([
-        "",
-        "> [!NOTE]",
-        "> `ContinuousFuturesTrend` receives the largest weight (**39.4%**) due to its low daily volatility (5.2% annualized in H1)",
-        "> across multi-asset ETF proxies. Conversely, `activist_13d` receives a modest weight (**3.6%**) due to its large",
-        "> idiosyncratic return swings during activist campaigns (56.4% annualized volatility in H1).",
-        "",
-        "---",
-        "",
-        "## 3. Out-of-Sample Performance (H2: 2018-06 to 2026-11)",
-        "",
-        f"Evaluation over the out-of-sample H2 period ({h2_n} bars) with weights frozen from H1:",
-        "",
-        "| Stream / Portfolio | H2 Alpha/yr | H2 t-stat | H2 Beta | Corr (QQQ) | Max Drawdown |",
-        "|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "> [!NOTE]",
+            "> `ContinuousFuturesTrend` receives the largest weight (**39.4%**) due to its low daily volatility (5.2% annualized in H1)",
+            "> across multi-asset ETF proxies. Conversely, `activist_13d` receives a modest weight (**3.6%**) due to its large",
+            "> idiosyncratic return swings during activist campaigns (56.4% annualized volatility in H1).",
+            "",
+            "---",
+            "",
+            "## 3. Out-of-Sample Performance (H2: 2018-06 to 2026-11)",
+            "",
+            f"Evaluation over the out-of-sample H2 period ({h2_n} bars) with weights frozen from H1:",
+            "",
+            "| Stream / Portfolio | H2 Alpha/yr | H2 t-stat | H2 Beta | Corr (QQQ) | Max Drawdown |",
+            "|---|---|---|---|---|---|",
+        ]
+    )
 
     for name, st in h2_reports:
         bold = "**" if "Blend" in name else ""
@@ -292,17 +297,19 @@ def format_doc(
             f"| {bold}{name}{bold} | {st.alpha_pct:+.1f}% | {st.t_stat:.2f} | {st.beta:.2f} | {st.corr:.2f} | {st.max_dd_pct:.1f}% |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## 4. Full Window Performance (2010-02 to 2026-11)",
-        "",
-        "Full-sample evaluation across the entire 16.8-year dataset, reporting H1, H2, and full-sample metrics:",
-        "",
-        "| Series | Bars | Alpha/yr | t-stat | Beta | Corr | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## 4. Full Window Performance (2010-02 to 2026-11)",
+            "",
+            "Full-sample evaluation across the entire 16.8-year dataset, reporting H1, H2, and full-sample metrics:",
+            "",
+            "| Series | Bars | Alpha/yr | t-stat | Beta | Corr | Max DD | H1 Alpha (t) | H2 Alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for r in reports:
         bold = "**" if "Blend" in r.name else ""
@@ -312,18 +319,20 @@ def format_doc(
             f"{r.h1.alpha_pct:+.1f}% ({r.h1.t_stat:.2f}) | {r.h2.alpha_pct:+.1f}% ({r.h2.t_stat:.2f}) | `{r.verdict}` |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## 5. Leave-One-Out Sensitivity Analysis (H2 Out-of-Sample)",
-        "",
-        "To measure each sleeve's marginal contribution, the blend was re-evaluated on H2 with each sleeve removed in turn",
-        "(renormalizing the remaining H1 inverse-volatility weights to sum to 1.0):",
-        "",
-        "| Excluded Sleeve | Remaining Sleeves | H2 Alpha/yr | H2 t-stat | H2 Beta | Corr (QQQ) | H2 Max DD | Marginal Impact |",
-        "|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## 5. Leave-One-Out Sensitivity Analysis (H2 Out-of-Sample)",
+            "",
+            "To measure each sleeve's marginal contribution, the blend was re-evaluated on H2 with each sleeve removed in turn",
+            "(renormalizing the remaining H1 inverse-volatility weights to sum to 1.0):",
+            "",
+            "| Excluded Sleeve | Remaining Sleeves | H2 Alpha/yr | H2 t-stat | H2 Beta | Corr (QQQ) | H2 Max DD | Marginal Impact |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for ex_name, st in loo_reports:
         # Explain impact
@@ -345,49 +354,51 @@ def format_doc(
             f"{st.beta:.2f} | {st.corr:.2f} | {st.max_dd_pct:.1f}% | {impact} |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## 6. Acceptance Criteria & Direct Verdict",
-        "",
-        f"1. **Does the blend beat its best single stream on H2 t?**",
-        f"   - **YES.** The **Inverse-Vol Blend achieves H2 t = {blend_iv_report.h2.t_stat:.2f}** (Alpha {blend_iv_report.h2.alpha_pct:+.1f}%/yr, Max DD {blend_iv_report.h2.max_dd_pct:.1f}%),",
-        f"     surpassing the best standalone sleeve on H2 t (**`{best_single_h2[0]}`: t = {best_single_h2[1].t_stat:.2f}**, Alpha {best_single_h2[1].alpha_pct:+.1f}%/yr, Max DD {best_single_h2[1].max_dd_pct:.1f}%).",
-        f"   - The equal-weight blend also delivers positive alpha (+6.4%/yr), but achieves a lower t-stat (t = 2.23) and larger drawdown (-20.1%).",
-        "",
-        f"2. **Verdict per the project bar:**",
-        f"   - **`{blend_iv_report.verdict}`.**",
-        f"   - **Reasoning:** The project rule strictly defines edge as: *`unproven` unless t >= 2 and alpha > 0 in both halves. Never round up.*",
-        f"   - While the Inverse-Vol Blend attains robust out-of-sample edge in **H2 (Alpha +6.0%, t = 3.01)**,",
-        f"     its in-sample **H1 performance achieved Alpha +2.0%, t = 1.18** (< 2.0).",
-        f"     Because t < 2.0 in H1, the formal designation remains strictly **`unproven`**.",
-        "",
-        "---",
-        "",
-        "## 7. Realism Notes & Copier Implementation Guidance",
-        "",
-        "1. **Activist 13D Trade Count & Fragility:**",
-        "   - Schedule 13D filings by qualified hedge funds are relatively infrequent (averaging fewer than 20 positions/year across the S&P 1500).",
-        "   - In H1 (2010–2018), 13D delivered spectacular alpha (+27.9%/yr, t=1.46) on high idiosyncratic volatility (56.4%).",
-        "   - In H2 (2018–2026), 13D alpha normalized substantially to +6.9%/yr (t=0.70).",
-        "   - Inverse-volatility correctly dampens this fragility by assigning 13D a modest 3.6% weight, preventing event noise from destabilizing the book.",
-        "",
-        "2. **Event Sleeve Beta Characteristics:**",
-        "   - Both `buyback_sp100` (beta 0.29–0.31) and `activist_13d` (beta 0.55–0.58) hold unhedged single-stock equities during their active windows.",
-        "   - However, because positions are held for short windows (10 and 20 sessions respectively) and idle capital rests in cash,",
-        "     their effective beta to QQQ across the blended book remains well controlled (overall blend beta = 0.24–0.26).",
-        "",
-        "3. **Starting Copier Allocation:**",
-        "   - Because the H1-fit inverse-volatility weights were calibrated without any lookahead into H2, they provide an empirically grounded,",
-        "     un-overfit baseline allocation for a live multi-sleeve copier or C2 strategy:",
-        "     - **39.4% ContinuousFuturesTrend** (`SPY, QQQ, IEF, USO, GLD, DBA` 6-proxy trend)",
-        "     - **20.5% Buyback Drift** (`buyback_sp100`, 10-day post-announcement window)",
-        "     - **18.5% SmaDailyGated** (9 SPDR sector 50/200 SMA trend with SPY market gate)",
-        "     - **18.0% QuarterlyTeCostGate** (ETF8 quarterly rebalanced momentum)",
-        "     - **3.6% Activist 13D** (`activist_13d`, 20-day fund filer window)",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## 6. Acceptance Criteria & Direct Verdict",
+            "",
+            "1. **Does the blend beat its best single stream on H2 t?**",
+            f"   - **YES.** The **Inverse-Vol Blend achieves H2 t = {blend_iv_report.h2.t_stat:.2f}** (Alpha {blend_iv_report.h2.alpha_pct:+.1f}%/yr, Max DD {blend_iv_report.h2.max_dd_pct:.1f}%),",
+            f"     surpassing the best standalone sleeve on H2 t (**`{best_single_h2[0]}`: t = {best_single_h2[1].t_stat:.2f}**, Alpha {best_single_h2[1].alpha_pct:+.1f}%/yr, Max DD {best_single_h2[1].max_dd_pct:.1f}%).",
+            "   - The equal-weight blend also delivers positive alpha (+6.4%/yr), but achieves a lower t-stat (t = 2.23) and larger drawdown (-20.1%).",
+            "",
+            "2. **Verdict per the project bar:**",
+            f"   - **`{blend_iv_report.verdict}`.**",
+            "   - **Reasoning:** The project rule strictly defines edge as: *`unproven` unless t >= 2 and alpha > 0 in both halves. Never round up.*",
+            "   - While the Inverse-Vol Blend attains robust out-of-sample edge in **H2 (Alpha +6.0%, t = 3.01)**,",
+            "     its in-sample **H1 performance achieved Alpha +2.0%, t = 1.18** (< 2.0).",
+            "     Because t < 2.0 in H1, the formal designation remains strictly **`unproven`**.",
+            "",
+            "---",
+            "",
+            "## 7. Realism Notes & Copier Implementation Guidance",
+            "",
+            "1. **Activist 13D Trade Count & Fragility:**",
+            "   - Schedule 13D filings by qualified hedge funds are relatively infrequent (averaging fewer than 20 positions/year across the S&P 1500).",
+            "   - In H1 (2010–2018), 13D delivered spectacular alpha (+27.9%/yr, t=1.46) on high idiosyncratic volatility (56.4%).",
+            "   - In H2 (2018–2026), 13D alpha normalized substantially to +6.9%/yr (t=0.70).",
+            "   - Inverse-volatility correctly dampens this fragility by assigning 13D a modest 3.6% weight, preventing event noise from destabilizing the book.",
+            "",
+            "2. **Event Sleeve Beta Characteristics:**",
+            "   - Both `buyback_sp100` (beta 0.29–0.31) and `activist_13d` (beta 0.55–0.58) hold unhedged single-stock equities during their active windows.",
+            "   - However, because positions are held for short windows (10 and 20 sessions respectively) and idle capital rests in cash,",
+            "     their effective beta to QQQ across the blended book remains well controlled (overall blend beta = 0.24–0.26).",
+            "",
+            "3. **Starting Copier Allocation:**",
+            "   - Because the H1-fit inverse-volatility weights were calibrated without any lookahead into H2, they provide an empirically grounded,",
+            "     un-overfit baseline allocation for a live multi-sleeve copier or C2 strategy:",
+            "     - **39.4% ContinuousFuturesTrend** (`SPY, QQQ, IEF, USO, GLD, DBA` 6-proxy trend)",
+            "     - **20.5% Buyback Drift** (`buyback_sp100`, 10-day post-announcement window)",
+            "     - **18.5% SmaDailyGated** (9 SPDR sector 50/200 SMA trend with SPY market gate)",
+            "     - **18.0% QuarterlyTeCostGate** (ETF8 quarterly rebalanced momentum)",
+            "     - **3.6% Activist 13D** (`activist_13d`, 20-day fund filer window)",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -402,7 +413,6 @@ def main() -> int:
     mid = n // 2
     h1 = df.iloc[:mid]
     h2 = df.iloc[mid:]
-    q_h1 = q.iloc[:mid]
     q_h2 = q.iloc[mid:]
 
     start_d = str(df.index[0].date())
@@ -421,7 +431,7 @@ def main() -> int:
 
     print("\nH1 Fit Weights:", file=sys.stderr)
     for c in df.columns:
-        print(f"  {c:25s}: vol={h1_vol[c]*100:5.1f}% | w_iv={w_iv[c]:.3f} | w_ew={w_ew[c]:.3f}", file=sys.stderr)
+        print(f"  {c:25s}: vol={h1_vol[c] * 100:5.1f}% | w_iv={w_iv[c]:.3f} | w_ew={w_ew[c]:.3f}", file=sys.stderr)
 
     # Blends
     blend_iv = (df * w_iv).sum(axis=1)
@@ -491,13 +501,17 @@ def main() -> int:
     print(f"{'Stream / Portfolio':28s} | {'Alpha/yr':9s} | {'t-stat':6s} | {'Beta':5s} | {'Corr':5s} | {'Max DD':7s}")
     print("-" * 72)
     for name, st in h2_reports:
-        print(f"{name:28s} | {st.alpha_pct:+8.1f}% | {st.t_stat:6.2f} | {st.beta:5.2f} | {st.corr:5.2f} | {st.max_dd_pct:6.1f}%")
+        print(
+            f"{name:28s} | {st.alpha_pct:+8.1f}% | {st.t_stat:6.2f} | {st.beta:5.2f} | {st.corr:5.2f} | {st.max_dd_pct:6.1f}%"
+        )
 
     print("\n--- Acceptance Questions ---")
     print(
         f"1. Does blend beat best single stream on H2 t? YES. (Inverse-Vol Blend: {blend_iv_report.h2.t_stat:.2f} vs {best_single_h2[0]}: {best_single_h2[1].t_stat:.2f})"
     )
-    print(f"2. Verdict per project bar: {blend_iv_report.verdict} (H1 t={blend_iv_report.h1.t_stat:.2f} < 2.0; H2 t={blend_iv_report.h2.t_stat:.2f})")
+    print(
+        f"2. Verdict per project bar: {blend_iv_report.verdict} (H1 t={blend_iv_report.h1.t_stat:.2f} < 2.0; H2 t={blend_iv_report.h2.t_stat:.2f})"
+    )
     print(f"\nExecution finished in {time.time() - t0:.1f}s")
     return 0
 

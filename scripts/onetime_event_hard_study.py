@@ -12,22 +12,22 @@ Pure functions are exposed for unit testing.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
-from datetime import UTC, date, datetime, time
 import json
 import logging
 import os
-from pathlib import Path
 import pickle
 import re
+from collections.abc import Sequence
+from datetime import UTC, datetime, time
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dotenv import dotenv_values
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, inspect, text
 import yfinance as yf
+from dotenv import dotenv_values
+from sqlalchemy import create_engine, inspect, text
 
 # Ensure DB & API key environment variables are set before importing tradingbot modules
 _secret_path = Path("/home/jguese/code/tradingbot/python_tradingbot_framework/.env.secret")
@@ -39,11 +39,10 @@ if _secret_path.exists():
 if "OPENROUTER_CHEAP_MODEL" not in os.environ or os.environ["OPENROUTER_CHEAP_MODEL"] == "openrouter/free":
     os.environ["OPENROUTER_CHEAP_MODEL"] = "deepseek/deepseek-chat"
 
-from tradingbot.utils.aitools import run_ai_simple
-from tradingbot.utils.event_study import (
+from tradingbot.utils.aitools import run_ai_simple  # noqa: E402
+from tradingbot.utils.event_study import (  # noqa: E402
     abnormal_returns,
     event_strategy_returns,
-    forward_returns,
     judge,
 )
 
@@ -88,11 +87,7 @@ WINDOW_HOLD_DAYS: dict[str, int] = {
 }
 
 # The 12 pre-registered variants
-PRE_REGISTERED_VARIANTS = [
-    (cls_name, ETF_MAPPINGS[cls_name], win)
-    for cls_name in PRIMARY_CLASSES
-    for win in WINDOWS
-]
+PRE_REGISTERED_VARIANTS = [(cls_name, ETF_MAPPINGS[cls_name], win) for cls_name in PRIMARY_CLASSES for win in WINDOWS]
 
 
 def ensure_environment() -> None:
@@ -200,18 +195,14 @@ def apply_costs_to_strategy(
         return net_rets
 
     # Precalculate session closes in UTC once
-    session_closes_utc = pd.DatetimeIndex([
-        datetime.combine(d.date(), time(16, 0), tzinfo=NEW_YORK).astimezone(UTC)
-        for d in prices_index
-    ])
+    session_closes_utc = pd.DatetimeIndex(
+        [datetime.combine(d.date(), time(16, 0), tzinfo=NEW_YORK).astimezone(UTC) for d in prices_index]
+    )
 
     ts_col = "ts" if "ts" in signals_df.columns else "timestamp"
     for _, sig in signals_df.iterrows():
         sig_ts = pd.Timestamp(sig[ts_col])
-        if sig_ts.tzinfo is None:
-            sig_ts = sig_ts.tz_localize(UTC)
-        else:
-            sig_ts = sig_ts.tz_convert(UTC)
+        sig_ts = sig_ts.tz_localize(UTC) if sig_ts.tzinfo is None else sig_ts.tz_convert(UTC)
 
         entry_idx = session_closes_utc.searchsorted(sig_ts, side="right")
         if entry_idx >= len(prices_index):
@@ -308,7 +299,7 @@ def classify_headlines_with_llm(
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if cache_path.exists():
         logger.info("Loading cached labels from %s", cache_path)
-        with open(cache_path, "r", encoding="utf-8") as f:
+        with open(cache_path, encoding="utf-8") as f:
             data = json.load(f)
             return {int(k): v for k, v in data.items()}
 
@@ -362,7 +353,7 @@ def classify_headlines_with_llm(
             parsed = None
 
         if parsed is not None:
-            for title, lab in zip(batch["title"], parsed):
+            for title, lab in zip(batch["title"], parsed, strict=False):
                 labels_by_title[title] = lab
         else:
             logger.info("Batch %s length/parsing mismatch, falling back to single calls", call_count)
@@ -443,7 +434,7 @@ def run_hard_event_study(
     qualifying_classes, too_few_classes = filter_too_few(class_counts, min_events=min_events_threshold)
 
     # 4. Load price data
-    tickers_needed = ["QQQ"] + list(ETF_MAPPINGS.values())
+    tickers_needed = ["QQQ", *list(ETF_MAPPINGS.values())]
     prices = load_price_data(tickers_needed)
     bench_series = prices["QQQ"]
     bench_returns = bench_series.pct_change().dropna()
@@ -458,24 +449,26 @@ def run_hard_event_study(
         hold_days = WINDOW_HOLD_DAYS[window]
 
         if cls_name not in qualifying_classes or n_events < min_events_threshold:
-            variant_results.append({
-                "class": cls_name,
-                "asset": asset,
-                "window": window,
-                "n_events": n_events,
-                "status": "too few",
-                "ar_mean": None,
-                "ar_t": None,
-                "alpha_2bp": None,
-                "t_2bp": None,
-                "beta": None,
-                "h1_alpha": None,
-                "h2_alpha": None,
-                "alpha_5bp": None,
-                "t_5bp": None,
-                "passes": False,
-                "placebo_p": None,
-            })
+            variant_results.append(
+                {
+                    "class": cls_name,
+                    "asset": asset,
+                    "window": window,
+                    "n_events": n_events,
+                    "status": "too few",
+                    "ar_mean": None,
+                    "ar_t": None,
+                    "alpha_2bp": None,
+                    "t_2bp": None,
+                    "beta": None,
+                    "h1_alpha": None,
+                    "h2_alpha": None,
+                    "alpha_5bp": None,
+                    "t_5bp": None,
+                    "passes": False,
+                    "placebo_p": None,
+                }
+            )
             continue
 
         # Extract events for this class
@@ -511,24 +504,26 @@ def run_hard_event_study(
             if placebo_p < 0.05:
                 survived_placebo = True
 
-        variant_results.append({
-            "class": cls_name,
-            "asset": asset,
-            "window": window,
-            "n_events": n_events,
-            "status": "PASS" if passes else "FAIL",
-            "ar_mean": ar_mean,
-            "ar_t": ar_t,
-            "alpha_2bp": float(judge_2bp["alpha"] * 100.0) if judge_2bp.get("alpha") is not None else None,
-            "t_2bp": judge_2bp.get("t"),
-            "beta": judge_2bp.get("beta"),
-            "h1_alpha": float(judge_2bp["alpha_h1"] * 100.0) if judge_2bp.get("alpha_h1") is not None else None,
-            "h2_alpha": float(judge_2bp["alpha_h2"] * 100.0) if judge_2bp.get("alpha_h2") is not None else None,
-            "alpha_5bp": float(judge_5bp["alpha"] * 100.0) if judge_5bp.get("alpha") is not None else None,
-            "t_5bp": judge_5bp.get("t"),
-            "passes": passes,
-            "placebo_p": placebo_p,
-        })
+        variant_results.append(
+            {
+                "class": cls_name,
+                "asset": asset,
+                "window": window,
+                "n_events": n_events,
+                "status": "PASS" if passes else "FAIL",
+                "ar_mean": ar_mean,
+                "ar_t": ar_t,
+                "alpha_2bp": float(judge_2bp["alpha"] * 100.0) if judge_2bp.get("alpha") is not None else None,
+                "t_2bp": judge_2bp.get("t"),
+                "beta": judge_2bp.get("beta"),
+                "h1_alpha": float(judge_2bp["alpha_h1"] * 100.0) if judge_2bp.get("alpha_h1") is not None else None,
+                "h2_alpha": float(judge_2bp["alpha_h2"] * 100.0) if judge_2bp.get("alpha_h2") is not None else None,
+                "alpha_5bp": float(judge_5bp["alpha"] * 100.0) if judge_5bp.get("alpha") is not None else None,
+                "t_5bp": judge_5bp.get("t"),
+                "passes": passes,
+                "placebo_p": placebo_p,
+            }
+        )
 
     # Overall verdict
     if survived_placebo:
@@ -589,13 +584,15 @@ def write_markdown_doc(report: dict[str, Any], doc_path: Path = Path("docs/backt
         status = "Scored" if cnt >= 20 else "**too few** (< 20 events)"
         lines.append(f"| {cls_name} | {etf} | {cnt} | {status} |")
 
-    lines.extend([
-        "",
-        "## Pre-registered Variants Table (12 variants)",
-        "",
-        "| Event Class | Asset | Window | N Events | Status | AR Mean | AR t | Alpha (2bp) | t (2bp) | Beta | H1 Alpha | H2 Alpha | Alpha (5bp) | t (5bp) |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Pre-registered Variants Table (12 variants)",
+            "",
+            "| Event Class | Asset | Window | N Events | Status | AR Mean | AR t | Alpha (2bp) | t (2bp) | Beta | H1 Alpha | H2 Alpha | Alpha (5bp) | t (5bp) |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for v in report["variant_results"]:
         status = v["status"]
@@ -614,40 +611,48 @@ def write_markdown_doc(report: dict[str, Any], doc_path: Path = Path("docs/backt
             f"{ar_mean_str} | {ar_t_str} | {a2_str} | {t2_str} | {beta_str} | {h1_str} | {h2_str} | {a5_str} | {t5_str} |"
         )
 
-    lines.extend([
-        "",
-        "## Key Findings & Discussion",
-        "",
-        "1. **Event Sparsity in News Feed:**",
-        "   Across the stored news database, specialized physical and geopolitical disruptions occur rarely:",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Key Findings & Discussion",
+            "",
+            "1. **Event Sparsity in News Feed:**",
+            "   Across the stored news database, specialized physical and geopolitical disruptions occur rarely:",
+        ]
+    )
 
     for tf_cls in report["too_few_classes"]:
         cnt = report["class_counts"].get(tf_cls, 0)
         lines.append(f"   - `{tf_cls}`: {cnt} events (< 20 threshold, listed as `too few`).")
 
-    lines.extend([
-        "   Per PLAN.md acceptance rules, classes with fewer than 20 events are safely marked `too few` and skipped to prevent overfitting on tiny samples.",
-        "",
-        "2. **Scored Classes:**",
-    ])
+    lines.extend(
+        [
+            "   Per PLAN.md acceptance rules, classes with fewer than 20 events are safely marked `too few` and skipped to prevent overfitting on tiny samples.",
+            "",
+            "2. **Scored Classes:**",
+        ]
+    )
 
     if not report["qualifying_classes"]:
-        lines.append("   - All hard event classes yielded fewer than 20 events in the sample; all variants are classified as `too few`.")
+        lines.append(
+            "   - All hard event classes yielded fewer than 20 events in the sample; all variants are classified as `too few`."
+        )
     else:
         for q_cls, cnt in report["qualifying_classes"].items():
             lines.append(f"   - `{q_cls}` ({cnt} events) was evaluated across windows [0,+1], [0,+3], and [0,+5].")
 
-    lines.extend([
-        "",
-        "3. **Execution & Cost Impact:**",
-        "   Transaction costs of 2 bp and 5 bp per side substantially drag short holding windows on sector ETFs,",
-        "   demonstrating that even modest abnormal reactions get eroded once bid-ask spread and turnover are applied.",
-        "",
-        f"4. **Verdict Conclusion:** `{report['overall_verdict']}`.",
-        "   Hard events identified by LLM headline classification do not demonstrate a robust, statistically significant",
-        "   long-only edge over QQQ that survives transaction costs and sample-half validation.",
-    ])
+    lines.extend(
+        [
+            "",
+            "3. **Execution & Cost Impact:**",
+            "   Transaction costs of 2 bp and 5 bp per side substantially drag short holding windows on sector ETFs,",
+            "   demonstrating that even modest abnormal reactions get eroded once bid-ask spread and turnover are applied.",
+            "",
+            f"4. **Verdict Conclusion:** `{report['overall_verdict']}`.",
+            "   Hard events identified by LLM headline classification do not demonstrate a robust, statistically significant",
+            "   long-only edge over QQQ that survives transaction costs and sample-half validation.",
+        ]
+    )
 
     with open(doc_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

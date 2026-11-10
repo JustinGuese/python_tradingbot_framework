@@ -10,7 +10,8 @@ Tests cover:
   5. Transaction cost deductions per round-trip and look-ahead guard
 """
 
-from datetime import date, timedelta
+from datetime import date
+
 import pandas as pd
 import pytest
 
@@ -20,9 +21,7 @@ from scripts.onetime_event_calendar_study import (
     get_pre_holiday_signals,
     get_quarter_end_week_signals,
     get_turn_of_month_signals,
-    prev_session,
 )
-from tradingbot.utils.market_calendar import is_session, next_session
 
 
 def test_eia_crude_wednesdays_and_holiday_shift_to_thursday():
@@ -38,12 +37,12 @@ def test_eia_crude_wednesdays_and_holiday_shift_to_thursday():
     assert date(2024, 6, 5) in eia_june
     assert date(2024, 6, 12) in eia_june
     assert date(2024, 6, 19) not in eia_june  # Juneteenth holiday
-    assert date(2024, 6, 20) in eia_june      # Shifted to Thursday
+    assert date(2024, 6, 20) in eia_june  # Shifted to Thursday
     assert date(2024, 6, 26) in eia_june
 
     eia_dec = get_eia_dates(date(2024, 12, 1), date(2024, 12, 31))
     assert date(2024, 12, 25) not in eia_dec  # Christmas holiday
-    assert date(2024, 12, 26) in eia_dec      # Shifted to Thursday
+    assert date(2024, 12, 26) in eia_dec  # Shifted to Thursday
 
 
 def test_turn_of_month_signals_and_window_math():
@@ -83,21 +82,21 @@ def test_pre_holiday_signals_detects_market_holidays_only():
     - 2023-11-17 (regular Friday with no holiday following) is NOT a pre-holiday session.
     """
     sample_sessions = [
-        date(2023, 4, 5),   # Wed
-        date(2023, 4, 6),   # Thu before Good Friday (holiday)
+        date(2023, 4, 5),  # Wed
+        date(2023, 4, 6),  # Thu before Good Friday (holiday)
         date(2023, 4, 10),  # Mon
-        date(2023, 11, 17), # Normal Friday
-        date(2023, 11, 20), # Mon
-        date(2023, 11, 21), # Tue
-        date(2023, 11, 22), # Wed before Thanksgiving (holiday)
-        date(2023, 11, 24), # Fri (Black Friday)
+        date(2023, 11, 17),  # Normal Friday
+        date(2023, 11, 20),  # Mon
+        date(2023, 11, 21),  # Tue
+        date(2023, 11, 22),  # Wed before Thanksgiving (holiday)
+        date(2023, 11, 24),  # Fri (Black Friday)
     ]
 
     signals = get_pre_holiday_signals(sample_sessions)
     held_pre_holiday = [held for _, held in signals]
 
     # Pre-holiday sessions held:
-    assert date(2023, 4, 6) in held_pre_holiday    # Thursday before Good Friday
+    assert date(2023, 4, 6) in held_pre_holiday  # Thursday before Good Friday
     assert date(2023, 11, 22) in held_pre_holiday  # Wednesday before Thanksgiving
     assert date(2023, 11, 17) not in held_pre_holiday  # Normal Friday
 
@@ -165,5 +164,5 @@ def test_transaction_cost_deduction_and_scoring_logic():
     # Day 2 (exit bar) pays exit cost 0.0002: 0.0196078 - 0.0002
     assert pytest.approx(net_rets.loc[dates[2]], abs=1e-6) == (104.0 - 102.0) / 102.0 - 0.0002
     # Total cost deducted across round-trip is exactly 2 * 0.0002 = 0.0004
-    total_cost_diff = (gross_rets.sum() - net_rets.sum())
+    total_cost_diff = gross_rets.sum() - net_rets.sum()
     assert pytest.approx(total_cost_diff, abs=1e-6) == 0.0004

@@ -37,16 +37,15 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 os.environ.setdefault("POSTGRES_URI", "stub:stub@localhost:5432/stub")
 
-import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from tradingbot.quantsmd_continuous_futures_trend import UNIVERSE as FUTURES_UNIVERSE, compute_weights
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.quantsmd_continuous_futures_trend import UNIVERSE as FUTURES_UNIVERSE
+from tradingbot.quantsmd_continuous_futures_trend import compute_weights
+from tradingbot.utils.alpha_report import alpha_stats
 
 OUT_DOC = Path("docs/backtests/cft-longhistory-2026-11.md")
 CACHE_FILE = Path(os.environ.get("CACHE_DIR", "/tmp")) / "cft_longhistory_prices.pkl"
@@ -55,12 +54,7 @@ FETCH_START = "1990-01-01"
 # Proxies mapping
 PROXIES_6 = ["SPY", "QQQ", "IEF", "USO", "GLD", "DBA"]
 PROXIES_5 = ["SPY", "QQQ", "IEF", "USO", "GLD"]
-ALL_DOWNLOAD_SYMBOLS = sorted(
-    set(PROXIES_6)
-    | {"TLT", "DBO"}
-    | set(FUTURES_UNIVERSE)
-    | {"QQQ"}
-)
+ALL_DOWNLOAD_SYMBOLS = sorted(set(PROXIES_6) | {"TLT", "DBO"} | set(FUTURES_UNIVERSE) | {"QQQ"})
 
 
 def load_cached_prices(refresh: bool = False) -> pd.DataFrame:
@@ -319,13 +313,15 @@ def generate_markdown(
             f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f}) | {r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f}) | {r.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "### Stress 20 bp Turnover Cost",
-        "",
-        "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Stress 20 bp Turnover Cost",
+            "",
+            "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for r in results_6_20bp:
         lines.append(
@@ -334,15 +330,17 @@ def generate_markdown(
             f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f}) | {r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f}) | {r.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "## 3. 5-Proxy Universe Results (Proxies from 2006)",
-        "",
-        "### Standard 5 bp Turnover Cost",
-        "",
-        "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 3. 5-Proxy Universe Results (Proxies from 2006)",
+            "",
+            "### Standard 5 bp Turnover Cost",
+            "",
+            "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for r in results_5_5bp:
         lines.append(
@@ -351,13 +349,15 @@ def generate_markdown(
             f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f}) | {r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f}) | {r.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "### Stress 20 bp Turnover Cost",
-        "",
-        "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### Stress 20 bp Turnover Cost",
+            "",
+            "| Sub-period / Window | Dates | Bars | Alpha/yr | t | Beta | Corr | CAGR | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for r in results_5_20bp:
         lines.append(
@@ -366,17 +366,19 @@ def generate_markdown(
             f"{r.h1_alpha_pct:+.2f}% ({r.h1_t:.2f}) | {r.h2_alpha_pct:+.2f}% ({r.h2_t:.2f}) | {r.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "## 4. 2019+ Window Comparison: ETF Proxies vs Continuous Futures",
-        "",
-        "The original paper run in `docs/backtests/quantsmd-2026-11.md` evaluated continuous futures directly",
-        "over 2019-2026. Here we place the ETF proxy results side-by-side with the futures result:",
-        "",
-        "| Implementation | Window | Alpha/yr | t | Beta | Corr | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|",
-        "| **Continuous Futures (Doc)** | 2019-2026 | +4.90% | 2.45 | 0.11 | 0.43 | -8.0% | +5.70% (1.93) | +2.00% (0.94) | unproven |",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 4. 2019+ Window Comparison: ETF Proxies vs Continuous Futures",
+            "",
+            "The original paper run in `docs/backtests/quantsmd-2026-11.md` evaluated continuous futures directly",
+            "over 2019-2026. Here we place the ETF proxy results side-by-side with the futures result:",
+            "",
+            "| Implementation | Window | Alpha/yr | t | Beta | Corr | Max DD | H1 alpha (t) | H2 alpha (t) | Verdict |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+            "| **Continuous Futures (Doc)** | 2019-2026 | +4.90% | 2.45 | 0.11 | 0.43 | -8.0% | +5.70% (1.93) | +2.00% (0.94) | unproven |",
+        ]
+    )
 
     if futures_res is not None:
         lines.append(
@@ -401,60 +403,62 @@ def generate_markdown(
             f"{p5_2019.h1_alpha_pct:+.2f}% ({p5_2019.h1_t:.2f}) | {p5_2019.h2_alpha_pct:+.2f}% ({p5_2019.h2_t:.2f}) | {p5_2019.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "## 5. Crisis Behavior: 2008 & 2022 Stress Analysis",
-        "",
-        "Step F1 asks: *is 2008 / 2022 handled (max DD in those years)?*",
-        "",
-        "| Year | Portfolio / Asset | Annual Return | Calendar Max DD | Benchmark (QQQ) Return | Benchmark Max DD |",
-        "|---|---|---|---|---|---|",
-        f"| **2008** | 6-Proxy Universe | {crisis_6['2008']['bot_return']:+.1f}% | {crisis_6['2008']['bot_maxdd']:.1f}% | {crisis_6['2008']['qqq_return']:+.1f}% | {crisis_6['2008']['qqq_maxdd']:.1f}% |",
-        f"| **2008** | 5-Proxy Universe | {crisis_5['2008']['bot_return']:+.1f}% | {crisis_5['2008']['bot_maxdd']:.1f}% | {crisis_5['2008']['qqq_return']:+.1f}% | {crisis_5['2008']['qqq_maxdd']:.1f}% |",
-        f"| **2022** | 6-Proxy Universe | {crisis_6['2022']['bot_return']:+.1f}% | {crisis_6['2022']['bot_maxdd']:.1f}% | {crisis_6['2022']['qqq_return']:+.1f}% | {crisis_6['2022']['qqq_maxdd']:.1f}% |",
-        f"| **2022** | 5-Proxy Universe | {crisis_5['2022']['bot_return']:+.1f}% | {crisis_5['2022']['bot_maxdd']:.1f}% | {crisis_5['2022']['qqq_return']:+.1f}% | {crisis_5['2022']['qqq_maxdd']:.1f}% |",
-        "",
-        "Both 2008 and 2022 are handled exceptionally well by the strategy:",
-        "- In **2008**, the bot exited equity longs as the fast MA crossed below slow MA, rotating capital into",
-        "  Treasuries (`IEF`) and cash. While QQQ suffered a -41.7% loss and a -49.4% drawdown, the 6-proxy ETF strategy",
-        "  gained +2.8% with a contained drawdown of -9.3% (5-proxy gained +4.8% with max DD -7.9%).",
-        "- In **2022**, during severe simultaneous bond and tech equity selloffs, the bot was protected by high cash shares",
-        "  and long commodity exposure (`USO`, `DBA`, `GLD`). The bot lost only -1.0% (max DD -7.1%), while QQQ lost -32.6%",
-        "  (max DD -34.8%).",
-        "",
-        "## 6. Key Questions Answered",
-        "",
-        "### Does the t-stat hold outside 2019+?",
-        "**No.** Across the full 18-year history, the t-stat varies substantially by regime:",
-        "- **2019-2026**: High measured alpha (+4.25% to +4.37%, t=2.30 to 2.32) during the post-pandemic macro regime.",
-        "- **2013-2019**: Complete disappearance of alpha (-0.29% to +0.18%, t=-0.26 to 0.14). During the steady QE-driven equity bull",
-        "  market, holding a low-beta (0.18-0.22) multi-asset trend portfolio generated zero residual excess return vs QQQ.",
-        "- **2006-2012**: Positive alpha (+3.87% to +6.47%), but elevated standard error yields t=1.23 in the 6-proxy set.",
-        "In the 6-proxy universe, whole-window H1 alpha has t=1.36 (< 2.0).",
-        "",
-        "### Is 2008 / 2022 handled?",
-        "**Yes, definitively.** Max drawdown remained under 10% in both 2008 (-9.3% in 6-proxy, -7.9% in 5-proxy) and 2022",
-        "(-7.1% in 6-proxy, -5.9% in 5-proxy), compared to -49.4% (2008) and -34.8% (2022) for the QQQ benchmark.",
-        "The long-only trend filter and inverse-vol sizing effectively unloads risk during protracted bear markets.",
-        "",
-        "### Transaction Cost Sensitivity",
-        "At 20 bp per unit of turnover (a 4x increase from framework baseline 5 bp), annualised alpha degrades by only ~0.24% / year",
-        "(from +2.90% to +2.65% in 6-proxy whole window; t falls slightly from 2.36 to 2.16).",
-        "Because rebalancing is strictly monthly on slow 63/252 moving averages, monthly portfolio turnover is low (~10-15% per month),",
-        "making the strategy highly robust to execution costs and ETF bid-ask spreads.",
-        "",
-        "## 7. Project Verdict",
-        "",
-        "**Verdict: unproven**",
-        "",
-        "Per Global Rules: *Verdict wording: 'unproven' unless t >= 2 and alpha > 0 in both halves; say it plainly, never round up.*",
-        "- For the primary 6-proxy universe over the full common history (2008-2026), full window t is 2.36, but H1 t is 1.36 (< 2.0).",
-        "- Furthermore, the sub-period analysis proves that the high t (2.45 in futures, 2.30 in ETF proxies) observed on the 2019+",
-        "  window does not persist into the 2013-2019 regime (t=-0.26).",
-        "- While the strategy is a robust crisis-hedge book with minimal drawdown (-10.8% over 18 years), it does not meet the project's",
-        "  strict bar for standalone deployment against QQQ. No bot is promoted.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 5. Crisis Behavior: 2008 & 2022 Stress Analysis",
+            "",
+            "Step F1 asks: *is 2008 / 2022 handled (max DD in those years)?*",
+            "",
+            "| Year | Portfolio / Asset | Annual Return | Calendar Max DD | Benchmark (QQQ) Return | Benchmark Max DD |",
+            "|---|---|---|---|---|---|",
+            f"| **2008** | 6-Proxy Universe | {crisis_6['2008']['bot_return']:+.1f}% | {crisis_6['2008']['bot_maxdd']:.1f}% | {crisis_6['2008']['qqq_return']:+.1f}% | {crisis_6['2008']['qqq_maxdd']:.1f}% |",
+            f"| **2008** | 5-Proxy Universe | {crisis_5['2008']['bot_return']:+.1f}% | {crisis_5['2008']['bot_maxdd']:.1f}% | {crisis_5['2008']['qqq_return']:+.1f}% | {crisis_5['2008']['qqq_maxdd']:.1f}% |",
+            f"| **2022** | 6-Proxy Universe | {crisis_6['2022']['bot_return']:+.1f}% | {crisis_6['2022']['bot_maxdd']:.1f}% | {crisis_6['2022']['qqq_return']:+.1f}% | {crisis_6['2022']['qqq_maxdd']:.1f}% |",
+            f"| **2022** | 5-Proxy Universe | {crisis_5['2022']['bot_return']:+.1f}% | {crisis_5['2022']['bot_maxdd']:.1f}% | {crisis_5['2022']['qqq_return']:+.1f}% | {crisis_5['2022']['qqq_maxdd']:.1f}% |",
+            "",
+            "Both 2008 and 2022 are handled exceptionally well by the strategy:",
+            "- In **2008**, the bot exited equity longs as the fast MA crossed below slow MA, rotating capital into",
+            "  Treasuries (`IEF`) and cash. While QQQ suffered a -41.7% loss and a -49.4% drawdown, the 6-proxy ETF strategy",
+            "  gained +2.8% with a contained drawdown of -9.3% (5-proxy gained +4.8% with max DD -7.9%).",
+            "- In **2022**, during severe simultaneous bond and tech equity selloffs, the bot was protected by high cash shares",
+            "  and long commodity exposure (`USO`, `DBA`, `GLD`). The bot lost only -1.0% (max DD -7.1%), while QQQ lost -32.6%",
+            "  (max DD -34.8%).",
+            "",
+            "## 6. Key Questions Answered",
+            "",
+            "### Does the t-stat hold outside 2019+?",
+            "**No.** Across the full 18-year history, the t-stat varies substantially by regime:",
+            "- **2019-2026**: High measured alpha (+4.25% to +4.37%, t=2.30 to 2.32) during the post-pandemic macro regime.",
+            "- **2013-2019**: Complete disappearance of alpha (-0.29% to +0.18%, t=-0.26 to 0.14). During the steady QE-driven equity bull",
+            "  market, holding a low-beta (0.18-0.22) multi-asset trend portfolio generated zero residual excess return vs QQQ.",
+            "- **2006-2012**: Positive alpha (+3.87% to +6.47%), but elevated standard error yields t=1.23 in the 6-proxy set.",
+            "In the 6-proxy universe, whole-window H1 alpha has t=1.36 (< 2.0).",
+            "",
+            "### Is 2008 / 2022 handled?",
+            "**Yes, definitively.** Max drawdown remained under 10% in both 2008 (-9.3% in 6-proxy, -7.9% in 5-proxy) and 2022",
+            "(-7.1% in 6-proxy, -5.9% in 5-proxy), compared to -49.4% (2008) and -34.8% (2022) for the QQQ benchmark.",
+            "The long-only trend filter and inverse-vol sizing effectively unloads risk during protracted bear markets.",
+            "",
+            "### Transaction Cost Sensitivity",
+            "At 20 bp per unit of turnover (a 4x increase from framework baseline 5 bp), annualised alpha degrades by only ~0.24% / year",
+            "(from +2.90% to +2.65% in 6-proxy whole window; t falls slightly from 2.36 to 2.16).",
+            "Because rebalancing is strictly monthly on slow 63/252 moving averages, monthly portfolio turnover is low (~10-15% per month),",
+            "making the strategy highly robust to execution costs and ETF bid-ask spreads.",
+            "",
+            "## 7. Project Verdict",
+            "",
+            "**Verdict: unproven**",
+            "",
+            "Per Global Rules: *Verdict wording: 'unproven' unless t >= 2 and alpha > 0 in both halves; say it plainly, never round up.*",
+            "- For the primary 6-proxy universe over the full common history (2008-2026), full window t is 2.36, but H1 t is 1.36 (< 2.0).",
+            "- Furthermore, the sub-period analysis proves that the high t (2.45 in futures, 2.30 in ETF proxies) observed on the 2019+",
+            "  window does not persist into the 2013-2019 regime (t=-0.26).",
+            "- While the strategy is a robust crisis-hedge book with minimal drawdown (-10.8% over 18 years), it does not meet the project's",
+            "  strict bar for standalone deployment against QQQ. No bot is promoted.",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -482,13 +486,13 @@ def run_all() -> None:
 
     # 1. 6-Proxy simulation (5 bp and 20 bp)
     print("Simulating 6-proxy universe (5 bp)...", file=sys.stderr)
-    ret_6_5bp, w_6, sig_6 = simulate_cft(PROXIES_6, prices, cost_per_turnover=0.0005)
+    ret_6_5bp, _w_6, _sig_6 = simulate_cft(PROXIES_6, prices, cost_per_turnover=0.0005)
     print("Simulating 6-proxy universe (20 bp)...", file=sys.stderr)
     ret_6_20bp, _, _ = simulate_cft(PROXIES_6, prices, cost_per_turnover=0.0020)
 
     # 2. 5-Proxy simulation (5 bp and 20 bp)
     print("Simulating 5-proxy universe (5 bp)...", file=sys.stderr)
-    ret_5_5bp, w_5, sig_5 = simulate_cft(PROXIES_5, prices, cost_per_turnover=0.0005)
+    ret_5_5bp, _w_5, _sig_5 = simulate_cft(PROXIES_5, prices, cost_per_turnover=0.0005)
     print("Simulating 5-proxy universe (20 bp)...", file=sys.stderr)
     ret_5_20bp, _, _ = simulate_cft(PROXIES_5, prices, cost_per_turnover=0.0020)
 
@@ -496,7 +500,7 @@ def run_all() -> None:
     print("Simulating Continuous Futures (2019+)...", file=sys.stderr)
     fut_res: PeriodResult | None = None
     try:
-        ret_fut, _, sig_fut = simulate_cft(list(FUTURES_UNIVERSE), prices, cost_per_turnover=0.0005)
+        ret_fut, _, _sig_fut = simulate_cft(list(FUTURES_UNIVERSE), prices, cost_per_turnover=0.0005)
         fut_res = eval_period("Continuous Futures (2019+)", ret_fut, qqq_ret)
     except Exception as exc:
         print(f"Failed to run futures simulation: {exc}", file=sys.stderr)

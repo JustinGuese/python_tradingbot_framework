@@ -23,29 +23,25 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
-from functools import lru_cache
 import html
 import json
 import os
-from pathlib import Path
 import pickle
 import re
-import sys
 import time as time_mod
 import urllib.error
 import urllib.request
 import warnings
+from dataclasses import dataclass
+from datetime import UTC, datetime, time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 # Pure & math utilities from framework
-import tradingbot.utils.event_study as es
 from tradingbot.utils.event_study import (
-    _bar_close_utc,
     _find_entry_bar_idx,
     _to_utc_timestamp,
     judge,
@@ -236,9 +232,11 @@ def classify_market_cap_bucket(
     Partition symbols into above_median vs below_median market cap buckets.
     Returns (symbol_to_bucket, median_val).
     """
-    valid = {s: market_caps[s] for s in symbols if s in market_caps and market_caps[s] is not None and market_caps[s] > 0}
+    valid = {
+        s: market_caps[s] for s in symbols if s in market_caps and market_caps[s] is not None and market_caps[s] > 0
+    }
     if not valid:
-        return {s: "above_median" for s in symbols}, 0.0
+        return dict.fromkeys(symbols, "above_median"), 0.0
 
     med = float(np.median(list(valid.values())))
     buckets = {}
@@ -371,7 +369,7 @@ def load_sec_ticker_to_cik(use_cache: bool = True) -> dict[str, int]:
         data = json.loads(raw.decode("utf-8"))
         return {v["ticker"].upper(): int(v["cik_str"]) for v in data.values()}
     except Exception as exc:
-        warnings.warn(f"Failed to fetch company_tickers.json: {exc}")
+        warnings.warn(f"Failed to fetch company_tickers.json: {exc}", stacklevel=2)
         return {}
 
 
@@ -393,7 +391,7 @@ def load_company_8k_filings(
         raw = fetch_edgar_bytes(url, cache_file=cache_file, use_cache=use_cache)
         data = json.loads(raw.decode("utf-8"))
     except Exception as exc:
-        warnings.warn(f"{symbol} (CIK {cik}): Failed to load submissions: {exc}")
+        warnings.warn(f"{symbol} (CIK {cik}): Failed to load submissions: {exc}", stacklevel=2)
         return []
 
     filings_list: list[dict] = []
@@ -421,15 +419,17 @@ def load_company_8k_filings(
             pdoc = str(primary_docs[i]) if i < len(primary_docs) else ""
             acc_dt = str(acceptances[i]) if i < len(acceptances) else None
 
-            filings_list.append({
-                "symbol": symbol,
-                "cik": cik,
-                "filing_date": fdate,
-                "acceptance_dt": parse_acceptance_datetime(acc_dt, fdate),
-                "accession_number": acc,
-                "primary_document": pdoc,
-                "items": items_val,
-            })
+            filings_list.append(
+                {
+                    "symbol": symbol,
+                    "cik": cik,
+                    "filing_date": fdate,
+                    "acceptance_dt": parse_acceptance_datetime(acc_dt, fdate),
+                    "accession_number": acc,
+                    "primary_document": pdoc,
+                    "items": items_val,
+                }
+            )
 
     # 1. Parse recent filings
     recent = data.get("filings", {}).get("recent", {})
@@ -538,7 +538,7 @@ def load_price_history(
 ) -> dict[str, pd.Series]:
     """Download daily close prices for symbols + QQQ with pickle cache."""
     cache_file = CACHE_DIR / "event_buyback_prices.pkl"
-    all_syms = sorted(set(symbols + ["QQQ"]))
+    all_syms = sorted({*symbols, "QQQ"})
 
     if use_cache and cache_file.exists():
         try:
@@ -633,8 +633,24 @@ def evaluate_variant(
     """Evaluate one strategy variant on filtered event signals."""
     if events_df.empty:
         return VariantResult(
-            hold_days, size_bucket, ar_filter, 0, 0.0, 0.0, 0.0,
-            None, None, None, None, None, None, None, None, None, None, False
+            hold_days,
+            size_bucket,
+            ar_filter,
+            0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            False,
         )
 
     # 1. Size filter
@@ -666,8 +682,24 @@ def evaluate_variant(
     n_events = len(filtered)
     if n_events < 6:
         return VariantResult(
-            hold_days, size_bucket, ar_filter, n_events, 0.0, 0.0, 0.0,
-            None, None, None, None, None, None, None, None, None, None, False
+            hold_days,
+            size_bucket,
+            ar_filter,
+            n_events,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            False,
         )
 
     # Calculate forward abnormal returns over hold_days
@@ -794,13 +826,23 @@ def run_placebo_test(
     t_start = time_mod.time()
     for i_draw in range(n_draws):
         if i_draw and i_draw % 25 == 0:
-            print(f"  placebo {i_draw}/{n_draws} draws, {time_mod.time() - t_start:.0f}s elapsed, exceed so far {exceed_count}", flush=True)
+            print(
+                f"  placebo {i_draw}/{n_draws} draws, {time_mod.time() - t_start:.0f}s elapsed, exceed so far {exceed_count}",
+                flush=True,
+            )
         rand_dates = rng.choice(valid_dates, size=n_events, replace=True)
         rand_syms = rng.choice(symbols, size=n_events, replace=True)
-        sim_signals = pd.DataFrame({
-            "acceptance_dt": [pd.Timestamp(d).tz_localize(UTC) if pd.Timestamp(d).tzinfo is None else pd.Timestamp(d).tz_convert(UTC) for d in rand_dates],
-            "symbol": rand_syms,
-        })
+        sim_signals = pd.DataFrame(
+            {
+                "acceptance_dt": [
+                    pd.Timestamp(d).tz_localize(UTC)
+                    if pd.Timestamp(d).tzinfo is None
+                    else pd.Timestamp(d).tz_convert(UTC)
+                    for d in rand_dates
+                ],
+                "symbol": rand_syms,
+            }
+        )
         sim_rets = strategy_returns_with_costs(sim_signals, prices, hold_days=hold_days, cost_per_side=0.0002)
         jd = judge(sim_rets, bench_rets)
         t_sim = jd["t"]
@@ -863,8 +905,16 @@ def format_markdown_report(
         t_2bp_str = f"{r.strat_t_2bp:.2f}" if r.strat_t_2bp is not None else "N/A"
         beta_str = f"{r.strat_beta:.2f}" if r.strat_beta is not None else "N/A"
 
-        h1_str = f"{r.h1_alpha_2bp_pct:+.2f}% ({r.h1_t_2bp:.2f})" if r.h1_alpha_2bp_pct is not None and r.h1_t_2bp is not None else "N/A"
-        h2_str = f"{r.h2_alpha_2bp_pct:+.2f}% ({r.h2_t_2bp:.2f})" if r.h2_alpha_2bp_pct is not None and r.h2_t_2bp is not None else "N/A"
+        h1_str = (
+            f"{r.h1_alpha_2bp_pct:+.2f}% ({r.h1_t_2bp:.2f})"
+            if r.h1_alpha_2bp_pct is not None and r.h1_t_2bp is not None
+            else "N/A"
+        )
+        h2_str = (
+            f"{r.h2_alpha_2bp_pct:+.2f}% ({r.h2_t_2bp:.2f})"
+            if r.h2_alpha_2bp_pct is not None and r.h2_t_2bp is not None
+            else "N/A"
+        )
 
         alpha_5bp_str = f"{r.strat_alpha_5bp_pct:+.2f}%" if r.strat_alpha_5bp_pct is not None else "N/A"
         t_5bp_str = f"{r.strat_t_5bp:.2f}" if r.strat_t_5bp is not None else "N/A"
@@ -874,13 +924,15 @@ def format_markdown_report(
             f"| {hold_str} | {size_str} | {filter_str} | {r.n_events} | {ar_mean_str} | {ar_t_str} | {win_str} | {alpha_2bp_str} | {t_2bp_str} | {beta_str} | {h1_str} | {h2_str} | {alpha_5bp_str} | {t_5bp_str} | {pass_str} |"
         )
 
-    lines.extend([
-        "",
-        "## Key Findings",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Key Findings",
+            "",
+        ]
+    )
 
-    scored =[r for r in results if r.strat_t_2bp is not None]
+    scored = [r for r in results if r.strat_t_2bp is not None]
     best = max(scored, key=lambda r: r.strat_t_2bp) if scored else None
     n_events = max((r.n_events for r in results), default=0)
     lines.append(f"1. **Sample:** up to {n_events} events per variant.")
@@ -892,9 +944,13 @@ def format_markdown_report(
     if passing:
         lines.append(f"3. **Passing Variants:** {len(passing)} variant(s) passed the initial statistical criteria.")
         if placebo_p is not None:
-            lines.append(f"   - Placebo test p-value: `{placebo_p:.4f}` over {os.environ.get('PLACEBO_DRAWS', '2000')} random same-count draws (requires p < 0.05).")
+            lines.append(
+                f"   - Placebo test p-value: `{placebo_p:.4f}` over {os.environ.get('PLACEBO_DRAWS', '2000')} random same-count draws (requires p < 0.05)."
+            )
     else:
-        lines.append("3. **Overall Assessment:** None of the 12 pre-registered variants clear the statistical threshold (`t >= 2.0`, `alpha > 0` in both halves, `beta < 0.5`).")
+        lines.append(
+            "3. **Overall Assessment:** None of the 12 pre-registered variants clear the statistical threshold (`t >= 2.0`, `alpha > 0` in both halves, `beta < 0.5`)."
+        )
 
     lines.append("")
     return "\n".join(lines)
@@ -982,7 +1038,9 @@ def run_buyback_study(
         pass_tag = "PASS" if res.passes else "FAIL"
         a2bp = f"{res.strat_alpha_2bp_pct:+.2f}%" if res.strat_alpha_2bp_pct is not None else "N/A"
         t2bp = f"{res.strat_t_2bp:.2f}" if res.strat_t_2bp is not None else "N/A"
-        print(f"  Hold {res.hold_days:2d}d | Size: {res.size_bucket:12s} | Filter: {str(res.ar_filter):5s} | N: {res.n_events:3d} | Alpha(2bp): {a2bp:8s} | t: {t2bp:6s} | {pass_tag}")
+        print(
+            f"  Hold {res.hold_days:2d}d | Size: {res.size_bucket:12s} | Filter: {res.ar_filter!s:5s} | N: {res.n_events:3d} | Alpha(2bp): {a2bp:8s} | t: {t2bp:6s} | {pass_tag}"
+        )
 
     # 7. Placebo test & Verdict
     passing = [r for r in results if r.passes]

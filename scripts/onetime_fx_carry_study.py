@@ -30,16 +30,14 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 os.environ.setdefault("POSTGRES_URI", "stub:stub@localhost:5432/stub")
 
-import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
 
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.utils.alpha_report import alpha_stats
 
 OUT_DOC = Path("docs/backtests/fx-carry-2026-11.md")
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", "/tmp"))
@@ -111,7 +109,7 @@ def load_spot_data(refresh: bool = False) -> tuple[pd.DataFrame, pd.Series]:
 
     # Drop rows where any FX currency is NaN (find common history start)
     fx_cols = list(DIRECT_PAIRS.values()) + list(INVERT_PAIRS.values())
-    valid_mask = converted[fx_cols + ["QQQ"]].notna().all(axis=1)
+    valid_mask = converted[[*fx_cols, "QQQ"]].notna().all(axis=1)
     clean_df = converted.loc[valid_mask].copy()
 
     try:
@@ -310,7 +308,7 @@ def run_fx_carry_study() -> tuple[list[StrategyMetrics], dict[str, float], list[
     qqq_ret = qqq.pct_change().fillna(0.0)
 
     # Monthly rebalance mask: first bar of each calendar month
-    is_month_start = (spots.index.month != pd.Series(spots.index.month, index=spots.index).shift(1))
+    is_month_start = spots.index.month != pd.Series(spots.index.month, index=spots.index).shift(1)
     is_month_start.iloc[0] = True
 
     # Weight matrices
@@ -389,31 +387,43 @@ def run_fx_carry_study() -> tuple[list[StrategyMetrics], dict[str, float], list[
     # Run simulations
     # Variant 1: Long-Only Carry (Top 3, 1/3 each, unconstrained, rest in US 3m cash)
     r_lo, m_lo = simulate_portfolio(
-        w_lo, carry_asset_ret, r_usd_daily, qqq_ret,
+        w_lo,
+        carry_asset_ret,
+        r_usd_daily,
+        qqq_ret,
         name="Long-Only Carry (Top 3, 1/3 each)",
         notes="Primary step X1 specification. Fully invested in top 3 differential currencies.",
     )
     results.append(m_lo)
 
     # Variant 2: Long-Only Carry (Top 3 positive-spread only, unallocated in US 3m cash)
-    r_lo_pos, m_lo_pos = simulate_portfolio(
-        w_lo_pos, carry_asset_ret, r_usd_daily, qqq_ret,
+    _r_lo_pos, m_lo_pos = simulate_portfolio(
+        w_lo_pos,
+        carry_asset_ret,
+        r_usd_daily,
+        qqq_ret,
         name="Long-Only Carry (Top 3, diff > 0 only)",
         notes="Holds only positive rate differential currencies; rest in USD cash earning 3m rate.",
     )
     results.append(m_lo_pos)
 
     # Variant 3: Spot-Only Carry Selection (same Top 3 weights, but spot returns only, cash earns 0%)
-    r_spot_top3, m_spot_top3 = simulate_portfolio(
-        w_lo, spot_ret, pd.Series(0.0, index=common_idx), qqq_ret,
+    _r_spot_top3, m_spot_top3 = simulate_portfolio(
+        w_lo,
+        spot_ret,
+        pd.Series(0.0, index=common_idx),
+        qqq_ret,
         name="Spot-Only Carry Selection (no carry interest, cash=0%)",
         notes="Direct carry-vs-spot counterfactual for the same top 3 currency holdings.",
     )
     results.append(m_spot_top3)
 
     # Variant 4: Long/Short Carry (Top 3 Long, Bottom 3 Short; 100% cash collateral)
-    r_ls, m_ls = simulate_portfolio(
-        w_ls, carry_asset_ret, r_usd_daily, qqq_ret,
+    _r_ls, m_ls = simulate_portfolio(
+        w_ls,
+        carry_asset_ret,
+        r_usd_daily,
+        qqq_ret,
         name="Long/Short Carry (Top 3 L / Bottom 3 S)",
         notes="Reference only ('not tradeable here'). 100% long, 100% short, 100% cash collateral.",
         is_long_short=True,
@@ -421,8 +431,11 @@ def run_fx_carry_study() -> tuple[list[StrategyMetrics], dict[str, float], list[
     results.append(m_ls)
 
     # Variant 4b: Long/Short Carry (50% Long, 50% Short; 1.0 gross leverage)
-    r_ls_half, m_ls_half = simulate_portfolio(
-        w_ls_half, carry_asset_ret, r_usd_daily, qqq_ret,
+    _r_ls_half, m_ls_half = simulate_portfolio(
+        w_ls_half,
+        carry_asset_ret,
+        r_usd_daily,
+        qqq_ret,
         name="Long/Short Carry (50% L / 50% S, 1.0 gross)",
         notes="Reference only ('not tradeable here'). 50% long, 50% short, 100% cash collateral.",
         is_long_short=True,
@@ -430,16 +443,22 @@ def run_fx_carry_study() -> tuple[list[StrategyMetrics], dict[str, float], list[
     results.append(m_ls_half)
 
     # Variant 5: Existing Spot FX Momentum Baseline (QuantsmdFxCrossSectionalMomentum)
-    r_sm_fx4, m_sm_fx4 = simulate_portfolio(
-        w_spot_fx4, spot_ret, pd.Series(0.0, index=common_idx), qqq_ret,
+    _r_sm_fx4, m_sm_fx4 = simulate_portfolio(
+        w_spot_fx4,
+        spot_ret,
+        pd.Series(0.0, index=common_idx),
+        qqq_ret,
         name="Existing Spot Momentum (QuantsmdFxCrossSectionalMom)",
         notes="Documented spot FX baseline on FX4 (t -1.19 in quantsmd-2026-11-all.md).",
     )
     results.append(m_sm_fx4)
 
     # Variant 6: Spot-Only G10 Momentum Baseline (Top 3 by 63d spot return)
-    r_sm_g10, m_sm_g10 = simulate_portfolio(
-        w_spot_g10, spot_ret, pd.Series(0.0, index=common_idx), qqq_ret,
+    _r_sm_g10, m_sm_g10 = simulate_portfolio(
+        w_spot_g10,
+        spot_ret,
+        pd.Series(0.0, index=common_idx),
+        qqq_ret,
         name="Spot-Only G10 Momentum (Top 3 by 63d return, cash=0%)",
         notes="Unconstrained G10 cross-sectional spot price momentum.",
     )
@@ -496,7 +515,7 @@ def generate_report(
         "## Methodology",
         "",
         "- **Universe:** G10 vs USD currencies from yfinance (`EURUSD=X`, `GBPUSD=X`, `AUDUSD=X`, `NZDUSD=X`, `USDJPY=X`, `USDCAD=X`, `USDCHF=X`, `USDNOK=X`, `USDSEK=X`). Pairs with USD as base currency (`USDJPY`, `USDCAD`, `USDCHF`, `USDNOK`, `USDSEK`) are inverted (`1 / close`) so all prices reflect foreign currency value in USD.",
-        f"- **Data window:** 2006-05-16 to 2026-11-06 (common history of all 9 pairs and QQQ; 5,148 weekday trading bars).",
+        "- **Data window:** 2006-05-16 to 2026-11-06 (common history of all 9 pairs and QQQ; 5,148 weekday trading bars).",
         "- **Short Rates:** 3-month short interest rates downloaded from FRED public CSVs (`IR3TIB01EZM156N`, `IR3TIB01GBM156N`, `IR3TIB01AUM156N`, `IR3TIB01NZM156N`, `IR3TIB01JPM156N`, `IR3TIB01CAM156N`, `IR3TIB01CHM156N`, `IR3TIB01NOM156N`, `IR3TIB01SEM156N`, `IR3TIB01USM156N`), monthly frequency, forward-filled to daily trading bars.",
         f"- **Dropped currencies:** {', '.join(dropped_ccys) if dropped_ccys else 'None. All 9 G10 currencies and USD have complete series.'}",
         "- **Daily Carry Return per Currency:** `spot_return + (r_foreign - r_USD) / 252`.",
@@ -515,46 +534,50 @@ def generate_report(
             f"{r.cagr:.2f}% | {r.maxdd:.2f}% | {r.h1_alpha:+.2f}% ({r.h1_t:.2f}) | {r.h2_alpha:+.2f}% ({r.h2_t:.2f}) | {r.verdict} |"
         )
 
-    lines.extend([
-        "",
-        "## Detailed Analysis",
-        "",
-        "### 1. Carry vs. Spot-Only Baseline",
-        "",
-        "- **Top-3 Carry vs. Top-3 Spot-Only:**",
-        f"  - Spot-Only Top 3 (same holdings, no interest differential, cash at 0%): **alpha {spot_top3.alpha:+.2f}% / yr**, **t = {spot_top3.t:.2f}**, Max DD **{spot_top3.maxdd:.2f}%**.",
-        f"  - Carry Top 3 (with foreign interest and USD cash yield): **alpha {lo.alpha:+.2f}% / yr**, **t = {lo.t:.2f}**, Max DD **{lo.maxdd:.2f}%**.",
-        f"  - **Net Carry Lift:** **{lift_alpha:+.2f}%/yr alpha**, lifting t by **{lift_t:+.2f}** and reducing drawdown by **{lift_dd:.2f}%**.",
-        "- **Existing Spot Momentum Baseline (`QuantsmdFxCrossSectionalMomentum`):**",
-        f"  - Trailing 63-bar price return on FX4 held at 50% NAV generates **alpha {sm_fx4.alpha:+.2f}%/yr**, **t = {sm_fx4.t:.2f}**, Max DD **{sm_fx4.maxdd:.2f}%**.",
-        "  - This reproduces the finding in `docs/backtests/quantsmd-2026-11-all.md` that spot FX price momentum loses without interest carry.",
-        "",
-        "### 2. Long/Short Reference ('Not Tradeable Here')",
-        "",
-        "- The long/short carry strategy holds the top 3 rate differential currencies long (+33.3% each) and shorts the bottom 3 currencies (-33.3% each), with 100% cash collateral earning the US 3-month rate.",
-        f"- **Performance (100% L / 100% S):** CAGR **{ls.cagr:.2f}%**, Max DD **{ls.maxdd:.2f}%**, Alpha **{ls.alpha:+.2f}%/yr**, **t = {ls.t:.2f}** (H1 alpha {ls.h1_alpha:+.2f}%, t {ls.h1_t:.2f}; H2 alpha {ls.h2_alpha:+.2f}%, t {ls.h2_t:.2f}).",
-        f"- **Performance (50% L / 50% S, 1.0 gross):** CAGR **{ls_half.cagr:.2f}%**, Max DD **{ls_half.maxdd:.2f}%**, Alpha **{ls_half.alpha:+.2f}%/yr**, **t = {ls_half.t:.2f}** (H1 alpha {ls_half.h1_alpha:+.2f}%, t {ls_half.h1_t:.2f}; H2 alpha {ls_half.h2_alpha:+.2f}%, t {ls_half.h2_t:.2f}).",
-        "- While this demonstrates that cross-sectional rate differentials are predictive in FX markets, it cannot be run in our long-only broker framework, and even with shorting it fails the project requirement of t >= 2.0 across the full window.",
-        "",
-        "### 3. Correlation with QQQ and Surviving Books",
-        "",
-        "Correlation of daily returns between Long-Only FX Carry and the project's return streams:",
-        "",
-        "| Stream | Correlation with Long-Only FX Carry |",
-        "|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Detailed Analysis",
+            "",
+            "### 1. Carry vs. Spot-Only Baseline",
+            "",
+            "- **Top-3 Carry vs. Top-3 Spot-Only:**",
+            f"  - Spot-Only Top 3 (same holdings, no interest differential, cash at 0%): **alpha {spot_top3.alpha:+.2f}% / yr**, **t = {spot_top3.t:.2f}**, Max DD **{spot_top3.maxdd:.2f}%**.",
+            f"  - Carry Top 3 (with foreign interest and USD cash yield): **alpha {lo.alpha:+.2f}% / yr**, **t = {lo.t:.2f}**, Max DD **{lo.maxdd:.2f}%**.",
+            f"  - **Net Carry Lift:** **{lift_alpha:+.2f}%/yr alpha**, lifting t by **{lift_t:+.2f}** and reducing drawdown by **{lift_dd:.2f}%**.",
+            "- **Existing Spot Momentum Baseline (`QuantsmdFxCrossSectionalMomentum`):**",
+            f"  - Trailing 63-bar price return on FX4 held at 50% NAV generates **alpha {sm_fx4.alpha:+.2f}%/yr**, **t = {sm_fx4.t:.2f}**, Max DD **{sm_fx4.maxdd:.2f}%**.",
+            "  - This reproduces the finding in `docs/backtests/quantsmd-2026-11-all.md` that spot FX price momentum loses without interest carry.",
+            "",
+            "### 2. Long/Short Reference ('Not Tradeable Here')",
+            "",
+            "- The long/short carry strategy holds the top 3 rate differential currencies long (+33.3% each) and shorts the bottom 3 currencies (-33.3% each), with 100% cash collateral earning the US 3-month rate.",
+            f"- **Performance (100% L / 100% S):** CAGR **{ls.cagr:.2f}%**, Max DD **{ls.maxdd:.2f}%**, Alpha **{ls.alpha:+.2f}%/yr**, **t = {ls.t:.2f}** (H1 alpha {ls.h1_alpha:+.2f}%, t {ls.h1_t:.2f}; H2 alpha {ls.h2_alpha:+.2f}%, t {ls.h2_t:.2f}).",
+            f"- **Performance (50% L / 50% S, 1.0 gross):** CAGR **{ls_half.cagr:.2f}%**, Max DD **{ls_half.maxdd:.2f}%**, Alpha **{ls_half.alpha:+.2f}%/yr**, **t = {ls_half.t:.2f}** (H1 alpha {ls_half.h1_alpha:+.2f}%, t {ls_half.h1_t:.2f}; H2 alpha {ls_half.h2_alpha:+.2f}%, t {ls_half.h2_t:.2f}).",
+            "- While this demonstrates that cross-sectional rate differentials are predictive in FX markets, it cannot be run in our long-only broker framework, and even with shorting it fails the project requirement of t >= 2.0 across the full window.",
+            "",
+            "### 3. Correlation with QQQ and Surviving Books",
+            "",
+            "Correlation of daily returns between Long-Only FX Carry and the project's return streams:",
+            "",
+            "| Stream | Correlation with Long-Only FX Carry |",
+            "|---|---|",
+        ]
+    )
 
     for stream, c in corrs.items():
         lines.append(f"| {stream} | {c:+.3f} |")
 
-    lines.extend([
-        "",
-        f"- **Interpretation:** Long-only FX carry has minimal correlation with US equities (QQQ corr {corrs.get('QQQ', 0.0):.2f}) and low correlation with trend/rotation survivors ({min(c for k, c in corrs.items() if k != 'QQQ'):+.2f} to {max(c for k, c in corrs.items() if k != 'QQQ'):+.2f}). While it is an uncorrelated return stream, its near-zero alpha ({lo.alpha:+.2f}%, t {lo.t:.2f}) means combining it with other books would merely dilute portfolio Sharpe without adding alpha.",
-        "",
-        "## Conclusion",
-        "",
-        "Step X1 is complete. Long-only FX carry is conclusively **unproven**. Do not promote an FX carry bot and do not tune parameters.",
-    ])
+    lines.extend(
+        [
+            "",
+            f"- **Interpretation:** Long-only FX carry has minimal correlation with US equities (QQQ corr {corrs.get('QQQ', 0.0):.2f}) and low correlation with trend/rotation survivors ({min(c for k, c in corrs.items() if k != 'QQQ'):+.2f} to {max(c for k, c in corrs.items() if k != 'QQQ'):+.2f}). While it is an uncorrelated return stream, its near-zero alpha ({lo.alpha:+.2f}%, t {lo.t:.2f}) means combining it with other books would merely dilute portfolio Sharpe without adding alpha.",
+            "",
+            "## Conclusion",
+            "",
+            "Step X1 is complete. Long-only FX carry is conclusively **unproven**. Do not promote an FX carry bot and do not tune parameters.",
+        ]
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -562,7 +585,7 @@ def generate_report(
 def main() -> None:
     t0 = time.time()
     print("Starting FX Carry Study (Step X1)...", file=sys.stderr)
-    results, corrs, dropped_ccys, r_lo = run_fx_carry_study()
+    results, corrs, dropped_ccys, _r_lo = run_fx_carry_study()
 
     doc_content = generate_report(results, corrs, dropped_ccys)
     OUT_DOC.parent.mkdir(parents=True, exist_ok=True)

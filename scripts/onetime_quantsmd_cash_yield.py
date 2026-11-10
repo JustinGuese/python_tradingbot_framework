@@ -31,39 +31,44 @@ Results:
 from __future__ import annotations
 
 import os
-import pickle
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 os.environ.setdefault("POSTGRES_URI", "stub:stub@localhost:5432/stub")
 
-import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from tradingbot import (
     quantsmd_monthly_rotation as mr,
+)
+from tradingbot import (
     quantsmd_quarterly_te_cost_gate as qte,
+)
+from tradingbot import (
     quantsmd_risk_parity_capped as rpc,
+)
+from tradingbot import (
     quantsmd_sma_daily as sma,
+)
+from tradingbot import (
     quantsmd_sma_daily_gated as smag,
+)
+from tradingbot import (
     quantsmd_vol_target_momentum as vtm,
 )
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.utils.alpha_report import alpha_stats
 
 OUT_DOC = Path("docs/backtests/quantsmd-cash-yield-2026-11.md")
 CACHE_FILE = Path(os.environ.get("CACHE_DIR", "/tmp")) / "quantsmd_cash_yield_prices.pkl"
 FETCH_START = "2000-01-01"
 COST_PER_TURNOVER = 0.0005  # 5 bps
 
-ALL_SYMBOLS = sorted(
-    set(mr.ETF8)
-    | set(rpc.UNIVERSE)
-    | {"SPY", "QQQ", "^IRX"}
-)
+ALL_SYMBOLS = sorted(set(mr.ETF8) | set(rpc.UNIVERSE) | {"SPY", "QQQ", "^IRX"})
 
 
 def load_cached_prices(refresh: bool = False) -> pd.DataFrame:
@@ -277,20 +282,24 @@ def generate_doc(results: list[SimulationResult], unfinished: list[str]) -> str:
         )
 
     if unfinished:
-        lines.extend([
-            "",
-            f"Unfinished / omitted bots: {', '.join(unfinished)}",
-        ])
+        lines.extend(
+            [
+                "",
+                f"Unfinished / omitted bots: {', '.join(unfinished)}",
+            ]
+        )
 
-    lines.extend([
-        "",
-        "## Detailed Breakdown",
-        "",
-        "### Baseline: Cash earns 0%",
-        "",
-        "| Bot | Start | CAGR | Max DD | Alpha/yr | t | Beta | Corr | H1 alpha (t) | H2 alpha (t) |",
-        "|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Detailed Breakdown",
+            "",
+            "### Baseline: Cash earns 0%",
+            "",
+            "| Bot | Start | CAGR | Max DD | Alpha/yr | t | Beta | Corr | H1 alpha (t) | H2 alpha (t) |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for r in results:
         lines.append(
             f"| {r.name} | {r.start[:4]} | {r.base_cagr:.1f}% | {r.base_maxdd:.1f}% | "
@@ -298,13 +307,15 @@ def generate_doc(results: list[SimulationResult], unfinished: list[str]) -> str:
             f"{r.base_h1_alpha:+.1f}% ({r.base_h1_t:.2f}) | {r.base_h2_alpha:+.1f}% ({r.base_h2_t:.2f}) |"
         )
 
-    lines.extend([
-        "",
-        "### With Cash Yield: Cash earns 13-week T-bill (^IRX / 252)",
-        "",
-        "| Bot | Start | CAGR | Max DD | Alpha/yr | t | Beta | Corr | H1 alpha (t) | H2 alpha (t) |",
-        "|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "### With Cash Yield: Cash earns 13-week T-bill (^IRX / 252)",
+            "",
+            "| Bot | Start | CAGR | Max DD | Alpha/yr | t | Beta | Corr | H1 alpha (t) | H2 alpha (t) |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for r in results:
         lines.append(
             f"| {r.name} | {r.start[:4]} | {r.yield_cagr:.1f}% | {r.yield_maxdd:.1f}% | "
@@ -312,16 +323,18 @@ def generate_doc(results: list[SimulationResult], unfinished: list[str]) -> str:
             f"{r.yield_h1_alpha:+.1f}% ({r.yield_h1_t:.2f}) | {r.yield_h2_alpha:+.1f}% ({r.yield_h2_t:.2f}) |"
         )
 
-    lines.extend([
-        "",
-        "## Interpretation",
-        "",
-        "- **All six bots remain `unproven` by the project bar (t >= 2 in both halves).** None of the books clears t >= 2 across both halves of its sample, even with cash yield credited.",
-        "- **Impact correlates strictly with cash share:**",
-        "  - For rotation and parity books that stay almost fully invested (`MonthlyRotation` ~2.8% cash, `RiskParityCapped` ~1.9% cash, `QuarterlyTeCostGate` ~2.4% cash), cash yield adds only +0.1% to +0.2% annualized alpha and negligible t-stat gain (+0.04 to +0.05).",
-        "  - For trend and gating books with significant cash allocations (`SmaDaily` ~13.7% cash, `SmaDailyGated` ~29.4% cash), cash yield provides a noticeable lift: `SmaDailyGated` gains +0.7%/yr alpha (from +5.4% to +6.1%) and lifts full-window t from 3.03 to 3.40 (H1 t increases from 2.00 to 2.40).",
-        "- **Second-half degradation persists:** Across all six books, performance in H2 remains substantially weaker than in H1 (e.g. `SmaDailyGated` H2 t is 1.62 vs H1 t 2.40; `QuarterlyTeCostGate` H2 t is 1.33 vs H1 t 2.21). Cash yield lifts the overall curve level but does not fix the post-2013 alpha decay.",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Interpretation",
+            "",
+            "- **All six bots remain `unproven` by the project bar (t >= 2 in both halves).** None of the books clears t >= 2 across both halves of its sample, even with cash yield credited.",
+            "- **Impact correlates strictly with cash share:**",
+            "  - For rotation and parity books that stay almost fully invested (`MonthlyRotation` ~2.8% cash, `RiskParityCapped` ~1.9% cash, `QuarterlyTeCostGate` ~2.4% cash), cash yield adds only +0.1% to +0.2% annualized alpha and negligible t-stat gain (+0.04 to +0.05).",
+            "  - For trend and gating books with significant cash allocations (`SmaDaily` ~13.7% cash, `SmaDailyGated` ~29.4% cash), cash yield provides a noticeable lift: `SmaDailyGated` gains +0.7%/yr alpha (from +5.4% to +6.1%) and lifts full-window t from 3.03 to 3.40 (H1 t increases from 2.00 to 2.40).",
+            "- **Second-half degradation persists:** Across all six books, performance in H2 remains substantially weaker than in H1 (e.g. `SmaDailyGated` H2 t is 1.62 vs H1 t 2.40; `QuarterlyTeCostGate` H2 t is 1.33 vs H1 t 2.21). Cash yield lifts the overall curve level but does not fix the post-2013 alpha decay.",
+        ]
+    )
 
     return "\n".join(lines) + "\n"
 

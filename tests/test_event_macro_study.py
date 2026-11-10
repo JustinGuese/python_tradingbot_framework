@@ -7,19 +7,14 @@ Acceptance:
 - Window arithmetic uses sessions, not calendar days (handles weekends and holidays).
 """
 
-from datetime import date, datetime, time
-from zoneinfo import ZoneInfo
+from datetime import date
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from scripts.onetime_event_macro_study import (
     build_strategy_signals,
     filter_past_events,
-    get_event_session,
     get_event_sessions,
-    prev_session,
 )
 
 
@@ -27,14 +22,16 @@ def test_only_past_events_are_used_future_dated_rows_excluded():
     """
     Acceptance: Only past events are used; future-dated rows are excluded.
     """
-    raw_events = pd.DataFrame([
-        {"kind": "FOMC", "event_date": date(2024, 1, 31)},
-        {"kind": "FOMC", "event_date": date(2025, 12, 10)},
-        {"kind": "FOMC", "event_date": date(2026, 6, 17)},
-        {"kind": "FOMC", "event_date": date(2026, 11, 4)},
-        {"kind": "FOMC", "event_date": date(2026, 12, 9)},  # Future
-        {"kind": "FOMC", "event_date": date(2027, 1, 27)},  # Future
-    ])
+    raw_events = pd.DataFrame(
+        [
+            {"kind": "FOMC", "event_date": date(2024, 1, 31)},
+            {"kind": "FOMC", "event_date": date(2025, 12, 10)},
+            {"kind": "FOMC", "event_date": date(2026, 6, 17)},
+            {"kind": "FOMC", "event_date": date(2026, 11, 4)},
+            {"kind": "FOMC", "event_date": date(2026, 12, 9)},  # Future
+            {"kind": "FOMC", "event_date": date(2027, 1, 27)},  # Future
+        ]
+    )
 
     as_of = date(2026, 11, 5)
     filtered = filter_past_events(raw_events, as_of=as_of)
@@ -50,10 +47,12 @@ def test_only_past_events_are_used_future_dated_rows_excluded():
     assert date(2027, 1, 27) not in set(filtered["event_date"])
 
     # Edge case: all future events -> returns empty DataFrame
-    future_only = pd.DataFrame([
-        {"kind": "FOMC", "event_date": date(2027, 3, 17)},
-        {"kind": "FOMC", "event_date": date(2027, 4, 28)},
-    ])
+    future_only = pd.DataFrame(
+        [
+            {"kind": "FOMC", "event_date": date(2027, 3, 17)},
+            {"kind": "FOMC", "event_date": date(2027, 4, 28)},
+        ]
+    )
     empty_res = filter_past_events(future_only, as_of=as_of)
     assert empty_res.empty
 
@@ -70,7 +69,7 @@ def test_window_arithmetic_uses_sessions_not_calendar_days_weekend():
     mon_sessions = get_event_sessions(mon_event)
 
     assert mon_sessions["T0"] == date(2026, 3, 9)
-    assert mon_sessions["T-1"] == date(2026, 3, 6)   # Friday
+    assert mon_sessions["T-1"] == date(2026, 3, 6)  # Friday
     assert mon_sessions["T+1"] == date(2026, 3, 10)  # Tuesday
     assert mon_sessions["T+2"] == date(2026, 3, 11)  # Wednesday
 
@@ -102,7 +101,7 @@ def test_window_arithmetic_uses_sessions_not_calendar_days_holiday():
     h_sessions = get_event_sessions(holiday_event)
 
     assert h_sessions["T0"] == date(2026, 1, 20)  # Rolled to next session
-    assert h_sessions["T-1"] == date(2026, 1, 16) # Friday before holiday weekend
+    assert h_sessions["T-1"] == date(2026, 1, 16)  # Friday before holiday weekend
 
 
 def test_build_strategy_signals_and_holding_periods():

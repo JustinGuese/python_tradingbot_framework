@@ -34,14 +34,26 @@ import yfinance as yf
 from scripts.onetime_quantsmd_backtest import true_cagr
 from tradingbot.quantsmd_monthly_rotation import (
     DEFAULT_LOOKBACK as MR_LOOKBACK,
+)
+from tradingbot.quantsmd_monthly_rotation import (
     DEFAULT_TOP_N as MR_TOP_N,
+)
+from tradingbot.quantsmd_monthly_rotation import (
     ETF8,
+)
+from tradingbot.quantsmd_monthly_rotation import (
     compute_weights as mr_weights,
 )
 from tradingbot.quantsmd_risk_parity_capped import (
     CAP as RP_CAP,
+)
+from tradingbot.quantsmd_risk_parity_capped import (
     LOOKBACK as RP_LOOKBACK,
+)
+from tradingbot.quantsmd_risk_parity_capped import (
     SECTORS9,
+)
+from tradingbot.quantsmd_risk_parity_capped import (
     compute_weights as rp_weights,
 )
 from tradingbot.utils.alpha_report import alpha_stats
@@ -103,12 +115,7 @@ def simulate_strategy(
         # Fails open (factor 1.0) before window bars are available, matching regime_scale.
         sma_val = spy_sma.loc[dt] if dt in spy_sma.index else np.nan
         spy_val = spy_closes.loc[dt] if dt in spy_closes.index else np.nan
-        if pd.isna(sma_val) or pd.isna(spy_val):
-            factor = 1.0
-        elif spy_val >= sma_val:
-            factor = 1.0
-        else:
-            factor = off_scale
+        factor = 1.0 if pd.isna(sma_val) or pd.isna(spy_val) or spy_val >= sma_val else off_scale
 
         if factor <= 0.0:
             gated_w = {}

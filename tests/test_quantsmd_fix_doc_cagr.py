@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 
 from scripts.onetime_quantsmd_fix_doc_cagr import (
@@ -58,7 +57,7 @@ def test_idempotency(tmp_path: Path):
     temp_file = tmp_path / "test_doc.md"
     temp_file.write_text(content, encoding="utf-8")
 
-    first_change = fix_file(temp_file)
+    fix_file(temp_file)
     # The file in repo may already have been updated by the script, but fix_file should be stable:
     second_change = fix_file(temp_file)
     assert second_change is False

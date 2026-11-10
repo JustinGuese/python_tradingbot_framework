@@ -43,6 +43,7 @@ except ImportError:
             return -1.0 if 1 + total_return == 0 else None
         return float((1 + total_return) ** (1 / years) - 1)
 
+
 END_DATE = "2026-11-06"
 METHOD_NOTE = (
     "Note: the old column was total return, corrected 2026-11-09, "
