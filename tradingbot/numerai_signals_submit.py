@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -137,30 +138,34 @@ def check_credentials(
 
 
 def check_already_submitted(napi: Any, model_id: str, current_round: int | None) -> bool:
-    """Check if predictions have already been uploaded for the current round."""
+    """True if this model already uploaded today (UTC); Signals rounds are daily.
+
+    numerapi's submission_ids carries only insertedAt, not the round number.
+    """
     if current_round is None:
         return False
     try:
-        try:
-            submissions = napi.get_submission_filenames(round_num=current_round, model_id=model_id)
-        except TypeError:
-            submissions = napi.get_submission_filenames(model_id=model_id)
-
-        if submissions:
-            for sub in submissions:
-                if isinstance(sub, dict):
-                    sub_round = sub.get("round_num") or sub.get("round") or sub.get("roundNumber")
-                    if sub_round is not None:
-                        if sub_round == current_round:
-                            return True
-                    else:
-                        # Dict without round field returned under round_num query
-                        return True
-                else:
-                    return True
+        today = datetime.now(UTC).date()
+        for sub in napi.submission_ids(model_id) or []:
+            ts = sub.get("insertedAt") if isinstance(sub, dict) else None
+            if ts is not None and ts.date() == today:
+                return True
     except Exception as exc:
         logger.warning("Could not check submissions for round %s: %s", current_round, exc)
     return False
+
+
+def fetch_universe(napi: Any) -> list[str]:
+    """The live Signals universe. numerapi's ticker_universe() reads the retired
+    signals/v1.0 file, so read the current live.parquet directly."""
+    last: Exception | None = None
+    for version in ("v3.1", "v3.0"):
+        try:
+            path = napi.download_dataset(f"signals/{version}/live.parquet")
+            return pd.read_parquet(path).numerai_ticker.tolist()
+        except Exception as exc:
+            last = exc
+    raise RuntimeError(f"Numerai live universe unavailable: {last}")
 
 
 def submit_signals(
@@ -219,7 +224,7 @@ def submit_signals(
         return 0
 
     # Fetch live universe
-    universe = napi.ticker_universe()
+    universe = fetch_universe(napi)
     if not universe:
         logger.error("Numerai ticker universe is empty")
         return 1

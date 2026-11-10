@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -28,13 +30,22 @@ def synthetic_prices():
     return pd.DataFrame(price_matrix, index=dates, columns=tickers)
 
 
+def set_universe(api, tickers):
+    """Serve `tickers` as the live.parquet the adapter downloads."""
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "live.parquet")
+    pd.DataFrame({"numerai_ticker": list(tickers)}).to_parquet(path)
+    api.download_dataset.side_effect = lambda name, *a, **k: path
+
+
 @pytest.fixture
 def mock_napi():
     """Create a mock SignalsAPI instance."""
     api = MagicMock()
     api.get_models.return_value = {"datafortress": "uuid-datafortress-1234"}
     api.get_current_round.return_value = 500
-    api.get_submission_filenames.return_value = []
+    api.submission_ids.return_value = []
     api.upload_predictions.return_value = "sub_98765"
     return api
 
@@ -45,7 +56,7 @@ def test_maps_yfinance_to_numerai_and_drops_unmapped(synthetic_prices, mock_napi
     mappable = [f"STOCK{i:03d} US" for i in range(110)]
     unmappable = ["BADTICKER 999", "INVALID/XYZ FOO BAR", "NOEXCHANGE"]
     universe = mappable + unmappable
-    mock_napi.ticker_universe.return_value = universe
+    set_universe(mock_napi, universe)
 
     captured_df = None
 
@@ -101,7 +112,7 @@ def test_refuses_to_upload_under_100_tickers(synthetic_prices, mock_napi):
     """Test 2: Refuses to upload when fewer than 100 tickers are valid/mapped."""
     # Only 50 mappable tickers
     small_universe = [f"STOCK{i:03d} US" for i in range(50)]
-    mock_napi.ticker_universe.return_value = small_universe
+    set_universe(mock_napi, small_universe)
 
     with pytest.raises(ValueError, match="Refusing to upload under 100 tickers"):
         submit_signals(
@@ -117,10 +128,10 @@ def test_refuses_to_upload_under_100_tickers(synthetic_prices, mock_napi):
 
 def test_second_run_in_same_round_skips(synthetic_prices, mock_napi):
     """Test 3: Idempotent per round; a second run in the same round skips upload."""
-    mock_napi.ticker_universe.return_value = [f"STOCK{i:03d} US" for i in range(110)]
+    set_universe(mock_napi, [f"STOCK{i:03d} US" for i in range(110)])
 
     # Mock an existing submission for the current round (500)
-    mock_napi.get_submission_filenames.return_value = [{"filename": "predictions.csv", "round_num": 500}]
+    mock_napi.submission_ids.return_value = [{"filename": "predictions.csv", "insertedAt": datetime.now(UTC)}]
 
     ret = submit_signals(
         public_id="mock_pub",
