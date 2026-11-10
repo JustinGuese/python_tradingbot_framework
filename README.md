@@ -38,6 +38,71 @@ Rules of thumb:
 
 See [CLAUDE.md](CLAUDE.md) for the full method and the latest fleet snapshot.
 
+### Reading the numbers
+
+- **Beta** is how much of QQQ the bot carries. Beta 1.0 moves like QQQ, 0.25 moves a
+  quarter as much, 0 is independent. Return that comes from beta is not skill, because
+  you can buy QQQ for free.
+- **Alpha** is the return left over after removing `beta × QQQ` each day, annualised.
+  Alpha of +5% means the bot added about 5 points a year on top of its market exposure.
+  It can exceed the bot's own return when QQQ fell over the window: the beta part is then
+  negative and removing it adds back. On a short window the annualisation also inflates
+  it (a month of data scaled ×252).
+- **t-stat** is alpha divided by its noise, scaled by days observed. It says how sure we
+  are that alpha is not luck. **t ≥ 2** is the bar; below that it is unproven, and a big
+  alpha with a small t on a short window is usually luck.
+- **CAGR** below is each bot's own live return annualised. It is **not** reliable under
+  about 100 days, and a high CAGR can just be beta.
+
+### Live fleet snapshot (2026-11-07)
+
+Live paper bots with at least 4 weeks of history, sorted by CAGR, from the
+`bot_alpha_report` table. Alpha, t and beta are vs QQQ over each bot's own window. The
+57 `quantsmd_*` bots are left out (3 live days). **Nothing has t ≥ 2 on the positive side.**
+
+| Bot | Days | Return | CAGR | Alpha/yr | t | Beta | Max DD | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| AIHedgeFundBot | 305 | +23.7% | 29% | +0.9% | 0.03 | 0.72 | −15.3% | unproven |
+| XAUZenCarryBot | 88 | +5.7% | 26% | +32.8% | 0.88 | 0.20 | −2.2% | too short |
+| option_PMCCBot | 39 | +2.3% | 24% | +48.8% | 0.56 | 0.26 | −4.3% | too short |
+| XAUSyntheticMetalTreeBot | 330 | +19.4% | 22% | +5.1% | 0.17 | 0.32 | −12.5% | unproven |
+| TelegramSignalsBankBot | 241 | +13.8% | 22% | +10.1% | 0.45 | 0.22 | −7.3% | unproven |
+| XAUZenbotTreeBot | 330 | +16.3% | 18% | +25.6% | 1.32 | 0.04 | −4.5% | unproven |
+| EarningsInsiderTiltBot | 254 | +10.6% | 16% | +6.6% | 0.52 | 0.48 | −4.8% | unproven |
+| option_CollarBot | 39 | +1.2% | 12% | +17.6% | 0.36 | 0.06 | −3.5% | too short |
+| option_WheelBot | 39 | +1.1% | 11% | +23.1% | 0.76 | 0.13 | −1.9% | too short |
+| option_LeapCallBot | 42 | +1.2% | 11% | +45.2% | 0.53 | 0.30 | −5.9% | too short |
+| AdaptiveMeanReversionBot | 228 | +6.6% | 11% | −2.2% | −0.62 | 0.99 | −14.6% | QQQ clone |
+| TARegimeAdaptiveBot | 254 | +5.8% | 8% | +8.0% | 0.84 | 0.41 | −8.0% | unproven |
+| RegimeAdaptiveBot | 254 | +4.5% | 7% | +2.5% | 0.40 | 0.23 | −2.3% | unproven |
+| DeepSeekToolBot | 254 | +4.8% | 7% | −3.1% | −0.24 | 0.63 | −7.7% | unproven |
+| FearGreedBotQQQInverse | 330 | +5.8% | 6% | +2.1% | 0.32 | 0.94 | −14.7% | QQQ clone |
+| KronosTraderBot | 206 | +1.3% | 2% | −1.1% | −0.18 | 0.15 | −2.7% | unproven |
+| GoldenButterflyMomBot | 228 | +0.9% | 1% | −3.3% | −0.54 | 0.20 | −2.6% | unproven |
+| option_DispersionBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| InstitutionalFlowBot | 42 | 0.0% | 0% | +9.7% | 0.22 | 0.09 | −5.6% | too short |
+| SwingTitaniumBot | 333 | +0.4% | 0% | +0.9% | 0.09 | 0.01 | −4.4% | unproven |
+| option_CatalystCallBot | 42 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| option_CreditSpreadBot | 42 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| option_CrossVolBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| option_EarningsCalendarBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| option_IndexVolBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| option_MispricingScanBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| SharpePortfolioOptWeeklyBot | 330 | +0.3% | 0% | −7.8% | −1.12 | 0.13 | −6.8% | unproven |
+| EURUSDTreeBot | 333 | −3.5% | −4% | −8.8% | −2.35 | 0.01 | −4.6% | pause candidate |
+| option_MispricingBot | 39 | −0.5% | −4% | −9.2% | −1.24 | −0.05 | −0.8% | too short |
+| FearGreedBotQQQ | 333 | −6.8% | −7% | −18.0% | −1.56 | 0.75 | −23.0% | unproven |
+| StockNewsSentimentBot | 228 | −4.1% | −7% | −13.3% | −0.74 | 0.26 | −8.4% | unproven |
+| SqueezeMomentumBot | 206 | −6.6% | −11% | −16.1% | −1.18 | 0.06 | −8.0% | unproven |
+| SynthesizedHyperConvexityBot | 228 | −7.5% | −12% | −24.9% | −1.35 | 0.69 | −24.6% | unproven |
+| TARegimeMultiAssetBot | 46 | −1.7% | −13% | −3.7% | −0.56 | 0.11 | −2.1% | too short |
+| option_IronCondorBot | 42 | −1.8% | −14% | −10.6% | −0.78 | 0.04 | −2.4% | too short |
+| AdaptiveMeanReversionBTCBot | 87 | −3.9% | −15% | +12.6% | 0.23 | 1.05 | −12.5% | too short |
+| GptBasedStrategyBTCTabased | 330 | −16.5% | −18% | +6.9% | 0.31 | 0.12 | −18.9% | unproven |
+| RecursiveDecayHarvestBot | 228 | −18.9% | −29% | −65.3% | −2.33 | 2.75 | −45.9% | pause candidate |
+| TSMOMTrendBot | 46 | −5.8% | −38% | −22.1% | −1.38 | 0.25 | −5.8% | too short |
+| option_EarningsCrushBot | 39 | −6.1% | −44% | −38.3% | −1.15 | 0.16 | −6.1% | too short |
+
 ## 🛠 System Architecture
 
 The system is designed to be lightweight and stateless. Each "Bot" is a containerized instance triggered by a schedule.
