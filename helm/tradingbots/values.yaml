@@ -816,10 +816,17 @@ liveTrade:
     portfolioFraction: "0.5" # trade with half of the paper account's equity
 
   # eToro — requires ETORO_API_KEY and ETORO_USER_KEY in tradingbot-secrets.
+  # Runs the same blend as the C2 strategy (TARegimeMultiAssetBot 0.39, TSMOMTrendBot 0.24,
+  # GoldenButterflyMomBot 0.37).
+  # Asset substitutions: DBC is substituted by PDBC, FXE/FXA/FXB by long FX pairs.
+  # FXF/FXY are not tradeable on eToro so their weight is held in SHV.
+  # Keep as DEMO account (demo: true); real money is demo: false plus real-account keys.
   etoro:
-    enabled: false
+    enabled: true
     schedule: "30 21 * * 1-5" # 9:30 PM UTC
     demo: true
+    dryRun: "false"
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
   # Darwinex — requires DARWINEX_USERNAME and DARWINEX_PASSWORD in tradingbot-secrets.
@@ -873,6 +880,17 @@ liveTrade:
     portfolioFraction: "0.95"
     dryRun: "true" # ALWAYS start with true
 
+  # MetaTrader 5 / MQL5 signal publisher.
+  # Connects via mt5linux RPyC bridge to the internal MT5 bridge service.
+  # MT5 rejects market orders while the market is closed so this runs next session
+  # in US hours in both EST and EDT (it trades the targets the blend computed the night before).
+  mt5Mql5:
+    enabled: true
+    schedule: "0 15 * * 1-5"
+    demo: true
+    dryRun: "false"
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+
 # telegram monitor
 telegramMonitor:
   enabled: true # Set to true to deploy the Telegram monitor CronJob
@@ -898,3 +916,20 @@ eventLogger:
     limits:
       cpu: 500m
       memory: 512Mi
+
+# MetaTrader 5 Bridge: self-hosted Wine + MetaTrader 5 + mt5linux (RPyC server).
+# Uses a pinned third-party image (gmag11/metatrader5_vnc:2.3).
+# RPyC (port 8001) is only reachable by pods labelled app.kubernetes.io/component=livetrade (enforced by NetworkPolicy).
+mt5Bridge:
+  enabled: true
+  image: "gmag11/metatrader5_vnc:2.3"
+  port: 8001
+  storage: "5Gi"
+
+# Numerai Signals tournament submission.
+# Submits unstaked signals (12-1 momentum). The signal is unproven; staking NMR is
+# a separate decision.
+numerai:
+  enabled: true
+  schedule: "0 22 * * 1-5"
+

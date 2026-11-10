@@ -430,12 +430,12 @@ QQQ and t-stat, not return:
   first to clear t >= 2 with both halves positive (t 3.08, beta 0.16), still a watch-list candidate. Hysteresis,
   rank buffers, currency-ETF carry, a pairs basket and a 12-bot order ensemble did not help.
 
-## 📈 Live Trading (Collective2, Interactive Brokers, eToro & Darwinex)
+## 📈 Live Trading (Collective2, Interactive Brokers, eToro, Darwinex, MT5/MQL5 & Numerai)
 
 > [!WARNING]
 > **DISCLAIMER:** This software is for educational and research purposes only. Trading involves significant risk of loss and is not suitable for all investors. Use of "Live Trading" features is strictly at your own risk. The authors and contributors are not liable for any financial losses, damages, or unintended trades incurred. Always test strategies thoroughly in a paper-trading environment before deploying real capital.
 
-The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers: **Collective2** (World API v4), **Interactive Brokers** (IB Gateway socket API via `ib_async`), **eToro** (Public REST API), and **Darwinex** (DXtrade API).
+The framework can mirror your paper-bot portfolios to a live brokerage account. Supported brokers and venues: **Collective2** (World API v4), **Interactive Brokers** (IB Gateway socket API via `ib_async`), **eToro** (Public REST API), **Darwinex** (DXtrade API), **MetaTrader 5 / MQL5** (RPyC bridge to MT5 terminal for MQL5 signal publishing), and **Numerai Signals** (tournament signal submissions).
 
 ### 1. Configure Environment
 
