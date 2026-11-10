@@ -44,6 +44,10 @@ class EtoroBroker(LiveBroker):
 
         # Caches
         self._instrument_cache: dict[str, str] = {}  # ticker -> instrument_id
+        # yfinance tickers eToro's search definitively returned nothing for. Only a clean
+        # empty result lands here, never an API error, so is_tradeable() can tell "not
+        # listed on eToro" (drop the weight to cash) from "lookup failed" (abort the sync).
+        self._unlisted: set[str] = set()
         # instrument_id -> [(positionId, units), ...]. eToro closes whole lots,
         # so a sized SELL needs every lot, not just the most recent one.
         self._position_lots: dict[str, list[tuple[str, float]]] = {}
@@ -367,6 +371,20 @@ class EtoroBroker(LiveBroker):
 
         return cancelled
 
+    def is_tradeable(self, yf_symbol: str) -> bool:
+        """False only when eToro definitively does not list the symbol (e.g. DBC and the
+        FX* currency ETFs, found by `coverage --broker etoro` on 2026-11-10), so its weight
+        stays in cash instead of aborting the whole sync under strictMapping.
+
+        A failed lookup is NOT "not listed": it raises, because treating a transient search
+        error as unlisted would silently turn a held position into cash.
+        """
+        if self.map_symbol(yf_symbol):
+            return True
+        if yf_symbol in self._unlisted:
+            return False
+        raise RuntimeError(f"eToro instrument lookup failed for {yf_symbol}; not treating it as unlisted")
+
     def map_symbol(self, yf_symbol: str) -> dict | None:
         """
         Translate yfinance symbol to eToro instrument ID.
@@ -401,6 +419,7 @@ class EtoroBroker(LiveBroker):
                 items = data.get("items") or data.get("results") or []
                 if not items:
                     logger.warning(f"No eToro instrument found for ticker: {ticker}")
+                    self._unlisted.add(yf_symbol)
                     return None
 
                 # Prefer exact match on internalSymbolFull, else first result

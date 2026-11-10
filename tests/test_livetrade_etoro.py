@@ -335,3 +335,18 @@ def test_etoro_cancel_open_orders_scans_stock_orders(broker):
         mock_delete.return_value = MagicMock(status_code=200, text="{}", json=lambda: {})
         assert broker.cancel_open_orders() == 1
         assert mock_delete.call_args.args[0].endswith("/api/v2/trading/execution/demo/orders/301")
+
+
+def test_etoro_is_tradeable_drops_unlisted_but_aborts_on_lookup_error(broker):
+    """An empty search = not listed (weight goes to cash). A search error must raise, never
+    be mistaken for "unlisted" (that would silently sell a held ETF into cash)."""
+    with patch.object(broker.client, "get") as mock_get:
+        mock_get.return_value = _response({"items": [{"instrumentId": 3000, "internalSymbolFull": "SPY"}]})
+        assert broker.is_tradeable("SPY") is True
+
+        mock_get.return_value = _response({"items": []})
+        assert broker.is_tradeable("DBC") is False
+
+        mock_get.side_effect = RuntimeError("eToro 503")
+        with pytest.raises(RuntimeError, match="lookup failed"):
+            broker.is_tradeable("TLT")
