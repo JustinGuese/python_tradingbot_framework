@@ -144,10 +144,14 @@ def _build_mt5_mql5() -> LiveBroker:
     logger.info(f"Initializing MT5 MQL5 copier for {login} on {server} via bridge {host}:{port} (Demo: {is_sandbox})")
     client = connect_rpyc(host=host, port=port)
 
+    # initialize() with credentials is the canonical MT5 call: it attaches to the running
+    # terminal AND logs in. login() alone fails with "IPC initialize failed" because the
+    # Python API has not been attached to the terminal yet.
     try:
-        ok = client.login(login=login_int, password=password, server=server)
+        ok = client.initialize(login=login_int, password=password, server=server)
     except Exception:
-        raise ConfigError(f"Failed to log in to MT5 server '{server}' with login {login}") from None
+        # Deliberately not chained: the exception text could echo the password.
+        raise ConfigError(f"Failed to initialize MT5 for server '{server}' with login {login}") from None
 
     if not ok:
         try:

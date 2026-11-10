@@ -304,7 +304,7 @@ def test_mt5_mql5_spec_builds_mt5_broker(monkeypatch):
     monkeypatch.setenv("MT5_MQL5_DEMO", "true")
 
     client_mock = MagicMock()
-    client_mock.login.return_value = True
+    client_mock.initialize.return_value = True
 
     connect_mock = MagicMock(return_value=client_mock)
     monkeypatch.setattr("tradingbot.livetrade.mt5.client.connect_rpyc", connect_mock)
@@ -317,5 +317,28 @@ def test_mt5_mql5_spec_builds_mt5_broker(monkeypatch):
     assert broker.server == "MetaQuotes-Demo"
     assert broker.is_sandbox is True
     connect_mock.assert_called_once_with(host="mt5-bridge", port=8001)
-    client_mock.login.assert_called_once_with(login=12345678, password="test-pass", server="MetaQuotes-Demo")
+    # initialize() with credentials attaches to the terminal and logs in; a bare login()
+    # would fail against the real bridge ("IPC initialize failed").
+    client_mock.initialize.assert_called_once_with(login=12345678, password="test-pass", server="MetaQuotes-Demo")
+    client_mock.login.assert_not_called()
+
+
+def test_mt5_mql5_failed_login_raises_config_error_without_leaking_the_password(monkeypatch):
+    monkeypatch.setenv("MT5_MQL5_LOGIN", "12345678")
+    monkeypatch.setenv("MT5_MQL5_PASSWORD", "s3cret-pw")
+    monkeypatch.setenv("MT5_MQL5_SERVER", "MetaQuotes-Demo")
+
+    for failure in ("returns_false", "raises"):
+        client_mock = MagicMock()
+        client_mock.last_error.return_value = (-6, "Authorization failed")
+        if failure == "returns_false":
+            client_mock.initialize.return_value = False
+        else:
+            client_mock.initialize.side_effect = RuntimeError("bad credentials s3cret-pw")
+        monkeypatch.setattr("tradingbot.livetrade.mt5.client.connect_rpyc", MagicMock(return_value=client_mock))
+
+        with pytest.raises(ConfigError) as exc:
+            REGISTRY["mt5_mql5"].build()
+        assert "s3cret-pw" not in str(exc.value)
+        assert exc.value.__cause__ is None
 
