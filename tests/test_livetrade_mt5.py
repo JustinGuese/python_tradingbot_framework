@@ -1,13 +1,13 @@
 """Unit tests for MT5Broker using FakeMT5."""
 
 from unittest.mock import MagicMock
+
 import pytest
 
 from tests.mt5_fake import FakeMT5
 from tradingbot.livetrade.mt5.broker import MT5Broker
 from tradingbot.livetrade.mt5.client import (
     ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
-    ACCOUNT_MARGIN_MODE_RETAIL_NETTING,
 )
 from tradingbot.livetrade.registry import ConfigError
 
@@ -153,17 +153,19 @@ def test_cancel_open_orders_and_cash_proxy():
 
     # Pending order cancellation
     from tradingbot.livetrade.mt5.client import TRADE_ACTION_PENDING
-    fake.order_send({
-        "action": TRADE_ACTION_PENDING,
-        "symbol": "SHV",
-        "volume": 1.0,
-        "price": 110.0,
-    })
+
+    fake.order_send(
+        {
+            "action": TRADE_ACTION_PENDING,
+            "symbol": "SHV",
+            "volume": 1.0,
+            "price": 110.0,
+        }
+    )
     assert len(fake.orders_get() or ()) == 1
     cancelled = broker_with_shv.cancel_open_orders()
     assert cancelled == 1
     assert len(fake.orders_get() or ()) == 0
-
 
 
 def test_contract_size_other_than_one_is_refused():

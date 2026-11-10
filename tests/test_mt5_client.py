@@ -49,12 +49,14 @@ def test_fake_nets_positions():
     fake = FakeMT5(margin_mode=ACCOUNT_MARGIN_MODE_RETAIL_NETTING)
 
     # First buy: opens net long
-    res1 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 1.0,
-        "type": ORDER_TYPE_BUY,
-    })
+    res1 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 1.0,
+            "type": ORDER_TYPE_BUY,
+        }
+    )
     assert res1.retcode == TRADE_RETCODE_DONE
     pos = fake.positions_get(symbol="SPY")
     assert pos is not None
@@ -63,12 +65,14 @@ def test_fake_nets_positions():
     first_ticket = pos[0].ticket
 
     # Second buy: increases existing net position
-    res2 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 2.0,
-        "type": ORDER_TYPE_BUY,
-    })
+    res2 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 2.0,
+            "type": ORDER_TYPE_BUY,
+        }
+    )
     assert res2.retcode == TRADE_RETCODE_DONE
     pos = fake.positions_get(symbol="SPY")
     assert pos is not None
@@ -77,12 +81,14 @@ def test_fake_nets_positions():
     assert pos[0].volume == 3.0
 
     # Sell 1.0: reduces net position
-    res3 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 1.0,
-        "type": ORDER_TYPE_SELL,
-    })
+    res3 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 1.0,
+            "type": ORDER_TYPE_SELL,
+        }
+    )
     assert res3.retcode == TRADE_RETCODE_DONE
     pos = fake.positions_get(symbol="SPY")
     assert pos is not None
@@ -90,12 +96,14 @@ def test_fake_nets_positions():
     assert pos[0].volume == 2.0
 
     # Sell 2.0: closes net position
-    res4 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 2.0,
-        "type": ORDER_TYPE_SELL,
-    })
+    res4 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 2.0,
+            "type": ORDER_TYPE_SELL,
+        }
+    )
     assert res4.retcode == TRADE_RETCODE_DONE
     assert fake.positions_get(symbol="SPY") == ()
 
@@ -105,18 +113,22 @@ def test_fake_hedges_positions_and_prevents_overshoot():
     fake = FakeMT5(margin_mode=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
 
     # Two separate buys create two tickets
-    res1 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 1.0,
-        "type": ORDER_TYPE_BUY,
-    })
-    res2 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 2.0,
-        "type": ORDER_TYPE_BUY,
-    })
+    res1 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 1.0,
+            "type": ORDER_TYPE_BUY,
+        }
+    )
+    res2 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 2.0,
+            "type": ORDER_TYPE_BUY,
+        }
+    )
     assert res1.retcode == TRADE_RETCODE_DONE
     assert res2.retcode == TRADE_RETCODE_DONE
 
@@ -127,13 +139,15 @@ def test_fake_hedges_positions_and_prevents_overshoot():
     assert ticket1 != ticket2
 
     # Attempting to oversell ticket2 by volume > 2.0 is rejected
-    res_over = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 2.5,
-        "type": ORDER_TYPE_SELL,
-        "position": ticket2,
-    })
+    res_over = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 2.5,
+            "type": ORDER_TYPE_SELL,
+            "position": ticket2,
+        }
+    )
     assert res_over.retcode == TRADE_RETCODE_INVALID_VOLUME
     # Ticket2 remains unchanged
     pos2_lookup = fake.positions_get(ticket=ticket2)
@@ -141,13 +155,15 @@ def test_fake_hedges_positions_and_prevents_overshoot():
     assert pos2_lookup[0].volume == 2.0
 
     # Close ticket1 exactly
-    res_close1 = fake.order_send({
-        "action": TRADE_ACTION_DEAL,
-        "symbol": "SPY",
-        "volume": 1.0,
-        "type": ORDER_TYPE_SELL,
-        "position": ticket1,
-    })
+    res_close1 = fake.order_send(
+        {
+            "action": TRADE_ACTION_DEAL,
+            "symbol": "SPY",
+            "volume": 1.0,
+            "type": ORDER_TYPE_SELL,
+            "position": ticket1,
+        }
+    )
     assert res_close1.retcode == TRADE_RETCODE_DONE
     positions_after = fake.positions_get(symbol="SPY")
     assert positions_after is not None
@@ -187,6 +203,7 @@ def test_connect_rpyc_lazy_import_and_stub():
 
         # Stubbing import to fail
         import builtins
+
         real_import = builtins.__import__
 
         def fake_import(name, *args, **kwargs):

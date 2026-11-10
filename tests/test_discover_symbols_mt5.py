@@ -1,11 +1,9 @@
 """Tests for discover_symbols with MT5 (--broker mt5_mql5)."""
 
 import json
-from pathlib import Path
 
 import pytest
 
-from tradingbot.livetrade import discover_symbols
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.discover_symbols import SymbolDiscoverer, main
 from tradingbot.livetrade.registry import REGISTRY, BrokerSpec
@@ -118,7 +116,9 @@ def test_discover_symbols_mt5_resolves_and_finds_suffixed_candidates(monkeypatch
     assert any(c["symbol"] == "QQQ.US" for c in candidates)
 
 
-def test_discover_symbols_mt5_apply_writes_under_key_without_touching_others(monkeypatch, tmp_path, stub_spec, fake_broker):
+def test_discover_symbols_mt5_apply_writes_under_key_without_touching_others(
+    monkeypatch, tmp_path, stub_spec, fake_broker
+):
     """--broker mt5_mql5 --apply writes mapping under 'mt5_mql5' preserving other brokers' entries."""
     monkeypatch.setitem(REGISTRY, "mt5_mql5", stub_spec)
 

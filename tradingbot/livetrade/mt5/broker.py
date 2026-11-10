@@ -117,9 +117,7 @@ class MT5Broker(LiveBroker):
 
         from tradingbot.livetrade.registry import ConfigError
 
-        raise ConfigError(
-            f"Unsupported MT5 account currency: '{currency}'. Only USD and EUR are supported."
-        )
+        raise ConfigError(f"Unsupported MT5 account currency: '{currency}'. Only USD and EUR are supported.")
 
     def get_cash(self) -> float:
         """Return the current cash balance in USD."""
@@ -223,15 +221,11 @@ class MT5Broker(LiveBroker):
             vol = round(steps * vol_step, 8)
 
             if vol < vol_min:
-                logger.warning(
-                    f"Order volume {vol} below volume_min {vol_min} for {broker_symbol}; skipping."
-                )
+                logger.warning(f"Order volume {vol} below volume_min {vol_min} for {broker_symbol}; skipping.")
                 return
 
             if vol > vol_max:
-                logger.warning(
-                    f"Order volume {vol} exceeds volume_max {vol_max} for {broker_symbol}; clamping to max."
-                )
+                logger.warning(f"Order volume {vol} exceeds volume_max {vol_max} for {broker_symbol}; clamping to max.")
                 vol = vol_max
 
             tick = self.client.symbol_info_tick(broker_symbol)
@@ -256,11 +250,7 @@ class MT5Broker(LiveBroker):
 
         if side == "SELL":
             raw_positions = self.client.positions_get(symbol=broker_symbol)
-            long_positions = [
-                p
-                for p in (raw_positions or ())
-                if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY
-            ]
+            long_positions = [p for p in (raw_positions or ()) if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY]
             total_open_vol = sum(float(getattr(p, "volume", 0.0)) for p in long_positions)
 
             if total_open_vol <= 1e-8:
@@ -271,9 +261,7 @@ class MT5Broker(LiveBroker):
             requested_vol = round(steps * vol_step, 8)
 
             if requested_vol < vol_min:
-                logger.warning(
-                    f"SELL volume {requested_vol} below volume_min {vol_min} for {broker_symbol}; skipping."
-                )
+                logger.warning(f"SELL volume {requested_vol} below volume_min {vol_min} for {broker_symbol}; skipping.")
                 return
 
             if requested_vol > total_open_vol:
@@ -382,9 +370,7 @@ class MT5Broker(LiveBroker):
             return None
 
         available_upper = {
-            getattr(s, "name", "").upper(): getattr(s, "name", "")
-            for s in symbols
-            if getattr(s, "name", "")
+            getattr(s, "name", "").upper(): getattr(s, "name", "") for s in symbols if getattr(s, "name", "")
         }
 
         # 1. Exact bare ticker match
@@ -394,17 +380,13 @@ class MT5Broker(LiveBroker):
         # 2. Suffixed match (.US, .P, .O, .N)
         suffixes = [".US", ".P", ".O", ".N"]
         matches = [
-            available_upper[f"{ticker}{sfx}".upper()]
-            for sfx in suffixes
-            if f"{ticker}{sfx}".upper() in available_upper
+            available_upper[f"{ticker}{sfx}".upper()] for sfx in suffixes if f"{ticker}{sfx}".upper() in available_upper
         ]
 
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            logger.warning(
-                f"Ambiguous symbol match for {yf_symbol}: {matches}; refusing to guess."
-            )
+            logger.warning(f"Ambiguous symbol match for {yf_symbol}: {matches}; refusing to guess.")
             return None
 
         return None
@@ -465,9 +447,7 @@ class MT5Broker(LiveBroker):
                     {
                         "symbol": name,
                         "description": getattr(s, "description", name) or name,
-                        "type": "forex"
-                        if "USD" in name_upper and len(name_upper) == 6
-                        else "stock",
+                        "type": "forex" if "USD" in name_upper and len(name_upper) == 6 else "stock",
                         "exchange": getattr(s, "exchange", ""),
                         "score": score,
                     }

@@ -6,6 +6,7 @@ Collective2 blend universe (TARegimeMultiAssetBot, TSMOMTrendBot, GoldenButterfl
 """
 
 import argparse
+import contextlib
 import logging
 import sys
 from collections.abc import Iterable
@@ -28,10 +29,10 @@ def blend_universe() -> list[str]:
     Reads universe constants from the bot modules and tradingbot.utils.universes
     rather than hardcoding a list.
     """
+    import tradingbot.utils.universes as universes_module
     from tradingbot.goldenbutterflymombot import UNIVERSE as gb_universe
     from tradingbot.taregimemultiassetbot import UNIVERSE as ta_universe
     from tradingbot.tsmomtrendbot import UNIVERSE as tsmom_universe
-    import tradingbot.utils.universes as universes_module
 
     tickers: set[str] = set()
     tickers.update(ta_universe)
@@ -75,11 +76,7 @@ def check_coverage(broker: LiveBroker, tickers: Iterable[str] | None = None) -> 
             continue
 
         meta = broker.map_symbol(ticker)
-        mapped = (
-            meta.get("symbol")
-            if isinstance(meta, dict)
-            else (meta if isinstance(meta, str) else None)
-        )
+        mapped = meta.get("symbol") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
 
         if meta and mapped and not str(mapped).startswith("^"):
             resolved[ticker] = str(mapped)
@@ -131,9 +128,7 @@ def format_coverage_table(broker_name: str, results: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Check symbol coverage for a broker against the blend universe"
-    )
+    parser = argparse.ArgumentParser(description="Check symbol coverage for a broker against the blend universe")
     parser.add_argument(
         "--broker",
         required=True,
@@ -169,10 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Coverage check failed for '%s': %s", broker_key, e)
         return 1
     finally:
-        try:
+        with contextlib.suppress(Exception):
             broker.disconnect()
-        except Exception:
-            pass
 
     print(format_coverage_table(broker_key, results))
 

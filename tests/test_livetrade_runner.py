@@ -341,4 +341,3 @@ def test_mt5_mql5_failed_login_raises_config_error_without_leaking_the_password(
             REGISTRY["mt5_mql5"].build()
         assert "s3cret-pw" not in str(exc.value)
         assert exc.value.__cause__ is None
-

@@ -355,14 +355,13 @@ class FakeMT5:
             pos_id = req.get("position")
 
             sym_info = self._symbols.get(symbol)
-            if sym_info:
-                if volume < sym_info.volume_min or volume > sym_info.volume_max:
-                    self._last_error = (TRADE_RETCODE_INVALID_VOLUME, "Invalid volume")
-                    return OrderSendResult(
-                        retcode=TRADE_RETCODE_INVALID_VOLUME,
-                        comment="Invalid volume",
-                        request=request,
-                    )
+            if sym_info and (volume < sym_info.volume_min or volume > sym_info.volume_max):
+                self._last_error = (TRADE_RETCODE_INVALID_VOLUME, "Invalid volume")
+                return OrderSendResult(
+                    retcode=TRADE_RETCODE_INVALID_VOLUME,
+                    comment="Invalid volume",
+                    request=request,
+                )
 
             # Processing SELL
             if order_type == ORDER_TYPE_SELL:
@@ -444,9 +443,7 @@ class FakeMT5:
                     else:
                         deal_ticket = self._next_ticket()
                         order_ticket = self._next_ticket()
-                        self._positions[net_pos.ticket] = net_pos._replace(
-                            volume=round(net_pos.volume + volume, 8)
-                        )
+                        self._positions[net_pos.ticket] = net_pos._replace(volume=round(net_pos.volume + volume, 8))
                         return OrderSendResult(
                             retcode=TRADE_RETCODE_DONE,
                             deal=deal_ticket,
@@ -499,9 +496,7 @@ class FakeMT5:
                     if net_pos.type == ORDER_TYPE_BUY:
                         deal_ticket = self._next_ticket()
                         order_ticket = self._next_ticket()
-                        self._positions[net_pos.ticket] = net_pos._replace(
-                            volume=round(net_pos.volume + volume, 8)
-                        )
+                        self._positions[net_pos.ticket] = net_pos._replace(volume=round(net_pos.volume + volume, 8))
                         return OrderSendResult(
                             retcode=TRADE_RETCODE_DONE,
                             deal=deal_ticket,

@@ -205,8 +205,7 @@ def connect_rpyc(host: str = "localhost", port: int = 18812) -> MT5Client:
         from mt5linux import MetaTrader5
     except ImportError as exc:
         raise ImportError(
-            "mt5linux is required to connect to MT5 over RPyC. "
-            "Please install mt5linux and rpyc."
+            "mt5linux is required to connect to MT5 over RPyC. Please install mt5linux and rpyc."
         ) from exc
 
     return MetaTrader5(host=host, port=port)

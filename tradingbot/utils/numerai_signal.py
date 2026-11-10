@@ -9,8 +9,10 @@ live validation relies on Numerai's tournament scoring.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -68,10 +70,8 @@ def _normalize_prices(prices: pd.DataFrame) -> pd.DataFrame:
 
     # Convert index to DatetimeIndex if possible
     if not isinstance(df.index, pd.DatetimeIndex):
-        try:
+        with contextlib.suppress(Exception):
             df.index = pd.to_datetime(df.index)
-        except Exception:
-            pass
 
     # Sort ascending and remove duplicate timestamps
     df = df.sort_index()
@@ -117,27 +117,22 @@ def build_signal(
     """
     universe_list = list(universe)
     if not universe_list:
-        raise ValueError(
-            f"Fewer than {min_valid} tickers have valid values (universe is empty)"
-        )
+        raise ValueError(f"Fewer than {min_valid} tickers have valid values (universe is empty)")
 
     df = _normalize_prices(prices)
 
     # Filter by asof cutoff to prevent lookahead
     if asof is not None and not df.empty:
-        if isinstance(asof, datetime.date) and not isinstance(asof, datetime.datetime):
-            asof_dt = pd.Timestamp(asof).replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif isinstance(asof, str) and len(asof.strip()) <= 10:
+        if (isinstance(asof, datetime.date) and not isinstance(asof, datetime.datetime)) or (
+            isinstance(asof, str) and len(asof.strip()) <= 10
+        ):
             asof_dt = pd.Timestamp(asof).replace(hour=23, minute=59, second=59, microsecond=999999)
         else:
             asof_dt = pd.to_datetime(asof)
 
         if isinstance(df.index, pd.DatetimeIndex):
             if df.index.tz is not None:
-                if asof_dt.tz is None:
-                    asof_dt = asof_dt.tz_localize(df.index.tz)
-                else:
-                    asof_dt = asof_dt.tz_convert(df.index.tz)
+                asof_dt = asof_dt.tz_localize(df.index.tz) if asof_dt.tz is None else asof_dt.tz_convert(df.index.tz)
             else:
                 if asof_dt.tz is not None:
                     asof_dt = asof_dt.tz_localize(None)
@@ -151,8 +146,7 @@ def build_signal(
 
     if len(df) < lookback_bars:
         raise ValueError(
-            f"Fewer than {min_valid} tickers have valid values "
-            f"(history length {len(df)} < lookback {lookback_bars})"
+            f"Fewer than {min_valid} tickers have valid values (history length {len(df)} < lookback {lookback_bars})"
         )
 
     # Compute 12-1 momentum
@@ -167,9 +161,7 @@ def build_signal(
     # Evaluate tickers that appear in both universe and prices
     eval_cols = [t for t in universe_list if t in df.columns]
     if not eval_cols:
-        raise ValueError(
-            f"Fewer than {min_valid} tickers have valid values (0 matching columns in price data)"
-        )
+        raise ValueError(f"Fewer than {min_valid} tickers have valid values (0 matching columns in price data)")
 
     sub_start = pd.to_numeric(p_start[eval_cols], errors="coerce")
     sub_end = pd.to_numeric(p_end[eval_cols], errors="coerce")
@@ -184,9 +176,7 @@ def build_signal(
 
     n_valid = len(valid_momentum)
     if n_valid < min_valid:
-        raise ValueError(
-            f"Fewer than {min_valid} tickers have valid values (found {n_valid})"
-        )
+        raise ValueError(f"Fewer than {min_valid} tickers have valid values (found {n_valid})")
 
     # Cross-sectional rank scaled strictly inside (0, 1)
     # Using (rank - 0.5) / n_valid ensures:

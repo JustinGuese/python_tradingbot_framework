@@ -2,18 +2,15 @@
 Unit tests for livetrade symbol coverage tool (coverage.py).
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.coverage import (
     blend_universe,
     check_coverage,
-    format_coverage_table,
     main,
 )
-from tradingbot.livetrade.registry import BrokerSpec, ConfigError
+from tradingbot.livetrade.registry import BrokerSpec
 
 
 class DummyBroker(LiveBroker):
@@ -150,7 +147,7 @@ def test_coverage_cli_exit_codes_and_security(capsys):
     # 4. All resolved -> exit 0
     all_tickers = blend_universe()
     broker_full = DummyBroker(
-        tradeable_map={t: True for t in all_tickers},
+        tradeable_map=dict.fromkeys(all_tickers, True),
         symbol_map={t: {"symbol": t} for t in all_tickers},
     )
     mock_spec_full = BrokerSpec(

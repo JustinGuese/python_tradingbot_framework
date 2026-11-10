@@ -12,7 +12,8 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -20,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Bloomberg country / exchange code to yfinance ticker suffix mapping
 BLOOMBERG_TO_YAHOO_EXCHANGE: dict[str, str] = {
-    "US": "",       # AAPL US -> AAPL
-    "LN": ".L",     # BP/ LN -> BP.L
-    "GY": ".DE",    # BMW GY -> BMW.DE
+    "US": "",  # AAPL US -> AAPL
+    "LN": ".L",  # BP/ LN -> BP.L
+    "GY": ".DE",  # BMW GY -> BMW.DE
     "GR": ".DE",
     "FP": ".PA",
     "PA": ".PA",
@@ -97,10 +98,12 @@ def map_signals_to_numerai(
     records = []
     for yf_ticker, val in signals.items():
         if yf_ticker in mapping:
-            records.append({
-                "numerai_ticker": mapping[yf_ticker],
-                "signal": float(val),
-            })
+            records.append(
+                {
+                    "numerai_ticker": mapping[yf_ticker],
+                    "signal": float(val),
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -188,6 +191,7 @@ def submit_signals(
     if napi is None:
         # Lazy import of numerapi inside function
         from numerapi import SignalsAPI
+
         napi = SignalsAPI(public_id=pub, secret_key=sec)
 
     # Resolve model_id
@@ -229,19 +233,19 @@ def submit_signals(
             min_tickers,
             len(yf_tickers),
         )
-        raise ValueError(
-            f"Refusing to upload under {min_tickers} tickers (found {len(yf_tickers)})"
-        )
+        raise ValueError(f"Refusing to upload under {min_tickers} tickers (found {len(yf_tickers)})")
 
     # Fetch prices
     if prices is None:
         if data_service is None:
             from tradingbot.utils.data_service import DataService
+
             data_service = DataService()
         prices = data_service.get_yf_data_multiple(yf_tickers, interval="1d", period="2y")
 
     # Build signal using N0 pure function
     from tradingbot.utils.numerai_signal import build_signal
+
     signals = build_signal(prices, universe=yf_tickers, asof=asof, min_valid=min_tickers)
 
     # Map yfinance -> Numerai tickers and drop unmapped
@@ -252,9 +256,7 @@ def submit_signals(
             min_tickers,
             len(predictions_df),
         )
-        raise ValueError(
-            f"Refusing to upload under {min_tickers} tickers (found {len(predictions_df)})"
-        )
+        raise ValueError(f"Refusing to upload under {min_tickers} tickers (found {len(predictions_df)})")
 
     # Write CSV and upload
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:

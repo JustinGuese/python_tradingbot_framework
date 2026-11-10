@@ -120,9 +120,7 @@ def test_second_run_in_same_round_skips(synthetic_prices, mock_napi):
     mock_napi.ticker_universe.return_value = [f"STOCK{i:03d} US" for i in range(110)]
 
     # Mock an existing submission for the current round (500)
-    mock_napi.get_submission_filenames.return_value = [
-        {"filename": "predictions.csv", "round_num": 500}
-    ]
+    mock_napi.get_submission_filenames.return_value = [{"filename": "predictions.csv", "round_num": 500}]
 
     ret = submit_signals(
         public_id="mock_pub",
