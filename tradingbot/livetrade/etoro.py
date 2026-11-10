@@ -75,6 +75,24 @@ class EtoroBroker(LiveBroker):
         response.raise_for_status()
         return response.json()
 
+    def _delete(self, endpoint: str, params: dict | None = None) -> dict:
+        url = f"{self.BASE_URL}/{endpoint}"
+        response = self.client.delete(url, params=params, headers=self._get_headers())
+        if response.status_code >= 400:
+            logger.error(f"eToro DELETE {endpoint} -> {response.status_code}: {getattr(response, 'text', '')}")
+            response.raise_for_status()
+            raise httpx.HTTPStatusError(
+                f"Client error {response.status_code}",
+                request=getattr(response, "request", None),
+                response=response,
+            )
+        if response.status_code == 204 or not getattr(response, "text", ""):
+            return {}
+        try:
+            return response.json()
+        except Exception:
+            return {}
+
     def _portfolio_endpoint(self) -> str:
         return f"api/v1/trading/info/{self._env}portfolio"
 
@@ -255,6 +273,90 @@ class EtoroBroker(LiveBroker):
                     self._post(endpoint, {"InstrumentId": int(broker_symbol)})
                 except Exception as e:
                     logger.error(f"eToro SELL order failed for position {pos_id} ({units} units): {e}")
+
+    def cancel_open_orders(self) -> int:
+        """
+        Cancel any orders this broker session has previously submitted that
+        are still open/pending. Lists pending open and close orders from the
+        portfolio, then cancels each via the v2 execution endpoint.
+
+        Returns:
+            int: Count of successfully cancelled orders.
+
+        Raises:
+            Exception: If listing pending orders fails, propagates the error
+                so the copier aborts rather than submitting on top of unknown
+                working orders.
+        """
+        p = self._portfolio()
+        order_ids: list[str] = []
+        seen = set()
+
+        def _collect(item: object) -> None:
+            oid = None
+            if isinstance(item, dict):
+                oid = item.get("orderID") or item.get("orderId") or item.get("OrderID") or item.get("id")
+            elif isinstance(item, (int, str)):
+                oid = item
+            if oid is not None:
+                s_oid = str(oid).strip()
+                if s_oid and s_oid not in seen:
+                    seen.add(s_oid)
+                    order_ids.append(s_oid)
+
+        # Pending orders in clientPortfolio can appear under various keys
+        for key in (
+            "orders",
+            "ordersForOpen",
+            "ordersForClose",
+            "ordersForCloseMultiple",
+            "openOrders",
+            "closeOrders",
+            "entryOrders",
+            "exitOrders",
+        ):
+            for item in p.get(key, []) or []:
+                _collect(item)
+
+        # Positions can also hold attached pending orders (ordersForOpen, ordersForClose)
+        for pos in p.get("positions", []) or []:
+            if isinstance(pos, dict):
+                for key in ("ordersForOpen", "ordersForClose", "orders"):
+                    for item in pos.get(key, []) or []:
+                        _collect(item)
+
+        cancelled = 0
+        for order_id in order_ids:
+            endpoint = f"api/v2/trading/execution/{self._env}orders/{order_id}"
+            try:
+                self._delete(endpoint)
+                cancelled += 1
+                logger.info(f"Cancelled eToro pending order {order_id}")
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if status in (405, 501):
+                    # Fall back to v1 only where v2 has no equivalent
+                    v1_done = False
+                    for v1_type in ("market-open-orders", "market-close-orders"):
+                        v1_endpoint = f"api/v1/trading/execution/{self._env}{v1_type}/{order_id}"
+                        try:
+                            self._delete(v1_endpoint)
+                            cancelled += 1
+                            v1_done = True
+                            logger.info(f"Cancelled eToro order {order_id} via v1 {v1_type}")
+                            break
+                        except Exception:
+                            pass
+                    if not v1_done:
+                        logger.warning(f"Failed to cancel eToro order {order_id} via v1 fallback")
+                elif status in (400, 404, 409, 410, 422):
+                    logger.info(f"eToro order {order_id} already cancelled or filled (status {status})")
+                else:
+                    logger.warning(f"Failed to cancel eToro order {order_id}: {e}")
+            except Exception as e:
+                logger.info(f"eToro order {order_id} already cancelled or failed: {e}")
+
+        return cancelled
 
     def map_symbol(self, yf_symbol: str) -> dict | None:
         """
