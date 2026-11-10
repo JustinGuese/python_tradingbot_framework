@@ -307,6 +307,9 @@ class EtoroBroker(LiveBroker):
         # Pending orders in clientPortfolio can appear under various keys
         for key in (
             "orders",
+            # Seen in the real demo payload (2026-11-10) next to the keys below. Unleveraged
+            # stock/ETF orders are the likeliest to sit here after the close.
+            "stockOrders",
             "ordersForOpen",
             "ordersForClose",
             "ordersForCloseMultiple",

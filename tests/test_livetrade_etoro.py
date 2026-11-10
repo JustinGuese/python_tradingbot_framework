@@ -324,3 +324,14 @@ def test_etoro_cancel_open_orders_aborts_when_a_cancel_fails_for_real(broker):
         mock_delete.side_effect = httpx.ReadTimeout("timed out")
         with pytest.raises(httpx.ReadTimeout):
             broker.cancel_open_orders()
+
+
+def test_etoro_cancel_open_orders_scans_stock_orders(broker):
+    """`stockOrders` is a real clientPortfolio key (seen in the live demo payload);
+    after-hours ETF orders must be found there or the overnight double-submit survives."""
+    payload = {"clientPortfolio": {"stockOrders": [{"orderID": "301"}]}}
+    with patch.object(broker.client, "get") as mock_get, patch.object(broker.client, "delete") as mock_delete:
+        mock_get.return_value = _response(payload)
+        mock_delete.return_value = MagicMock(status_code=200, text="{}", json=lambda: {})
+        assert broker.cancel_open_orders() == 1
+        assert mock_delete.call_args.args[0].endswith("/api/v2/trading/execution/demo/orders/301")
