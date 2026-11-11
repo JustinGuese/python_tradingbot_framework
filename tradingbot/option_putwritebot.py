@@ -31,7 +31,7 @@ class OptionPutWriteBot(OptionStrategyBot):
         underlying="SPY",
         # H1 winner (2000-2013 synthetic grid): beat the a-priori defaults (0.25 delta, 35 DTE,
         # ungated, 50% / 21 DTE) on 2013-2026 (H2 alpha t -1.58 vs -2.55), but is still negative
-        # out of sample: see docs/backtests/putwrite-2026-11.md. Paper, suspended.
+        # out of sample: see docs/backtests/putwrite-2026-11.md. Paper, live as a data-gathering run.
         put_delta=0.16,
         target_dte=21,
         max_term_ratio=None,
