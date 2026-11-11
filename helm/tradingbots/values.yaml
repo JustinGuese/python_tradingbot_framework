@@ -619,9 +619,10 @@ bots:
 # implied-signal-2026-11.md, fomc-vol-2026-11.md, crossvol-rank-2026-11.md (CrossVol stays paused).
 - name: option_putwritebot
   schedule: "5 16 * * 1-5" # SPY 16-delta cash-secured put-write, 21 DTE, close > SMA200
-  # Paused 2026-11-11. Out-of-sample alpha vs QQQ negative on synthetic 2013-26 (H2 t -1.58);
-  # with T-bill yield on collateral it is -0.2% (t -0.13). Low beta (0.08), unproven, not an edge.
-  suspend: true
+  # Live paper since 2026-11-11 as a data-gathering run, NOT a claimed edge. Out-of-sample alpha vs
+  # QQQ negative on synthetic 2013-26 (H2 t -1.58); with T-bill yield on collateral -0.2% (t -0.13);
+  # real surface 2019-26 with yield +3.2% (t 1.56). Beta 0.08, max DD -8%. Re-judge after 6-12 months
+  # of live data; pause again if alpha t is still < 0.
 - name: option_fomcvolbot
   schedule: "10 16 * * 1-5" # long SPY iron fly (5% wings) held across the FOMC announcement, <=5% risk
   # Live paper. Inconclusive: real-quote n=21 long fly +3.55% per trade, t 1.30, CI [-1.7, 9.0].
