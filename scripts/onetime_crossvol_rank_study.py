@@ -12,16 +12,15 @@ Resumable via --cache-dir.
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, date, datetime, timedelta
 import itertools
 import logging
 import math
 import os
 import pickle
 import sys
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 
-import numpy as np
 import pandas as pd
 
 # Ensure repo and scripts directories are in sys.path
@@ -32,19 +31,23 @@ SCRIPTS_DIR = os.path.join(CWD, "scripts")
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from tradingbot.option_crossvolbot import UNIVERSE
-from tradingbot.utils.backtest import _compute_alpha_metrics
-from tradingbot.utils.crossvol_rank import make_crossvol_decide
-from tradingbot.utils.db import OptionQuote, get_db_session
-from tradingbot.utils.option_replay import IRX, PriceHistory, ReplayMarket, run_strategy
-from tradingbot.utils.option_rules import CrossVolRules
-from tradingbot.utils.vol_indices import VIX, VIX3M, VVIX
+from tradingbot.option_crossvolbot import UNIVERSE  # noqa: E402
+from tradingbot.utils.backtest import _compute_alpha_metrics  # noqa: E402
+from tradingbot.utils.crossvol_rank import make_crossvol_decide  # noqa: E402
+from tradingbot.utils.db import OptionQuote, get_db_session  # noqa: E402
+from tradingbot.utils.option_replay import (  # noqa: E402
+    IRX,
+    PriceHistory,
+    ReplayMarket,
+    run_strategy,
+)
+from tradingbot.utils.option_rules import CrossVolRules  # noqa: E402
+from tradingbot.utils.vol_indices import VIX, VIX3M, VVIX  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 TABLE_HEADER = (
-    "| Configuration | Window | CAGR | Sharpe | Alpha/yr | t | Beta | Corr | Max DD | Trades |\n|"
-    + "---|" * 10
+    "| Configuration | Window | CAGR | Sharpe | Alpha/yr | t | Beta | Corr | Max DD | Trades |\n|" + "---|" * 10
 )
 
 
@@ -191,9 +194,7 @@ def build_tuning_grid() -> list[CrossVolRules]:
     min_gaps = [0.03, 0.05]
     stop_losses = [1.5, 2.0]
 
-    for r, st, d, dte, g, sl in itertools.product(
-        ranks, structures, short_deltas, target_dtes, min_gaps, stop_losses
-    ):
+    for r, st, d, dte, g, sl in itertools.product(ranks, structures, short_deltas, target_dtes, min_gaps, stop_losses):
         combos.append(
             CrossVolRules(
                 rank_metric=r,
@@ -267,11 +268,17 @@ def main() -> None:
     for idx, rules in enumerate(grid, 1):
         desc = f"metric={rules.rank_metric or 'gap'}, struct={rules.structure or 'condor'}, dte={rules.target_dte}, delta={rules.short_delta}"
         print(f"[{idx}/{len(grid)}] Evaluating: {desc}")
-        res = run_evaluation(rules, market, prices, names, args.fill)
+        try:
+            res = run_evaluation(rules, market, prices, names, args.fill)
+        except (ValueError, ZeroDivisionError) as exc:  # e.g. NaN risk budget on an uncapped-loss structure
+            print(f"       -> skipped ({type(exc).__name__}: {exc})")
+            continue
         results.append(res)
         h1_t = res["H1"]["t"]
         h2_t = res["H2"]["t"]
-        print(f"       -> H1 alpha t: {h1_t if h1_t is not None else 0.0:.2f}, H2 alpha t: {h2_t if h2_t is not None else 0.0:.2f}, Trades: {res['trades']}")
+        print(
+            f"       -> H1 alpha t: {h1_t if h1_t is not None else 0.0:.2f}, H2 alpha t: {h2_t if h2_t is not None else 0.0:.2f}, Trades: {res['trades']}"
+        )
 
     # Baseline is first
     baseline = results[0]
@@ -313,7 +320,7 @@ def main() -> None:
     print(f"Full grid results written to {args.csv}")
 
     # Build summary comparison table
-    ranked_by_h1 = sorted(results, key=lambda x: (x["H1"]["t"] if x["H1"]["t"] is not None else -99.0), reverse=True)
+    ranked_by_h1 = sorted(results, key=lambda x: x["H1"]["t"] if x["H1"]["t"] is not None else -99.0, reverse=True)
     h1_winner = ranked_by_h1[0]
 
     summary_lines = [TABLE_HEADER]
@@ -387,7 +394,7 @@ Additionally, we evaluate:
 <!-- VERDICT -->
 """
     if os.path.exists(args.out):
-        with open(args.out, "r") as f:
+        with open(args.out) as f:
             content = f.read()
         if "<!-- SUMMARY_TABLE -->" not in content:
             content = doc_template

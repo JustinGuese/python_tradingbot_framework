@@ -29,13 +29,16 @@ logger = logging.getLogger(__name__)
 class OptionPutWriteBot(OptionStrategyBot):
     RULES: ClassVar[PutWriteRules] = PutWriteRules(
         underlying="SPY",
-        put_delta=0.25,
-        target_dte=35,
+        # H1 winner (2000-2013 synthetic grid): beat the a-priori defaults (0.25 delta, 35 DTE,
+        # ungated, 50% / 21 DTE) on 2013-2026 (H2 alpha t -1.58 vs -2.55), but is still negative
+        # out of sample: see docs/backtests/putwrite-2026-11.md. Paper, suspended.
+        put_delta=0.16,
+        target_dte=21,
         max_term_ratio=None,
-        trend_filter=False,
+        trend_filter=True,
         min_gap=None,
-        take_profit=0.50,
-        exit_dte=21,
+        take_profit=None,
+        exit_dte=7,
     )
 
     def __init__(self, **kwargs):

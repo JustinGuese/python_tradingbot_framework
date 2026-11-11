@@ -718,6 +718,9 @@ Parked on purpose, as of 2026-09-29:
   the capture.** `scripts/onetime_option_replay_backtest.py` works on the
   captured full chains as it is. Allow about 60–80 sessions before reading a
   t-stat.
+- **Round 4 option bots (2026-11):** PutWrite (paused, negative OOS), FOMCVol (paper,
+  inconclusive), ImpliedSignal (paper, unproven vs equal-weight universe); CrossVol rank
+  filters failed the kill-gate and it stays paused. See `docs/backtests/*-2026-11.md`.
 - **SVI fitter iteration cap: low value.** `svi.fit_svi` stops at scipy's
   default 500 evaluations and treats that as a failed fit (about 15 of 52 names
   on a typical day). Raising `max_nfev` only takes the usable fits from 30/52 to

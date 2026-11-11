@@ -20,12 +20,27 @@ Additionally, we evaluate:
 
 ## Baseline vs Candidate Ranking Filters
 
-<!-- SUMMARY_TABLE -->
+The run was stopped after 59 of 97 grid cells (4h41m runtime). 37 cells produced results; the
+rest were skipped (NaN sizing in some delta-hedged-call cells, wing-selection failures).
+Ranks tested: `gap` (existing) and `vol_of_vol`; structures: condor and delta-hedged call writing.
+Idiosyncratic-vol rank was not reached. Cells covered 21 and 35 DTE and 0.10 / 0.15 delta.
+
+| Result over the 37 completed cells | Value |
+|---|---|
+| H2 alpha t > 0 | 0 of 37 |
+| H2 alpha t range | about -1.9 to -0.2 |
+| H1 alpha t range | about -2.8 to +0.13 |
+| Best H2 cell | gap, condor, 21 DTE, 0.15 delta: H1 -0.88, H2 -0.25 (150 trades) |
+| Delta-hedged call writing | H2 t -1.0 to -1.4 in every cell |
+| vol_of_vol vs gap | no difference beyond noise (both negative) |
 
 ## Full Tuning Grid Results
 
-<!-- GRID_TABLE -->
+Per-cell H1/H2 alpha t are in the run log; every completed cell is negative on H2.
 
 ## Kill-Gate Verdict
 
-<!-- VERDICT -->
+**Kill-gate: failed.** No rank or structure turned H2 alpha t above 0, so nothing beats the live
+rules. `CrossVolRules` is unchanged in behaviour (new fields default to None) and the bot
+stays paused. Caveat: the grid was cut at 59 of 97 cells and idiosyncratic vol was not tested;
+with 37 of 37 negative on H2, finishing would not plausibly change the verdict.
