@@ -155,6 +155,38 @@ def check_already_submitted(napi: Any, model_id: str, current_round: int | None)
     return False
 
 
+def load_prices_from_db(
+    symbols: Sequence[str], min_rows: int = 270, max_age_days: int = 6, lookback_days: int = 420
+) -> pd.DataFrame:
+    """Long-format daily closes (symbol, timestamp, close) from historic_data.
+
+    Keeps only symbols with >= min_rows bars whose last bar is at most
+    max_age_days old (enough for the 12-1 momentum window), in one query.
+    """
+    from datetime import timedelta
+
+    from tradingbot.utils.db import HistoricData, get_db_session
+
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+    with get_db_session() as session:
+        rows = (
+            session.query(HistoricData.symbol, HistoricData.timestamp, HistoricData.close)
+            .filter(
+                HistoricData.interval == "1d",
+                HistoricData.symbol.in_(list(symbols)),
+                HistoricData.timestamp >= cutoff.replace(tzinfo=None),
+            )
+            .all()
+        )
+    df = pd.DataFrame(rows, columns=["symbol", "timestamp", "close"]).dropna(subset=["close"])
+    if df.empty:
+        return df
+    stats = df.groupby("symbol")["timestamp"].agg(["count", "max"])
+    fresh_after = pd.Timestamp(datetime.now(UTC).replace(tzinfo=None) - timedelta(days=max_age_days))
+    keep = stats[(stats["count"] >= min_rows) & (pd.to_datetime(stats["max"]) >= fresh_after)].index
+    return df[df["symbol"].isin(keep)].reset_index(drop=True)
+
+
 def fetch_universe(napi: Any) -> list[str]:
     """The live Signals universe. numerapi's ticker_universe() reads the retired
     signals/v1.0 file, so read the current live.parquet directly."""
@@ -240,13 +272,18 @@ def submit_signals(
         )
         raise ValueError(f"Refusing to upload under {min_tickers} tickers (found {len(yf_tickers)})")
 
-    # Fetch prices
+    # Prices come from our own historic_data (daily bars) -- no yfinance. Only
+    # universe tickers we already track with enough fresh history are scored;
+    # Numerai accepts a partial universe as long as it has >= min_tickers names.
     if prices is None:
-        if data_service is None:
-            from tradingbot.utils.data_service import DataService
-
-            data_service = DataService()
-        prices = data_service.get_yf_data_multiple(yf_tickers, interval="1d", period="2y")
+        if data_service is not None:
+            prices = data_service.get_yf_data_multiple(yf_tickers, interval="1d", period="2y")
+        else:
+            prices = load_prices_from_db(yf_tickers)
+            yf_tickers = sorted(prices["symbol"].unique())
+            logger.info("Scoring %d universe tickers that have fresh DB history", len(yf_tickers))
+            if len(yf_tickers) < min_tickers:
+                raise ValueError(f"Refusing to upload under {min_tickers} tickers (DB covers {len(yf_tickers)})")
 
     # Build signal using N0 pure function
     from tradingbot.utils.numerai_signal import build_signal

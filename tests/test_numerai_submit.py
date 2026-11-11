@@ -164,3 +164,26 @@ def test_missing_credentials_exit_2_never_logs_secrets(monkeypatch, caplog):
     # Missing variable names must be reported
     assert "NUMERAI_SECRET_KEY" in caplog.text
     assert "NUMERAI_MODEL_NAME" in caplog.text
+
+
+def test_load_prices_from_db_keeps_only_fresh_deep_symbols(sqlite_db, db_session, monkeypatch):
+    """DB-only prices: a symbol needs enough bars and a recent last bar, else it is dropped."""
+    from datetime import timedelta
+
+    from tradingbot.numerai_signals_submit import load_prices_from_db
+    from tradingbot.utils.db import HistoricData
+
+    monkeypatch.setattr("tradingbot.utils.db.get_db_session", sqlite_db)  # the loader imports it lazily
+    now = datetime.now(UTC).replace(tzinfo=None, hour=21, minute=0, second=0, microsecond=0)
+
+    def bars(symbol, n, end):
+        return [
+            HistoricData(symbol=symbol, interval="1d", timestamp=end - timedelta(days=i), close=100.0 + i)
+            for i in range(n)
+        ]
+
+    db_session.add_all(bars("GOOD", 300, now) + bars("SHORT", 50, now) + bars("STALE", 300, now - timedelta(days=20)))
+    db_session.commit()
+
+    out = load_prices_from_db(["GOOD", "SHORT", "STALE", "MISSING"])
+    assert set(out["symbol"]) == {"GOOD"}
