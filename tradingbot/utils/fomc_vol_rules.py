@@ -12,9 +12,9 @@ long or short, unhedged or delta-hedged.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time
-import logging
 from zoneinfo import ZoneInfo
 
 from tradingbot.utils import macro_calendar, market_calendar, options
@@ -165,9 +165,7 @@ def select_fomc_structure(view: options.ChainView, rules: FOMCVolRules) -> optio
     raise ValueError(f"Unsupported structure: {rules.structure}")
 
 
-def decide_fomcvol(
-    market: Market, holdings: Holdings, rules: FOMCVolRules, underlying: str = "SPY"
-) -> list[Action]:
+def decide_fomcvol(market: Market, holdings: Holdings, rules: FOMCVolRules, underlying: str = "SPY") -> list[Action]:
     """
     Pure decision function for FOMCVolBot.
 

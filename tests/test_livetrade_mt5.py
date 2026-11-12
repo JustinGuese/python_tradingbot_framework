@@ -197,3 +197,24 @@ def test_failed_order_listing_or_cancel_aborts_instead_of_returning_zero():
     fake.order_send = lambda req: MagicMock(retcode=10013, comment="invalid request")  # type: ignore[method-assign]
     with pytest.raises(RuntimeError, match="failed to cancel order 7"):
         broker.cancel_open_orders()
+
+
+def test_symbol_index_uses_one_bulk_call_and_is_cached():
+    """Resolving many symbols must not re-list (or walk, over RPC) the broker's symbols each time."""
+    from unittest.mock import MagicMock
+
+    from tradingbot.livetrade.mt5.broker import MT5Broker
+
+    client = MagicMock()
+    client.symbol_names.return_value = ["SPY.US", "TLT.US", "EURUSD"]
+    broker = MT5Broker.__new__(MT5Broker)
+    broker.client = client
+    broker.symbol_mapper = None
+    broker.name = "mt5_mql5"
+
+    assert broker._resolve_symbol("SPY") == "SPY.US"
+    assert broker._resolve_symbol("TLT") == "TLT.US"
+    assert broker._resolve_symbol("EURUSD=X") == "EURUSD"
+    assert broker._resolve_symbol("NOPE") is None
+    client.symbol_names.assert_called_once()
+    client.symbols_get.assert_not_called()

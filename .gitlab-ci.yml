@@ -52,3 +52,15 @@ pytest:
 # Build only after tests pass.
 build-docker:
   needs: [pytest]
+
+build-mt5-bridge:
+  extends: .df-build
+  needs: [pytest]
+  variables:
+    DOCKERFILE: docker/mt5-bridge/Dockerfile
+    BUILD_CONTEXT: docker/mt5-bridge
+    IMAGE: $CI_REGISTRY_IMAGE/mt5-bridge:$CI_COMMIT_REF_SLUG
+
+deploy-helm:
+  needs: [build-docker, build-mt5-bridge]
+

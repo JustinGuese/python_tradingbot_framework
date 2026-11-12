@@ -934,11 +934,14 @@ eventLogger:
       memory: 512Mi
 
 # MetaTrader 5 Bridge: self-hosted Wine + MetaTrader 5 + mt5linux (RPyC server).
-# Uses a pinned third-party image (gmag11/metatrader5_vnc:2.3).
+# Custom image with wine-staging 11 and mt5linux 0.1.9 baked in (bypasses Wine 10 anti-debug check).
 # RPyC (port 8001) is only reachable by pods labelled app.kubernetes.io/component=livetrade (enforced by NetworkPolicy).
 mt5Bridge:
   enabled: true
-  image: "gmag11/metatrader5_vnc:2.3"
+  image: "registry.gitlab.com/datafortress/tradingbot25/mt5-bridge:main"
+  imagePullPolicy: Always
+  imagePullSecrets:
+  - name: regcred
   port: 8001
   storage: "5Gi"
 

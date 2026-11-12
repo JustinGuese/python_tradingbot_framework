@@ -17,7 +17,6 @@ import logging
 import math
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from tradingbot.utils import option_math as om

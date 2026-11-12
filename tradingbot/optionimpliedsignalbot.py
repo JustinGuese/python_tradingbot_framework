@@ -9,10 +9,10 @@ Schedule: 0 16 * * 5 (weekly on Friday near market close).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import datetime
 import logging
-from typing import ClassVar, Sequence
+from dataclasses import dataclass
+from typing import ClassVar
 
 import pandas as pd
 
@@ -61,7 +61,7 @@ class OptionImpliedSignalBot(Bot):
     ) -> dict[str, float]:
         """Compute target portfolio weights for the universe as of a date."""
         if signals_df is None or signals_df.empty:
-            now = as_of or datetime.datetime.now(datetime.timezone.utc)
+            now = as_of or datetime.datetime.now(datetime.UTC)
             start_date = pd.to_datetime(now) - pd.Timedelta(days=self.rules.smoothing * 14 + 30)
             try:
                 signals_df = load_signals_from_db(

@@ -24,7 +24,6 @@ import logging
 import math
 import os
 import pickle
-import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -46,7 +45,6 @@ from tradingbot.utils.option_replay import (
 from tradingbot.utils.putwrite_rules import (
     PutWriteRules,
     decide_putwrite,
-    putwrite_entry_ok,
     short_premium_exit_reason,
 )
 
@@ -209,7 +207,13 @@ def load_synthetic_inputs(
     df["high"] = raw["High"]
     df["low"] = raw["Low"]
 
-    for sym, col in [("QQQ", "qqq"), (calib.vol_index, "vol_index"), ("^VIX", "vix"), ("^VIX3M", "vix3m"), ("^IRX", "irx")]:
+    for sym, col in [
+        ("QQQ", "qqq"),
+        (calib.vol_index, "vol_index"),
+        ("^VIX", "vix"),
+        ("^VIX3M", "vix3m"),
+        ("^IRX", "irx"),
+    ]:
         d = yf.download(sym, start=download_start, auto_adjust=True, progress=False)
         if isinstance(d.columns, pd.MultiIndex):
             d.columns = d.columns.get_level_values(0)
@@ -227,19 +231,15 @@ def load_synthetic_inputs(
 
     eval_indices = list(range(len(df)))
     for dte in (21, 35, 45):
-        bdays = max(int(round(dte * 5 / 7)), 1)
+        bdays = max(round(dte * 5 / 7), 1)
         if is_smoke or len(eval_indices) < 200:
-            har = [
-                om.har_rv_forecast(returns.iloc[:i], bdays) if i >= 10 else 0.15
-                for i in eval_indices
-            ]
+            har = [om.har_rv_forecast(returns.iloc[:i], bdays) if i >= 10 else 0.15 for i in eval_indices]
         else:
             chunks = np.array_split(np.arange(len(eval_indices)), 16)
-            def _calc_chunk(chunk):
-                return [
-                    om.har_rv_forecast(returns.iloc[:i], bdays) if i >= 60 else 0.15
-                    for i in chunk
-                ]
+
+            def _calc_chunk(chunk, bdays=bdays):
+                return [om.har_rv_forecast(returns.iloc[:i], bdays) if i >= 60 else 0.15 for i in chunk]
+
             parts = Parallel(n_jobs=-1)(delayed(_calc_chunk)(c) for c in chunks)
             har = [x for p in parts for x in p]
         df[f"fair_{dte}"] = har
@@ -281,13 +281,12 @@ def sim_synthetic_putwrite(
         r = float(row["r"])
 
         # 1. Settle expiring options
-        if pos_strike is not None and pos_expiry is not None:
-            if today >= pos_expiry:
-                loss_per_share = max(pos_strike - spot, 0.0)
-                cash -= loss_per_share * pos_contracts * 100.0
-                pos_strike = pos_expiry = None
-                pos_credit = 0.0
-                pos_contracts = 0
+        if pos_strike is not None and pos_expiry is not None and today >= pos_expiry:
+            loss_per_share = max(pos_strike - spot, 0.0)
+            cash -= loss_per_share * pos_contracts * 100.0
+            pos_strike = pos_expiry = None
+            pos_credit = 0.0
+            pos_contracts = 0
 
         # Current marked value of short put
         cur_liability = 0.0
@@ -474,16 +473,16 @@ Replay against historical quotes and daily vol surfaces via `SurfaceReplayMarket
 ## Detailed Performance Comparison
 
 ### Defaults Configuration
-- **Rules**: `{defaults_row.get('params', 'SPY 0.25d 35dte')}`
-- **H1 Alpha**: {defaults_row.get('H1_alpha', np.nan):.2%} (t: {defaults_row.get('H1_t', np.nan):.2f})
-- **H2 Alpha**: {defaults_row.get('H2_alpha', np.nan):.2%} (t: {defaults_row.get('H2_t', np.nan):.2f}, Beta: {defaults_row.get('H2_beta', np.nan):.2f}, Sharpe: {defaults_row.get('H2_sharpe', np.nan):.2f})
-- **Full Window**: CAGR {defaults_row.get('full_true_cagr', np.nan):.2%}, Max DD {defaults_row.get('full_max_dd', np.nan):.2%}, Trades: {defaults_row.get('full_trades', 0)}
+- **Rules**: `{defaults_row.get("params", "SPY 0.25d 35dte")}`
+- **H1 Alpha**: {defaults_row.get("H1_alpha", np.nan):.2%} (t: {defaults_row.get("H1_t", np.nan):.2f})
+- **H2 Alpha**: {defaults_row.get("H2_alpha", np.nan):.2%} (t: {defaults_row.get("H2_t", np.nan):.2f}, Beta: {defaults_row.get("H2_beta", np.nan):.2f}, Sharpe: {defaults_row.get("H2_sharpe", np.nan):.2f})
+- **Full Window**: CAGR {defaults_row.get("full_true_cagr", np.nan):.2%}, Max DD {defaults_row.get("full_max_dd", np.nan):.2%}, Trades: {defaults_row.get("full_trades", 0)}
 
 ### H1 Winner Configuration
-- **Rules**: `{winner_row.get('params', 'Winner')}`
-- **H1 Alpha**: {winner_row.get('H1_alpha', np.nan):.2%} (t: {winner_row.get('H1_t', np.nan):.2f})
-- **H2 Alpha**: {winner_row.get('H2_alpha', np.nan):.2%} (t: {winner_row.get('H2_t', np.nan):.2f}, Beta: {winner_row.get('H2_beta', np.nan):.2f}, Sharpe: {winner_row.get('H2_sharpe', np.nan):.2f})
-- **Full Window**: CAGR {winner_row.get('full_true_cagr', np.nan):.2%}, Max DD {winner_row.get('full_max_dd', np.nan):.2%}, Trades: {winner_row.get('full_trades', 0)}
+- **Rules**: `{winner_row.get("params", "Winner")}`
+- **H1 Alpha**: {winner_row.get("H1_alpha", np.nan):.2%} (t: {winner_row.get("H1_t", np.nan):.2f})
+- **H2 Alpha**: {winner_row.get("H2_alpha", np.nan):.2%} (t: {winner_row.get("H2_t", np.nan):.2f}, Beta: {winner_row.get("H2_beta", np.nan):.2f}, Sharpe: {winner_row.get("H2_sharpe", np.nan):.2f})
+- **Full Window**: CAGR {winner_row.get("full_true_cagr", np.nan):.2%}, Max DD {winner_row.get("full_max_dd", np.nan):.2%}, Trades: {winner_row.get("full_trades", 0)}
 
 ## Protocol Decision & Live Rules
 
@@ -548,10 +547,7 @@ def main():
         end_date = date(2026, 9, 25)
 
     synth_df = load_synthetic_inputs(u, cache_dir=cache_dir, start=start_date, end=end_date, is_smoke=is_smoke)
-    if is_smoke:
-        split = synth_df.index[len(synth_df) // 2]
-    else:
-        split = SYNTHETIC_SPLIT
+    split = synth_df.index[len(synth_df) // 2] if is_smoke else SYNTHETIC_SPLIT
 
     combos = generate_grid(names, max_grid=max_grid)
     logger.info("Evaluating %d combinations in walk-forward grid...", len(combos))
@@ -589,13 +585,17 @@ def main():
     from scripts.option_tune_common import ship_decision
 
     shipped = ship_decision(defaults_row, winner_row)
-    sum_df = summary_table(wf_results, bot_name="option_PutWriteBot", defaults_row=defaults_row, h1_winner_row=winner_row)
+    sum_df = summary_table(
+        wf_results, bot_name="option_PutWriteBot", defaults_row=defaults_row, h1_winner_row=winner_row
+    )
     summary_table_md = sum_df.to_markdown(index=False)
 
     # 2. Real Surface Replay Check
     real_summary_md = ""
     if args.mode in ("all", "replay", "smoke"):
-        start_d = date(2026, 8, 1) if is_smoke else (date.fromisoformat(args.start) if args.start else date(2019, 5, 10))
+        start_d = (
+            date(2026, 8, 1) if is_smoke else (date.fromisoformat(args.start) if args.start else date(2019, 5, 10))
+        )
         end_d = date(2026, 8, 15) if is_smoke else (date.fromisoformat(args.end) if args.end else date(2026, 9, 25))
 
         logger.info("Initializing SurfaceReplayMarket for %s [%s to %s]...", names, start_d, end_d)
@@ -625,7 +625,7 @@ def main():
                 m = metrics(curve, qqq_curve)
                 real_summary_md = f"""| Underlying | Days | Trades | CAGR | Alpha/yr | t | Beta | Max DD |
 |---|---|---|---|---|---|---|---|
-| {names[0]} | {len(market.days)} | {book.trades} | {m.get('true_cagr', np.nan):.2%} | {m.get('alpha', np.nan):.2%} | {m.get('t', np.nan):.2f} | {m.get('beta', np.nan):.2f} | {m.get('max_dd', np.nan):.2%} |
+| {names[0]} | {len(market.days)} | {book.trades} | {m.get("true_cagr", np.nan):.2%} | {m.get("alpha", np.nan):.2%} | {m.get("t", np.nan):.2f} | {m.get("beta", np.nan):.2f} | {m.get("max_dd", np.nan):.2%} |
 """
             else:
                 real_summary_md = "No recorded option quotes found in the specified range."

@@ -213,4 +213,27 @@ def connect_rpyc(host: str = "localhost", port: int = 18812) -> MT5Client:
         raise ImportError("rpyc is required to connect to MT5 over RPyC. Please install rpyc.") from exc
 
     conn = rpyc.classic.connect(host, port)
-    return conn.modules["MetaTrader5"]
+    return _RemoteMT5(conn)
+
+
+class _RemoteMT5:
+    """The bridge's MetaTrader5 module, plus bulk helpers that avoid per-item RPC.
+
+    Iterating a remote symbols_get() result costs one round trip per symbol
+    (thousands of them, minutes in total), so names are collected server-side
+    and shipped in one pickle.
+    """
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+        self._mt5 = conn.modules["MetaTrader5"]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._mt5, name)
+
+    def symbol_names(self) -> list[str] | None:
+        from rpyc.utils.classic import obtain
+
+        self._conn.execute("import MetaTrader5 as _mt5")
+        names = self._conn.eval("[s.name for s in (_mt5.symbols_get() or [])]")
+        return list(obtain(names))
