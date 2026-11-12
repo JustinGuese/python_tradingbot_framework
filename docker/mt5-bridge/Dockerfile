@@ -15,6 +15,9 @@ RUN mkdir -pm755 /etc/apt/keyrings \
 ENV PATH="/opt/wine-staging/bin:${PATH}" \
     WINEDLLOVERRIDES="mscoree,mshtml=d"
 
+# s6 services may not inherit the image ENV PATH; make the staging binaries win anyway.
+RUN for b in wine wine64 wineserver winecfg wineboot; do ln -sf /opt/wine-staging/bin/$b /usr/local/bin/$b; done
+
 # Patch /Metatrader/start.sh at build time:
 # - Linux: pip install ... mt5linux -> mt5linux==0.1.9
 # - Windows: mt5linux>=0.1.9 -> rpyc==6.0.2 plumbum "numpy<2"
