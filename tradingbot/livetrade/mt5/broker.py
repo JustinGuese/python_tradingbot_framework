@@ -346,6 +346,22 @@ class MT5Broker(LiveBroker):
                 raise RuntimeError(f"MT5 failed to cancel order {ticket}: retcode={retcode}, comment='{comment}'")
         return cancelled_count
 
+    def _symbol_index(self) -> dict[str, str] | None:
+        """Upper-case name -> broker name for every listed symbol, fetched once per run."""
+        cached = getattr(self, "_symbol_index_cache", None)
+        if cached is not None:
+            return cached
+        bulk = getattr(self.client, "symbol_names", None)
+        if bulk is not None:
+            names = bulk()
+        else:
+            symbols = self.client.symbols_get()
+            names = None if symbols is None else [getattr(s, "name", "") for s in symbols]
+        if names is None:
+            return None
+        self._symbol_index_cache = {n.upper(): n for n in names if n}
+        return self._symbol_index_cache
+
     def _resolve_symbol(self, yf_symbol: str) -> str | None:
         """
         Resolve symbol on MT5:
@@ -365,13 +381,9 @@ class MT5Broker(LiveBroker):
         else:
             ticker = yf_symbol
 
-        symbols = self.client.symbols_get()
-        if symbols is None:
+        available_upper = self._symbol_index()
+        if available_upper is None:
             return None
-
-        available_upper = {
-            getattr(s, "name", "").upper(): getattr(s, "name", "") for s in symbols if getattr(s, "name", "")
-        }
 
         # 1. Exact bare ticker match
         if ticker.upper() in available_upper:

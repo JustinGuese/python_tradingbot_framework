@@ -4,15 +4,13 @@ All tests use synthetic in-memory data with zero DB dependencies.
 """
 
 import datetime
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from tradingbot.optionimpliedsignalbot import (
-    DEFAULT_UNIVERSE,
-    ImpliedSignalRules,
     OptionImpliedSignalBot,
-    RULES,
 )
 from tradingbot.utils.implied_signal import (
     compute_cross_sectional_signals,

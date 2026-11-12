@@ -2,14 +2,11 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from scripts.option_tune_common import (
     WalkForwardDataFrame,
     metrics,
     ship_decision,
-    summary_table,
-    true_cagr,
     walk_forward,
 )
 

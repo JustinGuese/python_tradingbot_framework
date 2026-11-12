@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import datetime
 import math
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from scripts.onetime_option_bots_backtest import metrics as base_metrics
-from tradingbot.utils.alpha_report import alpha_stats, AlphaStats
 
 
 def true_cagr(
@@ -67,9 +67,7 @@ def true_cagr(
         return float("nan")
 
 
-def compute_sharpe(
-    curve: pd.Series, risk_free_rate: float = 0.0, periods_per_year: float = 252.0
-) -> float:
+def compute_sharpe(curve: pd.Series, risk_free_rate: float = 0.0, periods_per_year: float = 252.0) -> float:
     """Annualized Sharpe ratio computed from daily curve returns."""
     if len(curve) < 3:
         return float("nan")
@@ -183,6 +181,7 @@ def ship_decision(defaults_h2: Any, winner_h2: Any) -> str:
     H1 winner beats the a-priori defaults on H2. Otherwise defaults ship.
     An empty or too-short H2 series yields NaN t and never "winner".
     """
+
     def _extract_t(val: Any) -> float:
         if val is None:
             return float("nan")
@@ -194,10 +193,10 @@ def ship_decision(defaults_h2: Any, winner_h2: Any) -> str:
                     v = val[k]
                     return float(v) if v is not None and np.isfinite(v) else float("nan")
         if hasattr(val, "t"):
-            v = getattr(val, "t")
+            v = val.t
             return float(v) if v is not None and np.isfinite(v) else float("nan")
         if hasattr(val, "alpha_t"):
-            v = getattr(val, "alpha_t")
+            v = val.alpha_t
             return float(v) if v is not None and np.isfinite(v) else float("nan")
         return float("nan")
 

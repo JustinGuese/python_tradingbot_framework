@@ -5,20 +5,17 @@ Tests use synthetic in-memory data, no DB.
 
 from __future__ import annotations
 
-import math
 import numpy as np
 import pandas as pd
-import pytest
 
 from tradingbot.utils.crossvol_rank import (
-    calc_gap,
     calc_idiosyncratic_vol,
     calc_vol_of_vol,
     make_crossvol_decide,
     rank_name_vols,
     select_candidates_ranked,
 )
-from tradingbot.utils.option_decide import Close, Hedge, Open
+from tradingbot.utils.option_decide import Hedge, Open
 from tradingbot.utils.option_rules import CrossVolRules, NameVol, cross_vol_candidates
 
 
@@ -43,11 +40,11 @@ def test_default_crossvol_rules_unchanged():
 def test_default_candidate_selection_unchanged():
     """With default rules, select_candidates_ranked behaves identically to cross_vol_candidates."""
     names = [
-        NameVol("AAPL", iv=0.30, fair=0.22, earnings_clear=True),   # gap = 0.08
-        NameVol("MSFT", iv=0.25, fair=0.23, earnings_clear=True),   # gap = 0.02 (< min_gap)
-        NameVol("NVDA", iv=0.45, fair=0.35, earnings_clear=True),   # gap = 0.10
+        NameVol("AAPL", iv=0.30, fair=0.22, earnings_clear=True),  # gap = 0.08
+        NameVol("MSFT", iv=0.25, fair=0.23, earnings_clear=True),  # gap = 0.02 (< min_gap)
+        NameVol("NVDA", iv=0.45, fair=0.35, earnings_clear=True),  # gap = 0.10
         NameVol("TSLA", iv=0.50, fair=0.40, earnings_clear=False),  # earnings not clear
-        NameVol("AMZN", iv=0.32, fair=0.25, earnings_clear=True),   # gap = 0.07
+        NameVol("AMZN", iv=0.32, fair=0.25, earnings_clear=True),  # gap = 0.07
     ]
     held = {"AMZN"}
     rules = CrossVolRules()
@@ -138,8 +135,8 @@ def test_ranking_deterministic_tie_breaking():
 
 def test_make_crossvol_decide_delta_hedged_call():
     """make_crossvol_decide with delta_hedged_call emits Open and Hedge actions."""
-    from dataclasses import dataclass
     from datetime import date
+
     from tradingbot.utils.options import StructurePick
 
     class DummyView:
@@ -149,18 +146,23 @@ def test_make_crossvol_decide_delta_hedged_call():
 
     class DummyChainMarket:
         today = date(2024, 1, 15)
+
         def vol_index(self, _):
             return 18.0
+
         def scan_scores(self):
             return {"AAPL": 2.5}
+
         def ohlc(self, names):
             return {n: pd.DataFrame({"close": [100.0, 101.0]}) for n in names}
+
         def name_vol(self, u, target_dte, ohlc, min_obs=60):
             return NameVol(u, iv=0.30, fair=0.20, earnings_clear=True), DummyView()
 
     class DummyHoldings:
         def underlyings(self):
             return set()
+
         def equity(self):
             return 100_000.0
 
@@ -169,6 +171,7 @@ def test_make_crossvol_decide_delta_hedged_call():
 
     # Monkeypatch select_vertical to return a fake pick
     import tradingbot.utils.options as opt
+
     orig_select = opt.select_vertical
     try:
         opt.select_vertical = lambda *args, **kwargs: StructurePick(

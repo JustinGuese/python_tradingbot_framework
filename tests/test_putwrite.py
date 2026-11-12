@@ -9,23 +9,17 @@ Tests:
 
 from __future__ import annotations
 
-import math
-from datetime import date, datetime, timezone
-from typing import Any
+from datetime import UTC, date, datetime
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from tradingbot.utils import option_math as om
 from tradingbot.utils import options
-from tradingbot.utils.option_decide import Action, Close, Holdings, Market, Open
+from tradingbot.utils.option_decide import Close, Holdings, Market, Open
 from tradingbot.utils.putwrite_rules import (
     PutWriteRules,
     decide_putwrite,
-    get_available_cash,
-    putwrite_entry_ok,
-    putwrite_exit_reason,
 )
 
 
@@ -39,7 +33,7 @@ class FakeMarket(Market):
         closes_series: pd.Series | None = None,
         chain_view: options.ChainView | None = None,
     ):
-        super().__init__(today, datetime.now(timezone.utc))
+        super().__init__(today, datetime.now(UTC))
         self._vix = vix
         self._vix3m = vix3m
         self._close_price = close_price
@@ -263,6 +257,7 @@ def test_take_profit_and_exit_dte_close():
 
     def _held_book(pnl: float, credit: float, dte: int) -> options.OptionBook:
         from datetime import timedelta
+
         g = om.Greeks(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         expiry = today + timedelta(days=dte)
         sym = f"SPY{expiry:%y%m%d}P00490000"
@@ -327,4 +322,3 @@ def test_no_entry_when_iv_fair_gap_too_small():
     actions_allowed = decide_putwrite(market, holdings, rules_relaxed, "SPY")
     assert len(actions_allowed) == 1
     assert isinstance(actions_allowed[0], Open)
-

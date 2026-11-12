@@ -20,21 +20,20 @@ Run with withenv wrapper:
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
 import logging
 import math
-import os
-from pathlib import Path
 import pickle
-import sys
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 import yfinance as yf
 
-from tradingbot.utils import macro_calendar, market_calendar, option_surface, options
+from tradingbot.utils import macro_calendar, option_surface
 from tradingbot.utils import option_math as om
 from tradingbot.utils.db import MacroEvent, get_db_session
 
@@ -55,9 +54,7 @@ STUDY_START_DEFAULT = date(2006, 1, 1)
 # ------------------------------------------------------------------
 
 
-def load_quotes_for_underlying(
-    underlying: str, start: date, end: date, cache_dir: Path
-) -> pd.DataFrame:
+def load_quotes_for_underlying(underlying: str, start: date, end: date, cache_dir: Path) -> pd.DataFrame:
     """
     Load option_quotes for `underlying` strictly in [start, end].
     Filters by underlying AND snapshot_at date range to avoid full-table scans.
@@ -111,9 +108,7 @@ def load_quotes_for_underlying(
     return df
 
 
-def load_price_history(
-    symbols: list[str], start: date, end: date, cache_dir: Path
-) -> dict[str, pd.DataFrame]:
+def load_price_history(symbols: list[str], start: date, end: date, cache_dir: Path) -> dict[str, pd.DataFrame]:
     """
     Download daily OHLC for underlying symbols and vol indices (^VIX, QQQ, etc.).
     Caches to cache_dir.
@@ -171,9 +166,7 @@ def load_macro_dates() -> dict[str, list[date]]:
     try:
         with get_db_session() as session:
             rows = (
-                session.query(MacroEvent.kind, MacroEvent.event_date)
-                .filter(MacroEvent.kind.in_(["CPI", "NFP"]))
-                .all()
+                session.query(MacroEvent.kind, MacroEvent.event_date).filter(MacroEvent.kind.in_(["CPI", "NFP"])).all()
             )
             for kind, dt in rows:
                 if kind == "CPI":
@@ -250,9 +243,7 @@ def _synthetic_quote(
     return bid, ask, mid
 
 
-def _synthetic_delta(
-    right: str, strike: float, spot: float, vix: float, dte_days: float, r: float = 0.04
-) -> float:
+def _synthetic_delta(right: str, strike: float, spot: float, vix: float, dte_days: float, r: float = 0.04) -> float:
     T = max(dte_days / 252.0, 1.0 / 252.0)
     atm_iv = (vix / 100.0) * 0.85
     m = math.log(strike / spot) / (atm_iv * math.sqrt(T))
@@ -306,12 +297,8 @@ def simulate_event_trade(
     exit_surface = None
     if use_real:
         try:
-            entry_surface = option_surface.build_surface(
-                underlying, quotes_by_day[entry_date], spot_entry, entry_date
-            )
-            exit_surface = option_surface.build_surface(
-                underlying, quotes_by_day[exit_date], spot_exit, exit_date
-            )
+            entry_surface = option_surface.build_surface(underlying, quotes_by_day[entry_date], spot_entry, entry_date)
+            exit_surface = option_surface.build_surface(underlying, quotes_by_day[exit_date], spot_exit, exit_date)
         except Exception:
             entry_surface = None
             exit_surface = None
@@ -342,10 +329,7 @@ def simulate_event_trade(
         elif spec.structure == "iron_fly":
             # For short iron fly: sell ATM (+1 short), buy wings (+1 long)
             is_wing = strike in (k_put_wing, k_call_wing)
-            if spec.side == "short":
-                sign = 1 if is_wing else -1
-            else:
-                sign = -1 if is_wing else 1
+            sign = (1 if is_wing else -1) if spec.side == "short" else -1 if is_wing else 1
         elif spec.structure == "strangle":
             sign = 1 if spec.side == "long" else -1
 
@@ -353,19 +337,20 @@ def simulate_event_trade(
         if is_real and entry_surface is not None:
             bid_in, ask_in, mid_in = entry_surface.quote(right, strike, front_expiry)
             delta_leg = om.delta(
-                spot_entry, strike, max(om.year_fraction(front_expiry, entry_date), 1.0 / 252.0),
-                0.04, entry_surface.iv(strike, max(om.year_fraction(front_expiry, entry_date), 1.0 / 252.0)),
-                right, 0.015
+                spot_entry,
+                strike,
+                max(om.year_fraction(front_expiry, entry_date), 1.0 / 252.0),
+                0.04,
+                entry_surface.iv(strike, max(om.year_fraction(front_expiry, entry_date), 1.0 / 252.0)),
+                right,
+                0.015,
             )
         else:
             bid_in, ask_in, mid_in = _synthetic_quote(right, strike, spot_entry, vix_entry, 2.0)
             delta_leg = _synthetic_delta(right, strike, spot_entry, vix_entry, 2.0)
 
         # Fill at entry
-        if fill_mode == "mid":
-            fill_in = mid_in
-        else:
-            fill_in = ask_in if sign > 0 else bid_in
+        fill_in = mid_in if fill_mode == "mid" else ask_in if sign > 0 else bid_in
 
         # Cash flow at entry: buying pays debit (-fill), selling receives credit (+fill)
         net_entry_cash += (-sign) * fill_in
@@ -378,10 +363,7 @@ def simulate_event_trade(
             bid_out, ask_out, mid_out = _synthetic_quote(right, strike, spot_exit, vix_exit, 1.0)
 
         # Fill at exit: closing a long sells at bid (+bid), closing a short buys at ask (-ask)
-        if fill_mode == "mid":
-            fill_out = mid_out
-        else:
-            fill_out = bid_out if sign > 0 else ask_out
+        fill_out = mid_out if fill_mode == "mid" else bid_out if sign > 0 else ask_out
 
         net_exit_cash += sign * fill_out
 
@@ -493,7 +475,7 @@ def run_fomc_study(
     logger.info("Starting FOMC Volatility Study across %s from %s to %s", names, start, end)
 
     # 1. Load Price History
-    all_syms = list(set(names + ["SPY", "^VIX", "QQQ"]))
+    all_syms = list({*names, "SPY", "^VIX", "QQQ"})
     prices = load_price_history(all_syms, start - timedelta(days=30), end + timedelta(days=10), cache_dir)
     spy_px = prices.get("SPY", pd.DataFrame())
     vix_px = prices.get("^VIX", None)
@@ -574,7 +556,9 @@ def run_fomc_study(
                     for h in hedges:
                         if struct == "straddle" and w != 0.05:
                             continue  # straddle width is irrelevant
-                        grid.append(TradeSpec(side=side, structure=struct, wing_width_pct=w, strike_offset=off, delta_hedged=h))
+                        grid.append(
+                            TradeSpec(side=side, structure=struct, wing_width_pct=w, strike_offset=off, delta_hedged=h)
+                        )
 
     # Dedupe specs
     grid = list(dict.fromkeys(grid))
@@ -775,7 +759,7 @@ def generate_markdown_report(
         "- **Entry:** Prior trading session (T-1) close (within last 120 minutes of regular trading).",
         "- **Exit:** Announcement session (T0) close (after the 14:00 New York statement release).",
         f"- **History:** {start} to {end} ({total_events} scheduled FOMC meetings).",
-        f"  - **H1 (2006–2019-05):** Synthetic Black-Scholes pricing calibrated from ^VIX implied vol and index smile.",
+        "  - **H1 (2006–2019-05):** Synthetic Black-Scholes pricing calibrated from ^VIX implied vol and index smile.",
         f"  - **H2 (2019-05–2026-11):** Real option chains from `option_quotes` interpolated via `DaySurface` ({real_events} meetings on real prices).",
         "- **Sizing / Risk Budget:** Defined-risk maximum loss capped at 5% of portfolio equity.",
         "",

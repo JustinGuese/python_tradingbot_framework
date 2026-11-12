@@ -199,5 +199,6 @@ def test_connect_rpyc_returns_remote_metatrader5_module(mocker):
     conn.modules.__getitem__.side_effect = lambda name: remote_mt5 if name == "MetaTrader5" else None
     connect = mocker.patch.object(rpyc.classic, "connect", return_value=conn)
 
-    assert connect_rpyc(host="cluster-bridge", port=8001) is remote_mt5
+    client = connect_rpyc(host="cluster-bridge", port=8001)
+    assert client.initialize is remote_mt5.initialize  # attribute access delegates to the remote module
     connect.assert_called_once_with("cluster-bridge", 8001)

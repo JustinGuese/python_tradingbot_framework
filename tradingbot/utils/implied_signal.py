@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -107,11 +106,7 @@ def compute_snapshot_signals(
         # Calculate DTE
         expiries = group["expiration"].drop_duplicates()
         dtes = [(exp, (exp - snap_time).total_seconds() / 86400.0) for exp in expiries]
-        valid_dtes = [
-            (exp, dte)
-            for exp, dte in dtes
-            if min_dte <= dte <= max_dte
-        ]
+        valid_dtes = [(exp, dte) for exp, dte in dtes if min_dte <= dte <= max_dte]
 
         if not valid_dtes:
             # If no expiry in range, pick closest positive DTE
@@ -157,14 +152,20 @@ def compute_snapshot_signals(
         put_strikes = np.unique(puts["strike"].dropna())
         call_strikes = np.unique(calls["strike"].dropna())
 
-        put_25d_k = float(put_strikes[np.argmin(np.abs(put_strikes - 0.95 * spot))]) if len(put_strikes) > 0 else atm_strike
-        call_25d_k = float(call_strikes[np.argmin(np.abs(call_strikes - 1.05 * spot))]) if len(call_strikes) > 0 else atm_strike
+        put_25d_k = (
+            float(put_strikes[np.argmin(np.abs(put_strikes - 0.95 * spot))]) if len(put_strikes) > 0 else atm_strike
+        )
+        call_25d_k = (
+            float(call_strikes[np.argmin(np.abs(call_strikes - 1.05 * spot))]) if len(call_strikes) > 0 else atm_strike
+        )
 
         put_25d_row = puts[puts["strike"] == put_25d_k]
         call_25d_row = calls[calls["strike"] == call_25d_k]
 
         put_iv_25d = float(put_25d_row["iv"].dropna().iloc[0]) if not put_25d_row["iv"].dropna().empty else put_iv_atm
-        call_iv_25d = float(call_25d_row["iv"].dropna().iloc[0]) if not call_25d_row["iv"].dropna().empty else call_iv_atm
+        call_iv_25d = (
+            float(call_25d_row["iv"].dropna().iloc[0]) if not call_25d_row["iv"].dropna().empty else call_iv_atm
+        )
 
         put_skew = put_iv_25d - atm_iv
         rr25 = call_iv_25d - put_iv_25d
@@ -232,9 +233,8 @@ def compute_cross_sectional_signals(
     # Per-underlying smoothing over time
     if smoothing > 1:
         res = res.sort_values(["underlying", "snapshot_at"]).reset_index(drop=True)
-        res[f"{signal_name}_smooth"] = (
-            res.groupby("underlying")[signal_name]
-            .transform(lambda s: s.rolling(smoothing, min_periods=1).mean())
+        res[f"{signal_name}_smooth"] = res.groupby("underlying")[signal_name].transform(
+            lambda s: s.rolling(smoothing, min_periods=1).mean()
         )
         active_col = f"{signal_name}_smooth"
     else:
@@ -242,9 +242,7 @@ def compute_cross_sectional_signals(
 
     # Cross-sectional rank per snapshot_at
     # Missing option data must remain NaN, not 0
-    res["rank"] = res.groupby("snapshot_at")[active_col].rank(
-        pct=True, ascending=True, na_option="keep"
-    )
+    res["rank"] = res.groupby("snapshot_at")[active_col].rank(pct=True, ascending=True, na_option="keep")
 
     return res.sort_values(["snapshot_at", "underlying"]).reset_index(drop=True)
 
@@ -290,7 +288,9 @@ def load_signals_from_db(
     start_dt = pd.to_datetime(start)
     end_dt = pd.to_datetime(end)
 
-    combined_cache = cache_path / f"implied_signals_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}_{len(underlyings)}.pkl"
+    combined_cache = (
+        cache_path / f"implied_signals_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}_{len(underlyings)}.pkl"
+    )
     if combined_cache.exists():
         try:
             logger.info("Loading cached signals from %s", combined_cache)
@@ -325,10 +325,14 @@ def load_signals_from_db(
             query_sql += " AND EXTRACT(DOW FROM snapshot_at) = 5"
 
         with get_db_session() as session:
-            rows = session.execute(
-                text(query_sql),
-                {"underlying": und, "start_dt": start_dt, "end_dt": end_dt},
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(query_sql),
+                    {"underlying": und, "start_dt": start_dt, "end_dt": end_dt},
+                )
+                .mappings()
+                .all()
+            )
 
         if not rows:
             continue

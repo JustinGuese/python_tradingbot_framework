@@ -6,16 +6,15 @@ Pure in-memory synthetic tests: no database connection or external services requ
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
-import numpy as np
+
 import pandas as pd
 import pytest
 
-from tradingbot.option_fomcvolbot import OptionFOMCVolBot, RULES
-from tradingbot.utils import macro_calendar, market_calendar, options
+from tradingbot.option_fomcvolbot import RULES, OptionFOMCVolBot
+from tradingbot.utils import options
 from tradingbot.utils.fomc_vol_rules import (
-    DEFAULT_ENTRY_WINDOW_MINUTES,
     FOMCVolRules,
     decide_fomcvol,
     in_entry_window,
@@ -159,9 +158,9 @@ def test_is_fomc_entry_session():
 def test_in_entry_window():
     # Regular close is 16:00 NY
     t_1530 = datetime(2026, 1, 27, 15, 30, tzinfo=NEW_YORK)  # 30 min to close -> True
-    t_1100 = datetime(2026, 1, 27, 11, 0, tzinfo=NEW_YORK)   # 300 min to close -> False
-    t_1605 = datetime(2026, 1, 27, 16, 5, tzinfo=NEW_YORK)   # past close -> False
-    t_sat = datetime(2026, 1, 24, 15, 30, tzinfo=NEW_YORK)    # weekend -> False
+    t_1100 = datetime(2026, 1, 27, 11, 0, tzinfo=NEW_YORK)  # 300 min to close -> False
+    t_1605 = datetime(2026, 1, 27, 16, 5, tzinfo=NEW_YORK)  # past close -> False
+    t_sat = datetime(2026, 1, 24, 15, 30, tzinfo=NEW_YORK)  # weekend -> False
 
     assert in_entry_window(t_1530, window_minutes=120) is True
     assert in_entry_window(t_1100, window_minutes=120) is False
