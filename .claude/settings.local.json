@@ -1,25 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:api-portal.etoro.com)",
-      "WebFetch(domain:skills.bullaware.com)",
+      "Bash(python3 -)",
+      "Bash(sed -i '/\"mt5linux==0.1.9\",/d' pyproject.toml)",
+      "Bash(sed -i 's/Pin a release that/Pin a release that/' helm/tradingbots/templates/deployment-mt5-bridge.yaml)",
+      "Bash(uv lock *)",
+      "Bash(export POSTGRES_URI=postgresql://ci:ci@localhost:5432/ci)",
+      "Bash(uv sync *)",
+      "Bash(uv run *)",
       "WebSearch",
-      "mcp__plugin_claude-mem_mcp-search__get_observations",
-      "WebFetch(domain:github.com)",
-      "Bash(.venv/bin/ruff check *)",
-      "Skill(gembuild)",
-      "Skill(gembuild:*)"
+      "Bash(sed -i 's/^import argparse$/import argparse\\\\nfrom collections.abc import Sequence/' scripts/onetime_fomc_vol_study.py)",
+      "Bash(sed -i 's/def _calc_chunk\\(chunk\\):/def _calc_chunk\\(chunk, bdays=bdays\\):/' scripts/onetime_putwrite_backtest.py)",
+      "Bash(python3 - *)"
     ],
     "additionalDirectories": [
-      "/home/jguese/code/tradingbot/tradingbot-ui-backend",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tradingbot/utils",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tradingbot",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/tests",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/helm/tradingbots",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-predmkt/docs/architecture",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/docs/backtests",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/tradingbot/utils",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework-pm2/scripts"
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt/sy/tests"
     ]
   }
 }
