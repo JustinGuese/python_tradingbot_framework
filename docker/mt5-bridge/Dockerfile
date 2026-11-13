@@ -27,7 +27,13 @@ RUN sed -i 's/--no-deps mt5linux/--no-deps mt5linux==0.1.9/g' /Metatrader/start.
     && grep -q 'rpyc==6.0.2 plumbum "numpy<2"' /Metatrader/start.sh
 
 # The Python API cannot place orders while the terminal's "Algo Trading" switch is
-# off (order_check -> retcode 10017 "Trade disabled"). Start the terminal with a
-# config that turns it on; start.sh passes $MT5_CMD_OPTIONS to terminal64.exe.
-RUN printf '[Experts]\r\nEnabled=1\r\nAllowLiveTrading=1\r\nAllowDllImport=0\r\n' > /opt/mt5-startup.ini
-ENV MT5_CMD_OPTIONS="/config:Z:\\opt\\mt5-startup.ini"
+# off (order_check -> retcode 10017 "Trade disabled"). Before the terminal starts,
+# append an [Experts] section to its UTF-16 Config/common.ini (on the PVC, so once
+# is enough) with Algo Trading on.
+RUN printf '%s\n' \
+    'ini="/config/.wine/drive_c/Program Files/MetaTrader 5/Config/common.ini"' \
+    'if [ -f "$ini" ] && ! iconv -f UTF-16 -t UTF-8 "$ini" | grep -q "^\[Experts\]"; then' \
+    '  printf "[Experts]\r\nEnabled=1\r\nAllowLiveTrading=1\r\nAllowDllImport=0\r\n" | iconv -f UTF-8 -t UTF-16LE >> "$ini"' \
+    'fi' > /opt/enable-algo-trading.sh \
+    && sed -i 's|^    \$wine_executable "\$mt5file" \$MT5_CMD_OPTIONS &|    . /opt/enable-algo-trading.sh\n&|' /Metatrader/start.sh \
+    && grep -q 'enable-algo-trading.sh' /Metatrader/start.sh
