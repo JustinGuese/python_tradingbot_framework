@@ -25,3 +25,9 @@ RUN sed -i 's/--no-deps mt5linux/--no-deps mt5linux==0.1.9/g' /Metatrader/start.
     && sed -i 's/"mt5linux>=0.1.9"/rpyc==6.0.2 plumbum "numpy<2"/g' /Metatrader/start.sh \
     && grep -q 'mt5linux==0.1.9' /Metatrader/start.sh \
     && grep -q 'rpyc==6.0.2 plumbum "numpy<2"' /Metatrader/start.sh
+
+# The Python API cannot place orders while the terminal's "Algo Trading" switch is
+# off (order_check -> retcode 10017 "Trade disabled"). Start the terminal with a
+# config that turns it on; start.sh passes $MT5_CMD_OPTIONS to terminal64.exe.
+RUN printf '[Experts]\r\nEnabled=1\r\nAllowLiveTrading=1\r\nAllowDllImport=0\r\n' > /opt/mt5-startup.ini
+ENV MT5_CMD_OPTIONS="/config:Z:\\opt\\mt5-startup.ini"

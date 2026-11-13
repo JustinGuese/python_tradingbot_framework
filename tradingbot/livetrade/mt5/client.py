@@ -231,6 +231,14 @@ class _RemoteMT5:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._mt5, name)
 
+    # MetaTrader5 5.0.36 rejects a positional request dict arriving over RPyC
+    # ("Unnamed arguments not allowed", last_error -2), so send it as kwargs.
+    def order_send(self, request: dict[str, Any]) -> Any:
+        return self._mt5.order_send(**request)
+
+    def order_check(self, request: dict[str, Any]) -> Any:
+        return self._mt5.order_check(**request)
+
     def symbol_names(self) -> list[str] | None:
         from rpyc.utils.classic import obtain
 

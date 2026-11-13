@@ -202,3 +202,19 @@ def test_connect_rpyc_returns_remote_metatrader5_module(mocker):
     client = connect_rpyc(host="cluster-bridge", port=8001)
     assert client.initialize is remote_mt5.initialize  # attribute access delegates to the remote module
     connect.assert_called_once_with("cluster-bridge", 8001)
+
+
+def test_remote_order_send_passes_request_as_kwargs(mocker):
+    """MetaTrader5 over RPyC rejects a positional dict (-2 'Unnamed arguments'); send kwargs."""
+    import rpyc
+
+    conn = MagicMock()
+    remote_mt5 = MagicMock()
+    conn.modules.__getitem__.side_effect = lambda name: remote_mt5 if name == "MetaTrader5" else None
+    mocker.patch.object(rpyc.classic, "connect", return_value=conn)
+
+    client = connect_rpyc(host="h", port=8001)
+    client.order_send({"symbol": "SPY", "volume": 1.0})
+    client.order_check({"symbol": "SPY", "volume": 1.0})
+    remote_mt5.order_send.assert_called_once_with(symbol="SPY", volume=1.0)
+    remote_mt5.order_check.assert_called_once_with(symbol="SPY", volume=1.0)
