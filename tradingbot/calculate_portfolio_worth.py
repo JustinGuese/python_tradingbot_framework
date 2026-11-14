@@ -7,6 +7,7 @@ from tradingbot.utils.data_service import DataService
 from tradingbot.utils.db import Bot as BotModel
 from tradingbot.utils.db import PortfolioWorth, get_db_session
 from tradingbot.utils.portfolio_utils import calculate_portfolio_worth
+from tradingbot.utils.short_carry import apply_carry
 from tradingbot.utils.splits import apply_splits_all_bots
 from tradingbot.utils.stock_fundamentals_loader import (
     get_portfolio_symbols,
@@ -45,6 +46,11 @@ def main():
                 if existing:
                     logger.info(f"  Portfolio worth for {bot.name} already calculated for {today.date()}, skipping")
                     continue
+
+                # Apply short carry before valuing
+                today_date = today.date() if isinstance(today, datetime) else today
+                apply_carry(bot.name, today=today_date, session=session, data_service=data_service)
+                session.refresh(bot)
 
                 # Calculate current portfolio worth
                 worth = calculate_portfolio_worth(bot, data_service)
