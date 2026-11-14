@@ -40,6 +40,16 @@ def positive_weight_sum(weights: dict[str, float]) -> float:
     return sum(w for w in weights.values() if w > 0)
 
 
+def gross_weight(weights: dict[str, float]) -> float:
+    """Sum of the absolute values of asset weights (excluding cash 'USD')."""
+    return sum(abs(w) for k, w in weights.items() if k != "USD")
+
+
+def net_weight(weights: dict[str, float]) -> float:
+    """Sum of signed asset weights (excluding cash 'USD')."""
+    return sum(w for k, w in weights.items() if k != "USD")
+
+
 def is_normalized(weights: dict[str, float], tolerance: float = WEIGHT_SUM_TOLERANCE) -> bool:
     """True if the positive weights sum to 1.0 within `tolerance`."""
     return abs(positive_weight_sum(weights) - 1.0) <= tolerance

@@ -40,7 +40,14 @@ from .config import setup_logging
 from .data_service import DataService
 from .db import RunLog, get_db_session, init_db
 from .portfolio_manager import PortfolioManager
-from .weights import WEIGHT_SUM_TOLERANCE, normalize_weights, positive_weight_sum, require_normalized
+from .weights import (
+    WEIGHT_SUM_TOLERANCE,
+    gross_weight,
+    net_weight,
+    normalize_weights,
+    positive_weight_sum,
+    require_normalized,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,12 @@ class Bot:
     # universe from the predictions table on every run, so a single day's gap
     # would otherwise liquidate and re-enter the whole book.
     LIQUIDATE_UNTRACKED: bool = False
+
+    # Short selling controls (PLAN.md S1b). Off by default; opted-in bots set
+    # ALLOW_SHORT = True to enable negative target weights and short positions.
+    ALLOW_SHORT: ClassVar[bool] = False
+    MAX_GROSS: ClassVar[float] = 1.0
+    SHORTABLE: ClassVar[set[str] | list[str] | tuple[str, ...] | None] = None
 
     # Optional override for the history backtest_bot fetches. None means "use
     # _get_backtest_period(interval)", which is right for strategies whose signal
@@ -588,6 +601,26 @@ class Bot:
             symbol, quantity_usd=quantity_usd, cached_data=cached, option=self._option_mode(option)
         )
 
+    def short(self, symbol: str, quantity_usd: float = -1) -> None:
+        """
+        Short a quantity of the specified symbol.
+
+        Args:
+            symbol: Trading symbol to short
+            quantity_usd: Amount in USD to short (-1 means use available capacity)
+        """
+        self._portfolio_manager.short(symbol, quantity_usd=quantity_usd)
+
+    def cover(self, symbol: str, quantity_usd: float = -1) -> None:
+        """
+        Cover a short position in the specified symbol.
+
+        Args:
+            symbol: Trading symbol to cover
+            quantity_usd: Amount in USD to cover (-1 means cover all short holdings)
+        """
+        self._portfolio_manager.cover(symbol, quantity_usd=quantity_usd)
+
     @property
     def dbBot(self) -> BotSnapshot:
         """
@@ -715,7 +748,16 @@ class Bot:
         Raises:
             ValueError: If weights don't sum to 1.0 (within tolerance)
         """
-        self._portfolio_manager.rebalance_portfolio(targetPortfolio, only_over_50_usd=onlyOver50USD)
+        if getattr(self, "ALLOW_SHORT", False):
+            self._portfolio_manager.rebalance_portfolio(
+                targetPortfolio,
+                only_over_50_usd=onlyOver50USD,
+                allow_short=True,
+                max_gross=getattr(self, "MAX_GROSS", 1.0),
+                shortable=getattr(self, "SHORTABLE", None),
+            )
+        else:
+            self._portfolio_manager.rebalance_portfolio(targetPortfolio, only_over_50_usd=onlyOver50USD)
 
     # Decision and execution methods
     def decisionFunction(self, row: pd.Series) -> int:
@@ -1179,6 +1221,8 @@ class Bot:
             making a statement, not failing to make one.)
         """
         bot_name = getattr(self, "bot_name", self.__class__.__name__)
+        allow_short = bool(getattr(self, "ALLOW_SHORT", False))
+        max_gross = float(getattr(self, "MAX_GROSS", 1.0))
 
         weights: dict[str, float] = {}
         dropped_unknown: list[str] = []
@@ -1196,10 +1240,13 @@ class Bot:
             if symbol not in allowed:
                 dropped_unknown.append(symbol)
                 continue
-            # Clamp rather than drop: normalize_weights documents that a key at
-            # 0.0 means "sell it" while an absent key means "leave it alone",
-            # and a bot asking for a negative weight is asking to be out.
-            weights[symbol] = max(0.0, weight)
+            if allow_short:
+                weights[symbol] = weight
+            else:
+                # Clamp rather than drop: normalize_weights documents that a key at
+                # 0.0 means "sell it" while an absent key means "leave it alone",
+                # and a bot asking for a negative weight is asking to be out.
+                weights[symbol] = max(0.0, weight)
 
         if dropped_unknown:
             logger.warning(
@@ -1208,12 +1255,25 @@ class Bot:
                 sorted(dropped_unknown),
             )
 
-        total = positive_weight_sum(weights)
-        if total > 1.0:
-            if total > 1.0 + WEIGHT_SUM_TOLERANCE:
-                logger.error("%s: targetWeights summed to %.6f — scaling down to 1.0", bot_name, total)
-            weights = normalize_weights(weights)
+        if allow_short:
+            gross = gross_weight(weights)
+            if gross > max_gross:
+                if gross > max_gross + WEIGHT_SUM_TOLERANCE:
+                    logger.error(
+                        "%s: targetWeights gross %.6f exceeded MAX_GROSS %.6f — scaling down",
+                        bot_name,
+                        gross,
+                        max_gross,
+                    )
+                scale = max_gross / gross
+                weights = {s: w * scale for s, w in weights.items()}
+        else:
             total = positive_weight_sum(weights)
+            if total > 1.0:
+                if total > 1.0 + WEIGHT_SUM_TOLERANCE:
+                    logger.error("%s: targetWeights summed to %.6f — scaling down to 1.0", bot_name, total)
+                weights = normalize_weights(weights)
+                total = positive_weight_sum(weights)
 
         # Holdings outside the universe keep their exact current weight and are
         # excluded from the strategy's budget — same rule as
@@ -1233,12 +1293,23 @@ class Bot:
                     sorted(keep),
                 )
                 budget = max(0.0, 1.0 - kept_total)
-                if total > budget and total > 0:
-                    weights = {s: w * budget / total for s, w in weights.items()}
+                if not allow_short:
+                    if total > budget and total > 0:
+                        weights = {s: w * budget / total for s, w in weights.items()}
+                else:
+                    curr_gross = gross_weight(weights)
+                    if curr_gross > budget and curr_gross > 0:
+                        weights = {s: w * budget / curr_gross for s, w in weights.items()}
                 weights.update(keep)
 
-        residual = 1.0 - positive_weight_sum(weights)
-        weights["USD"] = max(0.0, residual)
+        if allow_short:
+            residual = 1.0 - sum(weights.values())
+            if abs(residual) < 1e-12:
+                residual = 0.0
+            weights["USD"] = residual
+        else:
+            residual = 1.0 - positive_weight_sum(weights)
+            weights["USD"] = max(0.0, residual)
         # Free invariant assert: every caller downstream assumes this holds.
         require_normalized(weights, context=f"{bot_name} targetWeights")
         return weights
