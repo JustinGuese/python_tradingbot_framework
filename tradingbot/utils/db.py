@@ -999,6 +999,74 @@ class LiveEquity(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class Inst13fFiling(Base):
+    """
+    SEC Form 13F filing metadata.
+
+    Captures quarterly institutional investment manager filings from SEC EDGAR.
+    Keyed by SEC acceptance time (`filed_at`), not period end, to prevent
+    look-ahead bias in backtests and live execution.
+    """
+
+    __tablename__ = "inst13f_filings"
+    __table_args__ = (
+        UniqueConstraint("accession", name="uq_inst13f_filings_accession"),
+        Index("ix_inst13f_filings_cik_period", "cik", "period_end"),
+        Index("ix_inst13f_filings_filed_at", "filed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accession: Mapped[str] = mapped_column(String, nullable=False)
+    cik: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    filer_name: Mapped[str] = mapped_column(String, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    filed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_amendment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class Inst13fHolding(Base):
+    """
+    Individual holding line items from Form 13F INFOTABLE.
+
+    Values are normalized to dollars ($ USD), handling the SEC's 2023
+    value unit change (thousands to dollars).
+    """
+
+    __tablename__ = "inst13f_holdings"
+    __table_args__ = (
+        Index("ix_inst13f_holdings_accession", "accession"),
+        Index("ix_inst13f_holdings_cusip", "cusip"),
+        Index("ix_inst13f_holdings_ticker", "ticker"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accession: Mapped[str] = mapped_column(String, nullable=False)
+    cusip: Mapped[str] = mapped_column(String, nullable=False)
+    ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    value_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    shares: Mapped[float] = mapped_column(Float, nullable=False)
+    put_call: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class CusipMap(Base):
+    """
+    Mapping table from CUSIP to ticker symbol.
+
+    Populated from OpenFIGI or other mapping sources.
+    Unresolved CUSIPs have ticker NULL to avoid repeated failed queries.
+    """
+
+    __tablename__ = "cusip_map"
+
+    cusip: Mapped[str] = mapped_column(String, primary_key=True)
+    ticker: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    mapped_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 def _migrate_schema() -> None:
     """
     Apply incremental column additions that create_all cannot handle on existing tables.
