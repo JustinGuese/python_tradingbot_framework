@@ -3,7 +3,7 @@ import time
 from typing import Literal
 
 import yfinance as yf
-from ib_async import IB, Contract, Crypto, Forex, Future, MarketOrder, Stock, util
+from ib_async import IB, Contract, Crypto, Forex, Future, LimitOrder, MarketOrder, Stock, util
 
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.symbol_map import SymbolMapper
@@ -31,6 +31,8 @@ class InteractiveBrokersBroker(LiveBroker):
     run's still-working orders are cancelled and manual orders are left alone.
     """
 
+    supports_limit_orders: bool = True
+
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -51,6 +53,7 @@ class InteractiveBrokersBroker(LiveBroker):
         self._connected = False
         self._eligible: dict[str, bool] = {}
         self._yf_prices: dict[str, float] = {}
+        self.supports_limit_orders = True
 
     @property
     def account_ref(self) -> str:
@@ -297,13 +300,55 @@ class InteractiveBrokersBroker(LiveBroker):
             return Future(symbol, exchange=exchange, currency=currency)
         return Stock(symbol, exchange, currency)
 
+    @staticmethod
+    def is_deferred(trade: object) -> bool:
+        """Check if an IB trade was deferred to the next session (e.g. IB warning 399)."""
+        if trade is None:
+            return False
+        why_held = getattr(getattr(trade, "orderStatus", None), "whyHeld", None)
+        if isinstance(why_held, str):
+            why_held_lower = why_held.lower()
+            if "399" in why_held_lower or "not placed until" in why_held_lower:
+                return True
+
+        log = getattr(trade, "log", None)
+        if log is None:
+            return False
+        for entry in log:
+            code = getattr(entry, "errorCode", None)
+            if code == 399:
+                return True
+            msg = getattr(entry, "message", None)
+            if msg is None and isinstance(entry, str):
+                msg = entry
+            if isinstance(msg, str):
+                msg_lower = msg.lower()
+                if "399" in msg_lower and (
+                    "not placed" in msg_lower
+                    or "not be placed" in msg_lower
+                    or "until" in msg_lower
+                    or "warning" in msg_lower
+                    or "defer" in msg_lower
+                ):
+                    return True
+                if (
+                    "not placed until" in msg_lower
+                    or "will not be placed until" in msg_lower
+                    or "will not be placed at the exchange until" in msg_lower
+                ):
+                    return True
+        return False
+
+    _is_deferred = is_deferred
+
     def place_order(
         self,
         broker_symbol: str,
         quantity: float,
         side: Literal["BUY", "SELL"],
         symbol_type: str | None = None,
-    ) -> None:
+        limit_price: float | None = None,
+    ) -> str | None:
         self.connect(readonly=False)
         yf_symbol = self.symbol_mapper.unmap_symbol(broker_symbol, broker_name=self.name)
         meta = self.map_symbol(yf_symbol)
@@ -339,14 +384,22 @@ class InteractiveBrokersBroker(LiveBroker):
                     f"Skipping {side} for {broker_symbol}: quantity {final_qty:.4f} is < 1 "
                     f"(fractional STK not supported via API)"
                 )
-                return
+                return None
             final_qty = float(int(final_qty))
 
-        order = MarketOrder(side, final_qty)
+        if limit_price is not None:
+            if float(limit_price) <= 0:
+                raise ValueError(f"Limit price must be positive, got {limit_price}")
+            order = LimitOrder(side, final_qty, float(limit_price), tif="DAY")
+        else:
+            order = MarketOrder(side, final_qty)
         if self.account_id:
             order.account = self.account_id
 
-        logger.info(f"Submitting IB {side} order for {final_qty} {broker_symbol}")
+        order_desc = f"{side} {final_qty} {broker_symbol}" + (
+            f" @ limit {float(limit_price):.4f} (DAY)" if limit_price is not None else ""
+        )
+        logger.info(f"Submitting IB {order_desc}")
         trade = self.ib.placeOrder(contract, order)
 
         # Give the gateway a moment to acknowledge, so a rejection surfaces here
@@ -355,16 +408,30 @@ class InteractiveBrokersBroker(LiveBroker):
         deadline = time.time() + 5.0
         while time.time() < deadline and trade.orderStatus.status in ("", "PendingSubmit", "ApiPending"):
             self.ib.sleep(0.25)
+            if self.is_deferred(trade):
+                break
         status = trade.orderStatus.status
         logger.info(f"IB Order Status: {status}")
+        if self.is_deferred(trade):
+            logger.warning(
+                f"IB deferred {side} {final_qty} {broker_symbol}: order will not be placed until next session (warning 399)"
+            )
+            return "deferred"
+
         if status in ("Cancelled", "ApiCancelled", "Inactive"):
             # The cause (e.g. Error 201, no trading permission) can arrive after the
             # status flips; the first log entry is often only the TIF notice.
             self.ib.sleep(1.5)
-            reasons = [e.message for e in trade.log if e.message and "TIF was set" not in e.message]
+            if self.is_deferred(trade):
+                logger.warning(
+                    f"IB deferred {side} {final_qty} {broker_symbol}: order will not be placed until next session (warning 399)"
+                )
+                return "deferred"
+            reasons = [e.message for e in trade.log if getattr(e, "message", None) and "TIF was set" not in e.message]
             raise RuntimeError(
                 f"IB rejected {side} {final_qty} {broker_symbol}: {status} {(reasons[-1] if reasons else '')[:300]}".strip()
             )
+        return status
 
     def cancel_open_orders(self) -> int:
         """Cancel open orders submitted under this clientId."""
