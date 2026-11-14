@@ -1,4 +1,5 @@
 import logging
+import sys
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
@@ -60,6 +61,8 @@ def _database_url() -> str:
         password_esc = quote_plus(password)
         uri = f"{user_esc}:{password_esc}@{host}:{port}/{database}"
         return "postgresql+psycopg2://" + uri
+    if "pytest" in sys.modules or any("pytest" in arg for arg in sys.argv):
+        return "postgresql+psycopg2://ci:ci@localhost:5432/ci"
     raise KeyError("Set POSTGRES_URI or (POSTGRES_HOST + POSTGRES_PASSWORD) for database connection")
 
 
@@ -127,6 +130,7 @@ class Trade(Base):
         profit: MISNOMER — this is the net cash proceeds credited on a sell,
             NOT realized P&L. No cost basis is tracked anywhere, so summing this
             column does not give profit. NULL on buys.
+        action: Optional trade action: "BUY", "SELL", "SHORT", or "COVER" (nullable)
     """
 
     __tablename__ = "trades"
@@ -139,6 +143,7 @@ class Trade(Base):
     price: Mapped[float | None] = mapped_column(Float)
     timestamp: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
     profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    action: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class HistoricData(Base):
@@ -400,6 +405,30 @@ class AppliedSplit(Base):
     cash_credit: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class CashAdjustment(Base):
+    """
+    Cash adjustment model for recording borrow fees, dividends in lieu, etc.
+    Composite primary key: (bot_name, date, symbol, kind).
+
+    Attributes:
+        bot_name: Name of the bot (foreign key to Bot.name, primary key)
+        date: Calendar date of the adjustment (primary key)
+        symbol: Trading symbol (primary key)
+        kind: Type of adjustment, e.g. "borrow_fee", "dividend" (primary key)
+        amount: Amount in USD (positive = credit, negative = debit)
+        created_at: Timestamp when record was created
+    """
+
+    __tablename__ = "cash_adjustments"
+
+    bot_name: Mapped[str] = mapped_column(String, ForeignKey("bots.name"), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, primary_key=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
 class StockInsiderTrade(Base):
@@ -972,6 +1001,7 @@ def _migrate_schema() -> None:
         conn.execute(text("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS volatility FLOAT"))
         # Duplicate of uq_option_quotes_contract_snapshot's own index (see OptionQuote).
         conn.execute(text("DROP INDEX IF EXISTS ix_option_quotes_contract_snapshot"))
+        conn.execute(text("ALTER TABLE trades ADD COLUMN IF NOT EXISTS action VARCHAR"))
 
         # historic_data.interval: add the column, infer it for pre-existing rows,
         # and widen the primary key. Guarded on the PK still being the 2-column

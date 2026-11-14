@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from .db import Bot as BotModel
-from .db import RunLog, Trade, get_db_session
+from .db import CashAdjustment, RunLog, Trade, get_db_session
 
 
 class BotRepository:
@@ -158,6 +158,7 @@ class BotRepository:
         is_buy: bool,
         profit: float | None = None,
         session: Session | None = None,
+        action: str | None = None,
     ) -> Trade | None:
         """
         Log a trade to the database.
@@ -171,6 +172,7 @@ class BotRepository:
             profit: MISNOMER — net cash proceeds credited on a sell, NOT realized
                 P&L (no cost basis is tracked). Leave None on buys.
             session: Optional existing database session
+            action: Optional trade action: "BUY", "SELL", "SHORT", or "COVER"
 
         Returns:
             The created Trade when `session` is given (still attached to it),
@@ -188,6 +190,7 @@ class BotRepository:
                 # is deprecated in 3.12, so build the same naive value via now(UTC).
                 timestamp=datetime.now(UTC).replace(tzinfo=None),
                 profit=float(profit) if profit is not None else None,
+                action=action,
             )
             sess.add(trade)
             sess.flush()
