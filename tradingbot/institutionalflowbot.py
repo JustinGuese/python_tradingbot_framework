@@ -1,6 +1,14 @@
 """
-InstitutionalFlowBot — hold the S&P 100 names that look like they are being
-accumulated by institutions, rebalanced weekly.
+InstitutionalFlowBot — large-cap momentum with a trend filter across S&P 100 names,
+rebalanced weekly.
+
+Despite the name, this bot uses price and volume only. It has NO access to 13F filings,
+dark-pool prints, ETF creations, or options-flow data. The bot name, DB name, and
+schedule stay as InstitutionalFlowBot so historical metrics and database records are not orphaned.
+
+Live note: Gate-off periods are 100% cash (SHV) and look idle on copy platforms.
+When QQQ is below its 200-day MA, the market gate moves entirely to cash (parked
+in SHV by the live copier).
 
 Each Friday after the close:
 
@@ -28,11 +36,11 @@ through slippage and the no-trade band. The backtest compares both
 (rebalance_weekday=None rebalances every bar); see
 docs/backtests/institutionalflowbot.md.
 
-Daily bars carry no MOC, dark-pool, ETF-flow, 13F or options-flow data, so
-those institutional footprints are not used. Valuation fundamentals are
-captured daily into `stock_fundamentals` (tradingbot/fundamentalssnapshot.py)
-but are not an input yet: they have no history before capture started, so
-nothing using them could be backtested.
+Price and volume only: daily bars carry no MOC, dark-pool, ETF-flow, 13F or
+options-flow data, so those institutional footprints are not used. Valuation
+fundamentals are captured daily into `stock_fundamentals`
+(tradingbot/fundamentalssnapshot.py) but are not an input yet: they have no
+history before capture started, so nothing using them could be backtested.
 
 Schedule: 15 21 * * 5 — Friday after the US close. On a holiday Friday the
 newest bar is Thursday's, the weekday gate returns None, and the week is skipped
@@ -63,8 +71,12 @@ def _bar_timestamp(row: pd.Series) -> pd.Timestamp:
 
 class InstitutionalFlowBot(Bot):
     """
-    Weekly top-N of S&P 100 stocks passing institutional mandate filters,
-    ranked by volume-based accumulation.
+    Weekly top-N of S&P 100 stocks passing trend and liquidity mandate filters,
+    ranked by accumulation score (large-cap momentum with a trend filter).
+
+    Uses price and volume data only (no 13F, dark-pool, or options-flow data).
+    Bot name, DB name, and schedule stay (history is not orphaned).
+    Gate-off periods are 100% cash (SHV) and look idle on copy platforms.
 
     Args:
         top_n: Number of names held; each gets 1/top_n of the book.

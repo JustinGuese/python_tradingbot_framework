@@ -2,6 +2,14 @@
 
 **Status: deployed as paper** (`15 21 * * 5`, Fridays). No copier holds it.
 
+Despite the name, InstitutionalFlowBot is **large-cap momentum with a trend filter**.
+It uses daily price and volume data only, with **no 13F filings, dark-pool prints, or options-flow data**.
+The bot name, DB name, and schedule stay as `InstitutionalFlowBot` so historical metrics
+and database records are not orphaned.
+
+**Live note:** Gate-off periods are 100% cash (SHV) and look idle on copy platforms (eToro, MT5, Collective2).
+When QQQ is below its 200-day MA, the bot sits completely in cash/SHV.
+
 It has positive alpha against both QQQ and an equal-weight hold of its own
 universe, in both halves of the sample, at a beta of about 0.4. It is
 **unproven**: out of sample, t = 1.52. The market gate is the only component
@@ -9,6 +17,7 @@ whose effect is unambiguous.
 
 ## What it does
 
+InstitutionalFlowBot is a large-cap momentum strategy with a trend filter that uses price and volume only.
 Every Friday it takes the S&P 100 (99 names) and runs four steps:
 
 1. **Market gate.** If QQQ is below its 200-day MA, it holds cash.
@@ -29,8 +38,9 @@ Every Friday it takes the S&P 100 (99 names) and runs four steps:
 
 Code: `tradingbot/institutionalflowbot.py` and `tradingbot/utils/institutional_ta.py`.
 
-Out of scope, because free daily data does not contain them: MOC imbalances,
-dark-pool prints, ETF creations, 13F changes and options flow.
+Out of scope, because standard daily price and volume data does not contain them:
+MOC imbalances, dark-pool prints, ETF creations, 13F filings/changes, and options flow.
+InstitutionalFlowBot has no access to any of these datasets.
 
 Fundamentals are captured daily from 2026-09-25 into `stock_fundamentals`. The
 bot does not read them, because there is no history before capture to backtest
@@ -97,6 +107,13 @@ window despite its name.
 
 ## Reading it honestly
 
+- **Large-cap momentum with a trend filter (honest naming):** Despite its name,
+  the strategy uses price and volume only. It does not use 13F filings, dark-pool
+  prints, or options flow. The bot name, DB name, and schedule stay as
+  `InstitutionalFlowBot` to avoid orphaning database records and historical tracking.
+- **Copy platform appearance:** Gate-off periods are 100% cash (SHV) and look
+  idle on copy platforms (eToro, MT5, Collective2). When QQQ is below SMA200, no
+  stock trades are placed, which is deliberate regime defense rather than a malfunction.
 - **Not proven.** The out-of-sample t is 1.52. The full-sample t of 2.14
   includes the half the parameters were chosen on, so it is not evidence of an
   edge. The bar is t ≥ 2 out of sample or in live trading.
