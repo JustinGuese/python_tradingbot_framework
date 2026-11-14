@@ -187,3 +187,43 @@ def test_load_prices_from_db_keeps_only_fresh_deep_symbols(sqlite_db, db_session
 
     out = load_prices_from_db(["GOOD", "SHORT", "STALE", "MISSING"])
     assert set(out["symbol"]) == {"GOOD"}
+
+
+def test_submit_signals_with_multi_country_universe(mock_napi, monkeypatch):
+    """Test S3b: submit_signals extracts country codes from global Numerai tickers."""
+    from unittest.mock import patch
+    from tradingbot.numerai_signals_submit import submit_signals
+
+    # Universe with US, German (GY), and British (LN) tickers
+    universe = [f"US_{i:03d} US" for i in range(50)] + [f"DE_{i:03d} GY" for i in range(30)] + [f"UK_{i:03d} LN" for i in range(30)]
+    set_universe(mock_napi, universe)
+
+    dates = pd.date_range("2023-01-01", periods=270, freq="B", tz="UTC")
+    all_yf = [f"US_{i:03d}" for i in range(50)] + [f"DE_{i:03d}.DE" for i in range(30)] + [f"UK_{i:03d}.L" for i in range(30)]
+    prices = pd.DataFrame(100.0, index=dates, columns=all_yf)
+
+    captured_country_map = None
+
+    from tradingbot.utils import numerai_features
+    orig_build = numerai_features.build_rank_blended_signal
+
+    def spy_build(*args, **kwargs):
+        nonlocal captured_country_map
+        captured_country_map = kwargs.get("country_map")
+        return orig_build(*args, **kwargs)
+
+    with patch("tradingbot.utils.numerai_features.build_rank_blended_signal", side_effect=spy_build):
+        ret = submit_signals(
+            public_id="mock_pub",
+            secret_key="mock_sec",
+            model_name="datafortress",
+            prices=prices,
+            napi=mock_napi,
+        )
+
+    assert ret == 0
+    assert captured_country_map is not None
+    assert captured_country_map["US_001"] == "US"
+    assert captured_country_map["DE_001.DE"] == "GY"
+    assert captured_country_map["UK_001.L"] == "LN"
+
