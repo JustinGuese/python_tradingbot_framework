@@ -8,6 +8,7 @@ from tradingbot.utils.data_service import DataService
 from tradingbot.utils.options import is_option_symbol, option_underlyings
 
 from .broker import LiveBroker
+from .execution import ExecutionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,14 @@ class LiveTradeCopier:
         min_order_usd: float = 50.0,
         dry_run: bool = False,
         portfolio_fraction: float = 1.0,
+        execution_policy: ExecutionPolicy | None = None,
     ):
         self.broker = broker
         self.bot_weights = dict(bot_weights)
         self.min_order_usd = min_order_usd
         self.dry_run = dry_run
         self.portfolio_fraction = portfolio_fraction
+        self.execution_policy = execution_policy or ExecutionPolicy()
         self.data_service = DataService()
         self.bot_repo = BotRepository()
         self.strict_mapping = os.getenv("LIVETRADE_STRICT_MAPPING", "false").lower() == "true"
@@ -136,6 +139,14 @@ class LiveTradeCopier:
         # 5. Calculate orders (full target-state sync: liquidates anything not in target)
         orders = self._calculate_orders(broker_target_weights, current_positions, total_equity)
 
+        # Abort if outside the execution window (crypto brokers exempt via broker.always_open = True)
+        is_always_open = getattr(self.broker, "always_open", False) is True or getattr(self.broker, "always_open", False) == True
+        if not is_always_open:
+            in_win, reason = self.execution_policy.explain_window()
+            if not in_win:
+                logger.error(f"Aborting sync: outside US execution window on {self.broker.name}: {reason}")
+                return
+
         # 6. Execute orders: Sells first, then Buys (with a settle pause in between)
         self._execute_orders(orders)
         logger.info("Sync complete")
@@ -235,15 +246,18 @@ class LiveTradeCopier:
             # Full liquidation: not in target, just sell the whole position.
             # No price lookup needed — broker knows the quantity.
             if target_weight == 0.0 and current_qty > 0:
-                orders.append(
-                    {
-                        "symbol": symbol,
-                        "quantity": current_qty,
-                        "side": "SELL",
-                        "value": 0.0,  # unknown without a price; not used for execution
-                        "type": target_meta["type"],
-                    }
-                )
+                order_data = {
+                    "symbol": symbol,
+                    "quantity": current_qty,
+                    "side": "SELL",
+                    "value": 0.0,  # unknown without a price; not used for execution
+                    "type": target_meta["type"],
+                }
+                if getattr(self.broker, "supports_limit_orders", False) is True:
+                    p = self.broker.get_latest_price(symbol)
+                    if p > 0:
+                        order_data["limit_price"] = self.execution_policy.marketable_limit("SELL", p)
+                orders.append(order_data)
                 continue
 
             target_value = total_equity * target_weight
@@ -261,31 +275,44 @@ class LiveTradeCopier:
             qty_to_trade = diff_value / current_price
             side: Literal["BUY", "SELL"] = "BUY" if qty_to_trade > 0 else "SELL"
 
-            orders.append(
-                {
-                    "symbol": symbol,
-                    "quantity": abs(qty_to_trade),
-                    "side": side,
-                    "value": abs(diff_value),
-                    "type": target_meta["type"],
-                }
-            )
+            order_data = {
+                "symbol": symbol,
+                "quantity": abs(qty_to_trade),
+                "side": side,
+                "value": abs(diff_value),
+                "type": target_meta["type"],
+            }
+            if getattr(self.broker, "supports_limit_orders", False) is True:
+                order_data["limit_price"] = self.execution_policy.marketable_limit(side, current_price)
+
+            orders.append(order_data)
 
         return orders
 
     def _execute_orders(self, orders: list[dict]) -> None:
         sells = [o for o in orders if o["side"] == "SELL"]
         buys = [o for o in orders if o["side"] == "BUY"]
+        supports_limit = getattr(self.broker, "supports_limit_orders", False) is True
 
         def _submit(o: dict) -> None:
+            limit_price = o.get("limit_price")
+            if supports_limit and limit_price is None:
+                p = self.broker.get_latest_price(o["symbol"])
+                if p > 0:
+                    limit_price = self.execution_policy.marketable_limit(o["side"], p)
+
             if self.dry_run:
+                limit_info = f", limit=${limit_price:.2f}" if (supports_limit and limit_price is not None) else ""
                 logger.info(
                     f"[DRY RUN] Would {o['side']} {o['quantity']:.4f} {o['symbol']} "
-                    f"(type={o['type']}, ~${o['value']:.2f})"
+                    f"(type={o['type']}, ~${o['value']:.2f}{limit_info})"
                 )
                 return
             try:
-                self.broker.place_order(o["symbol"], o["quantity"], o["side"], symbol_type=o["type"])
+                kwargs = {"symbol_type": o["type"]}
+                if supports_limit:
+                    kwargs["limit_price"] = limit_price
+                self.broker.place_order(o["symbol"], o["quantity"], o["side"], **kwargs)
                 logger.info(f"Submitted {o['side']} {o['quantity']:.4f} {o['symbol']}")
             except Exception as e:
                 logger.error(f"Failed to execute {o['side']} for {o['symbol']}: {e}")
