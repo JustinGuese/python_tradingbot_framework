@@ -8,9 +8,11 @@ Rules:
   (cik, period_end). `select_effective` returns the amendment only for
   `as_of >= amendment.filed_at`; before that the original is the effective one.
 - Option rows (PUTCALL set) are dropped.
-- Value units: the SEC changed Form 13F VALUE from thousands of dollars to
-  whole dollars for filings made on or after 2023-01-03 (the date the EDGAR
-  13F XML schema change took effect). Decided by filing date, not period end.
+- Value units (thousands vs whole dollars) are detected per filing from the
+  implied price per share (value/shares) against the cross-filer median per
+  CUSIP in the same load; a filing ~1000x below the others is in thousands.
+  The SEC page does not document the change date, so the date rule
+  (VALUE_DOLLARS_CUTOVER) is only a logged fallback when overlaps are too few.
 - Non-equity / unmapped CUSIPs are only flagged (ticker stays NULL, mapped
   later through cusip_map).
 """
@@ -20,13 +22,18 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import math
+import statistics
+from collections import defaultdict
 from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# First filing date reporting VALUE in whole dollars (before: thousands).
+# Unverified fallback: first filing date believed to report VALUE in dollars.
 VALUE_DOLLARS_CUTOVER = date(2023, 1, 3)
+MIN_OVERLAP_CUSIPS = 3  # CUSIPs shared with other filers needed to judge a filing
+UNIT_GAP_DECADES = 2.0  # log10 gap separating the thousands group (true gap is 3)
 
 _DATE_FORMATS = ("%d-%b-%Y", "%Y-%m-%d", "%m/%d/%Y")
 
@@ -47,8 +54,41 @@ def _read_tsv(text: str) -> list[dict[str, str]]:
 
 
 def normalise_value(value: float, filed_on: date) -> float:
-    """Return the reported VALUE in dollars, based on the filing date."""
+    """Date-rule fallback: VALUE in dollars, assuming the cutover date."""
     return float(value) * (1.0 if filed_on >= VALUE_DOLLARS_CUTOVER else 1000.0)
+
+
+def detect_thousands(rows: list[dict[str, Any]]) -> dict[str, bool | None]:
+    """Per accession: True if VALUE is in thousands, False if dollars, None if unknown.
+
+    Each filing's offset is the median over its CUSIPs of log10(implied price)
+    minus log10(cross-filer median implied price for that CUSIP). Filings whose
+    offsets sit more than UNIT_GAP_DECADES below the top group are in thousands.
+    """
+    by_cusip: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if r["shares"] > 0 and r["raw_value"] > 0:
+            by_cusip[r["cusip"]][r["accession"]].append(math.log10(r["raw_value"] / r["shares"]))
+    offsets: dict[str, list[float]] = defaultdict(list)
+    for per_filer in by_cusip.values():
+        if len(per_filer) < 2:
+            continue
+        logs = {a: statistics.median(v) for a, v in per_filer.items()}
+        ref = statistics.median(logs.values())
+        for a, lp in logs.items():
+            offsets[a].append(lp - ref)
+    off = {a: statistics.median(v) for a, v in offsets.items() if len(v) >= MIN_OVERLAP_CUSIPS}
+    out: dict[str, bool | None] = {r["accession"]: None for r in rows}
+    if len(off) < 2:
+        return out
+    top = max(off.values())
+    for a, d in off.items():
+        out[a] = (top - d) > UNIT_GAP_DECADES
+    # If every judged filing sits in one group the unit is unidentifiable from
+    # relative prices alone; leave to the date-rule fallback.
+    if not any(out[a] for a in off) or all(out[a] for a in off):
+        return {a: None for a in out}
+    return out
 
 
 def parse_quarter(submission: str, coverpage: str, infotable: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -85,10 +125,26 @@ def parse_quarter(submission: str, coverpage: str, infotable: str) -> tuple[list
                 "accession": f["accession"],
                 "cusip": r["CUSIP"].upper(),
                 "ticker": None,
-                "value_usd": normalise_value(value, f["filed_at"].date()),
+                "raw_value": value,
                 "shares": shares,
                 "put_call": None,
             }
+        )
+    units = detect_thousands(holdings)
+    fallback = 0
+    for h in holdings:
+        thousands = units.get(h["accession"])
+        raw = h.pop("raw_value")
+        if thousands is None:
+            fallback += 1
+            h["value_usd"] = normalise_value(raw, filings[h["accession"]]["filed_at"].date())
+        else:
+            h["value_usd"] = raw * (1000.0 if thousands else 1.0)
+    if fallback:
+        logger.warning(
+            "13F units: %d holdings used the unverified date rule (%s) for lack of cross-filer overlap",
+            fallback,
+            VALUE_DOLLARS_CUTOVER,
         )
     return list(filings.values()), holdings
 

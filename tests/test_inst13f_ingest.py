@@ -19,15 +19,36 @@ def _parse(subs, covs, infs):
     )
 
 
-def test_value_units_normalised_across_2023_change():
+CUSIPS = [("037833100", 150), ("594918104", 300), ("67066G104", 100)]
+
+
+def _rows(acc, scale):
+    return [f"{acc}\t{c}\t{int(p * 1000 * scale)}\t1000\t" for c, p in CUSIPS]
+
+
+def test_unit_detection_mixed_units_same_quarter():
+    # B reports thousands, A and C dollars, same quarter/CUSIPs. Date rule would
+    # get it wrong (all filed after the cutover); the price comparison must not.
     _, h = _parse(
-        ["A1\t15-NOV-2022\t13F-HR\t1\t30-SEP-2022", "A2\t14-FEB-2023\t13F-HR\t1\t31-DEC-2022"],
+        [f"{a}\t14-FEB-2024\t13F-HR\t{i}\t31-DEC-2023" for i, a in enumerate("ABC", 1)],
+        [f"{a}\tN\tF" for a in "ABC"],
+        _rows("A", 1) + _rows("B", 0.001) + _rows("C", 1),
+    )
+    by = {(x["accession"], x["cusip"]): x["value_usd"] for x in h}
+    assert by[("B", "037833100")] == 150_000.0
+    assert by[("A", "037833100")] == 150_000.0
+    assert by[("C", "594918104")] == 300_000.0
+
+
+def test_unit_fallback_to_date_rule_when_no_overlap():
+    _, h = _parse(
+        ["A1\t15-NOV-2022\t13F-HR\t1\t30-SEP-2022", "A2\t14-FEB-2023\t13F-HR\t2\t31-DEC-2022"],
         ["A1\tN\tFund", "A2\tN\tFund"],
-        ["A1\t037833100\t5\t10\t", "A2\t037833100\t5000\t10\t"],
+        ["A1\t037833100\t5\t10\t", "A2\t594918104\t5000\t10\t"],
     )
     by = {x["accession"]: x["value_usd"] for x in h}
-    assert by["A1"] == 5000.0  # thousands -> dollars
-    assert by["A2"] == 5000.0  # already dollars
+    assert by["A1"] == 5000.0  # before cutover: thousands
+    assert by["A2"] == 5000.0  # after: dollars
 
 
 def test_amendment_replaces_original_only_from_its_filing_date():
