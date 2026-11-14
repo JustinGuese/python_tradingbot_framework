@@ -73,3 +73,39 @@ Enter the MT5 login (MT5_MQL5_LOGIN) and pick the MetaQuotes-Demo server.
 Give it the investor password (read-only). Never enter the master trading password. It's in your .env.secret, so I'm not printing it here.
 Choose Free signal. A free signal can be registered from a demo account. It gives you a public, audited track record with no real money at risk. A paid signal needs a real funded account and MQL5 seller verification (ID and address).
 Do this after the bot has placed real trades. A signal with an empty history looks dead, and the audit starts counting from registration. So wait for the 15:00 UTC run to fill, then register.
+
+**Darwinex Zero, but not yet. Collective2: skip.** Neither is the first thing to spend on, because the two highest-value steps are free: a small real-money IBKR account and Numerai.
+
+## Collective2: no
+
+- Your blend (about 6.6% CAGR at 5.7% vol) will not attract subscribers on a leaderboard sorted by return, so the $600 a year buys a listing nobody subscribes to.
+- The record is a model account, which C2 itself labels hypothetical, so an allocator gives it no weight.
+
+## Darwinex Zero: yes, conditionally
+
+- **Price:** the monthly plan has been €45 / $50 since 17 November 2025.
+- **Payout:** you earn 15% of the profit on allocated capital, above a high-water mark, settled quarterly unless you pay for the monthly option.
+- **Seed capital:** top performers get €50,000 to €500,000 each month, for six months.
+- **Break-even:** at 6.6% a year you need about $60k allocated continuously to cover the $600 (600 / (0.15 × 0.066)). One mid-sized allocation pays for it; none means you lose $600 a year.
+- **In your favour:** as far as I know, Darwinex rescales every strategy to a common risk target, so low vol is not penalised the way it is on C2. Verify this in their docs.
+
+I would only start paying once these two are true:
+
+1. **The MT5 leg actually fills.** Every buy currently fails with "result expired". Fix that on the free demo first, or you pay for a record of rejected orders.
+2. **Your instruments exist there.** Plans have been split by asset class since 2024, and ETFs trade as CFDs. Check that your universe (or close substitutes) is on the CFD plan.
+
+Then take the monthly plan for three months, not the annual pack, and cancel if the track diverges from the backtest replay.
+
+## Order I would spend in
+
+1. Real-money IBKR account: $0 in fees, and the only record an allocator will accept.
+2. Numerai: $0, a third-party out-of-sample score.
+3. Darwinex Zero: $50 a month, after the two checks above.
+4. Collective2: nothing.
+
+Sources:
+
+- [Darwinex Zero: Performance fees](https://darwinexzero.document360.io/docs/performance-fees)
+- [Darwinex Zero updates subscription pricing](https://thegodfunded.com/en/news/darwinex-zero-updates-subscription-pricing)
+- [Darwinex Zero firm overview](https://thegodfunded.com/en/firms/darwinexzero)
+- [Collective2: Trade Leader fees](https://support.collective2.com/hc/en-us/articles/360007312793-What-are-the-fees-involved-for-a-Trade-Leader)

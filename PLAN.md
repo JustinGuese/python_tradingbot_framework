@@ -1,97 +1,95 @@
-# PLAN — execution timing, leg cleanup, tracking, new research (gembuild)
+# PLAN — short selling on the paper book, IBKR-style (gembuild)
 
-Out of scope (user said NOT): cutting fleet bots, raising the t bar, second benchmark, extending history.
-Rules for every step: touch only listed files; max 2 test rounds; never weaken configs/tests; default is LIVE (no new dry-run defaults).
+Source design: PLAN_SHORTS.md. Rules for every step: touch only listed files; max 2 test rounds; never weaken
+configs/tests; ruff-format any python snippet in .md; shipped behaviour is LIVE (no new dry-run defaults).
+`ALLOW_SHORT=False` is a guard that makes existing bots unchanged, not a dry-run: the new sleeve (S2c) turns it on.
 
-## Timing design (applies to Batches 0-2)
-Targets are computed after the US close (21:xx UTC) and are the *previous close's* decision. Copiers then
-execute **next day mid-session, never at the open**:
-- Single execution slot **15:00-15:10 UTC** for every venue. It is >= 30 min after the US open in winter
-  (14:30 UTC) and >= 90 min in summer (13:30 UTC), and still >= 30 min before London UCITS close in summer
-  (15:30 UTC). So it works year-round with no DST juggling.
-- Orders go out as **marketable limit orders** (last price +/- 0.15%, DAY) instead of raw market orders.
-- A guard refuses to submit outside the window [open+30min, close-15min] (US calendar) and logs why.
-  IB's "will not be placed until Monday" deferral stops counting as a silent reject.
+## Shared contract (all batches rely on these names)
+- `utils/margin.py` pure fns (no I/O): `book_values(portfolio, prices) -> (long, short, equity)`,
+  `initial_ok(portfolio, prices, max_gross) -> bool` (Reg T: equity >= 0.5*long + 0.5*short AND (long+short)/equity <= max_gross),
+  `maintenance_breach(portfolio, prices) -> bool` (equity < 0.25*long + 0.30*short),
+  `spendable_cash(portfolio, prices) -> float` (cash minus short collateral, floored at 0; equals `USD` for a long-only book),
+  `cover_order(portfolio, prices) -> str | None` (largest short by value).
+  Stock shorts only; option underlyings keep `options.margin_requirement`.
+- `ShortConfig` in `utils/config.py` (env): `SHORT_BORROW_RATE_PCT=1.0` (per year), `SHORT_MAINT_PCT=0.30`, `SHORT_INIT_PCT=0.50`;
+  `SHORT_BORROW_OVERRIDES` (json symbol->rate). `SHORTABLE` default allowlist (liquid ETFs + S&P 100) in the same file.
+- Bot class attrs (defined in S1b): `ALLOW_SHORT=False`, `MAX_GROSS=1.0`, `SHORTABLE=None` (None = config default).
+- `PortfolioManager` (S1a): `short(symbol, quantity_usd)`, `cover(symbol, quantity_usd=-1)`,
+  `rebalance_portfolio(target, only_over_50_usd=False, *, allow_short=False, max_gross=1.0, shortable=None)`; targets may be negative only if `allow_short`.
+- `trades.action` nullable str (BUY/SELL/SHORT/COVER) via `log_trade(..., action=None)`; table `cash_adjustments(bot_name, date, symbol, kind, amount)` PK (bot_name, date, symbol, kind).
+- Broker (S2): `LiveBroker.supports_short: bool = False`; order sides `"BUY"|"SELL"|"SHORT"|"COVER"`.
 
 ---
-## Batch 0 — shared contract (1 step)
-### S0 execution policy
-Files: tradingbot/livetrade/execution.py (new), tradingbot/livetrade/copier.py, tradingbot/livetrade/broker.py, tests/test_livetrade_execution.py (new)
-- `execution.py`: `ExecutionPolicy` (env: `LIVETRADE_MIN_MIN_AFTER_OPEN=30`, `LIVETRADE_MIN_BEFORE_CLOSE=15`,
-  `LIVETRADE_LIMIT_BAND_PCT=0.0015`), `in_window(now)` using `utils/market_calendar.session_open_utc/close_utc`,
-  `marketable_limit(side, last_price)`.
-- `broker.py`: `LiveBroker.supports_limit_orders: bool = False`; `place_order(..., limit_price: float | None = None)`
-  documented as optional. Existing adapters keep working (copier passes `limit_price` only if `supports_limit_orders`).
-- `copier.py`: before `_execute_orders`, abort the sync with a clear ERROR line if outside the window
-  (crypto brokers, i.e. Hyperliquid, are exempt via `broker.always_open = True`). Pass limit prices to capable brokers.
-- Tests: window math (winter/summer/early close/weekend); limit price sides; copier skips outside window and
-  does not skip for an always-open broker.
+## Batch 0 — contract (1 step)
+### S0 margin core + schema
+Files: tradingbot/utils/margin.py (new), tradingbot/utils/config.py, tradingbot/utils/db.py, tradingbot/utils/bot_repository.py, tests/test_margin.py (new)
+- Implement the contract above; add `Trade.action`, `CashAdjustment` model (follow the repo's existing schema-migration mechanism; grep first), `log_trade(action=)`.
+- Tests: long-only book => spendable == USD and no breach (zero behaviour change); 100 long / 100 short at max_gross 2.0 passes, at 1.0 fails;
+  maintenance breach triggers and `cover_order` picks the largest short; missing price raises (fail closed).
 
 ---
 ## Batch 1 — parallel (4 steps, disjoint files)
-### S1a IB limit orders
-Files: tradingbot/livetrade/interactive_brokers.py, tests/test_livetrade_ib.py
-- Implement `supports_limit_orders = True`; `LimitOrder` with TIF DAY when `limit_price` given. Treat the IB
-  "not placed until <next session>" warning (399) as a clear skipped-not-failed status.
-- Tests: limit order built with price/TIF; 399 warning classified as deferral.
+### S1a PortfolioManager
+Files: tradingbot/utils/portfolio_manager.py, tests/test_portfolio_manager_shorts.py (new)
+- Generalise `trade_option_legs` into signed `trade_legs` (options wrapper keeps its API); add `short`/`cover`; `sell()` stays clamped at zero.
+- `rebalance_portfolio`: remove the refusal on negative holdings and the `qty > 0` valuation; with `allow_short` compute signed share deltas for the whole
+  book, check `margin.initial_ok` once on the resulting book, reductions always pass; whole shares on the short side; refuse symbols outside `shortable`;
+  missing price on a short raises. Log `action` on every trade. Without `allow_short` behaviour is byte-identical (existing tests stay green).
+- Tests: sell never goes negative; short then cover round-trips cash exactly; rebalance 100 long / -100 QQQ passes at max_gross 2.0 and is refused whole at 1.0;
+  non-shortable symbol refused; naked option underlying still uses options margin.
 
-### S1b MT5 "result expired" fix
-Files: tradingbot/livetrade/mt5/broker.py, tradingbot/livetrade/mt5/client.py, tests/test_livetrade_mt5.py, tests/mt5_fake.py
-- Diagnose why every BUY on 2026-11-13 ended "result expired" (RPyC result timeout vs a request that was
-  filled/rejected: check `order_send` retcode handling, filling mode IOC/FOK/RETURN per symbol, deviation, timeout).
-  Fix, add limit/deviation support (`supports_limit_orders = True`), and make the broker confirm via position
-  lookup after a timeout instead of reporting failure on an order that may have filled.
-- Tests: timeout followed by position present => success, no resend (idempotency); retcode mapping.
+### S1b Bot class + weights
+Files: tradingbot/utils/botclass.py, tradingbot/utils/weights.py, tests/test_botclass_short_weights.py (new)
+- Add `ALLOW_SHORT/MAX_GROSS/SHORTABLE`; `short()/cover()` wrappers on Bot; never exposed to the LLM tools.
+- `_coerce_target_weights`: keep the `max(0.0, w)` clamp unless `ALLOW_SHORT`; then allow negatives, signed sum incl. USD == 1, gross <= MAX_GROSS (scale down + ERROR log if exceeded).
+  `weights.py`: signed-aware helpers (`gross_weight`, `net_weight`) without changing `positive_weight_sum` semantics for existing callers.
+  Decision `-1` stays "exit" everywhere. Pass the new kwargs to `rebalance_portfolio` only when ALLOW_SHORT (tests mock PortfolioManager).
+- Tests: default bot clamps negatives exactly as today; opted-in bot keeps -0.5 and USD residual normalises; gross above MAX_GROSS is scaled; -1 decision still exits.
 
-### S1c Live-vs-paper tracking
-Files: tradingbot/utils/live_tracking.py (new), scripts/live_vs_paper_tracking.py (new), tests/test_live_tracking.py (new)
-- From `live_equity` per broker and the paper blend's `portfolio_worth` (weekday + gap rules from AGENTS.md),
-  compute daily tracking error, cumulative drift, beta of live to paper, and the share of days the broker was
-  flat while the blend was invested. Prints a table. This is the live "does it match the backtest" check.
-- Tests: flat-broker detection; weekday/gap filtering; drift on synthetic series.
+### S1c Backtest parity
+Files: tradingbot/utils/backtest.py, tests/test_backtest_shorts.py (new)
+- Phase 1/2 loops symmetric for shorts using `margin.py`; per-bar borrow cost (`SHORT_BORROW_RATE_PCT`/bars per year), force-cover on maintenance breach, shortable check,
+  slippage/commission on both sides. Read `ALLOW_SHORT/MAX_GROSS` via getattr defaults. Long-only path unchanged (tests/test_backtest_parity.py stays green).
+- Tests: short on a falling series profits net of borrow; rising series triggers force-cover not negative equity; long-only result identical to before; alpha metrics report lower beta for a hedged book.
 
-### S1d Trial registry (bookkeeping only, no gate)
-Files: tradingbot/utils/db.py, tradingbot/utils/trial_registry.py (new), tradingbot/utils/backtest.py, tests/test_trial_registry.py (new)
-- Table `backtest_trials` (bot, params hash, date, alpha, alpha_t, beta, n). `backtest_bot` and tune helpers
-  append a row when `record_trial=True` (default True, failures to write never break a backtest).
-  Helper `trial_count(bot|all)`. No threshold changes anywhere.
-- Tests: row written once per call; DB failure swallowed; count helper.
-
----
-## Batch 2 — config + docs (1 step; owns values.yaml)
-### S2 schedules, defaults, docs
-Files: helm/tradingbots/values.yaml, docs/guides/live-trading.md, TODOS.md
-- Move `interactiveBrokers`, `etoro`, `mt5_mql5` schedules to 15:00 / 15:05 / 15:10 UTC (keep the 21:xx bot
-  runs as the target producers). Document the slot reasoning in comments.
-- Set the shared `liveTrade.botWeights` default to the validated blend (remove the paused 3x bot + QQQ clone).
-- Leave `collective2XauZerifine` enabled (user decision); only add a comment that it needs a paid Trade Leader plan (error 1020).
-- live-trading.md: execution-window section; TODOS.md: replace C2 item, add real-money IBKR master-account item.
+### S1d Carry, worth, splits
+Files: tradingbot/utils/short_carry.py (new), tradingbot/utils/portfolio_utils.py, tradingbot/calculate_portfolio_worth.py, tests/test_short_carry.py (new), tests/test_splits.py
+- `apply_carry(bot_name, today)`: daily borrow fee on short market value (calendar days since last accrual), dividends in lieu on ex-date (shorts only); idempotent via
+  `cash_adjustments`; maintenance liquidation logged with action COVER and a reason. Called from calculate_portfolio_worth before valuing.
+- `calculate_portfolio_worth`: a short with no price raises instead of being skipped (long behaviour unchanged).
+- tests/test_splits.py: add a 2:1 split on a short holding (qty doubles, still negative, cash untouched).
+- Tests: accrual twice on the same day charges once; weekend gap charges 3 days; dividend debit once; missing short price raises.
 
 ---
-## Batch 3 — research, parallel (4 steps, disjoint new files)
-### S3a Buyback sleeve, broader universe, LONG-ONLY (no shorts, no hedge)
-Files: scripts/onetime_buyback_broad_study.py (new), tradingbot/buybackbroadbot.py (new), tests/test_buyback_broad_bot.py (new), docs/backtests/buyback-broad-2026-11.md (new)
-- Study: buyback_sp100 vs a broader universe, long-only, idle cash in SHV. Report alpha/t/beta/corr per half.
-  Bot (paper) only if alpha > 0 in both halves and beta < 0.5; otherwise doc only.
-- Tests: exposure caps; no negative weights.
+## Batch 2 — parallel (3 steps, disjoint files)
+### S2a Copier
+Files: tradingbot/livetrade/copier.py, tradingbot/livetrade/broker.py, tests/test_livetrade_copier_shorts.py (new)
+- `supports_short=False` on LiveBroker. `_calculate_target_weights` keeps negative stock weights when the broker supports shorts, otherwise drops them with an
+  honest log line ("short dropped", not "option structure"). `_park_idle_cash` uses gross not net. Orders: SHORT/COVER intents; covers never scaled by the buy-cash clamp;
+  a positions read showing an unexpected short on a non-short broker aborts that symbol (the Hyperliquid/C2 lesson), never doubles it.
+- Tests: short weight dropped for a non-short broker; supported broker gets SHORT then COVER on flip; cash clamp never scales a cover; stray short is covered once, not doubled.
 
-### S3b Numerai cross-sectional model
-Files: tradingbot/utils/numerai_features.py (new), tradingbot/numerai_signals_submit.py, tests/test_numerai_signal.py, tests/test_numerai_submit.py
-- Replace pure 12-1 momentum with a rank-blended score: short-term reversal, residual (market/sector-neutral)
-  momentum, buyback and insider event flags from existing DB tables, all rank-normalised and neutralised to
-  country + market. DB prices only, deterministic, idempotent daily submit stays.
-- Tests: neutralisation (zero mean per group), rank bounds [0,1], missing-feature fallback, submit idempotency kept.
+### S2b IB adapter
+Files: tradingbot/livetrade/interactive_brokers.py, tests/test_livetrade_ib_short.py (new)
+- `supports_short=True`; map SHORT->SELL / COVER->BUY with the held contract; skip (log, don't raise) when shares are not available (`reqMktData` shortable tick > 2.5
+  rule or tick missing => skip); whole shares only. Unit tests with fakes; no live IB calls (IB session known broken since Aug).
+- Tests: SHORT builds a SELL on an empty position; COVER buys at most the open short; unshortable tick skips the order; fractional qty floors.
 
-### S3c Funding-rate carry study (study only)
-Files: scripts/onetime_funding_carry_study.py (new), docs/backtests/funding-carry-2026-11.md (new)
-- Pull Hyperliquid public funding history (BTC/ETH/SOL...), model delta-neutral carry net of fees and borrow,
-  report yield, max DD, t-stat of the daily PnL, and correlation to QQQ. No bot unless a later decision asks.
-
-### S3d Long-only/flat trend on Darwinex-tradable instruments (study only, no shorts)
-Files: scripts/onetime_trend_darwinex_study.py (new), docs/backtests/trend-darwinex-2026-11.md (new)
-- Instruments limited to what a Darwinex/DXtrade-style venue offers: FX majors, index and commodity futures proxies
-  (yfinance `=F` / `=X`). Long/flat 12-1 trend with vol targeting. Report alpha/t/beta per half and the
-  correlation to the C2 blend sleeves.
+### S2c First consumer: hedged buyback sleeve (paper, live ON)
+Files: tradingbot/buybackhedgedbot.py (new), helm/ values file where buybackdriftbot's CronJob is defined (add one entry, not suspended), tests/test_buybackhedgedbot.py (new)
+- Reuse `buybackdriftbot` signal; long book plus a QQQ short sized to beta ~0 (ALLOW_SHORT=True, MAX_GROSS=2.0, SHORTABLE includes QQQ). Mirror the existing bot's helm wiring exactly.
+- Tests: target weights sum to 1 signed, QQQ weight negative, gross <= 2.0; flat when no signals (no stranded short).
 
 ---
-## Final review (me): run new tests once; `git diff pre-agy` vs this plan; confirm no config/test weakened.
+## Batch 3 — docs (2 steps, disjoint files)
+### S3a Architecture doc + nav
+Files: docs/architecture/short-selling.md (new), mkdocs.yml
+- Design rules, IBKR mapping table, margin math, borrow/dividend model, backtest parity, copier behaviour, how to opt a bot in, known limits (no hard-to-borrow, no locates, paper only on IB until its session works). Add to nav.
+
+### S3b Existing docs
+Files: docs/architecture/database-models.md, docs/architecture/bot-class-system.md, docs/api/portfolio-manager.md, README.md
+- Document `trades.action`, `cash_adjustments`, `ALLOW_SHORT/MAX_GROSS/SHORTABLE`, `short/cover`, signed rebalance; README: replace "the framework is long-only" statements, add the hedged sleeve to the live list.
+
+---
+## Final review (me, not agy)
+Run the new tests once; `git diff pre-agy` vs this plan; verify golden parity (existing portfolio_manager/backtest/splits/copier tests unchanged and green); `ruff format --check` on touched files incl. .md snippets.
