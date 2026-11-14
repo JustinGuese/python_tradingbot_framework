@@ -792,7 +792,9 @@ liveTrade:
     # Collective2 requires an active paid Trade Leader subscription to accept submitted signals.
     # Kept ENABLED per user decision; trades will execute once the subscription is active.
     enabled: true
-    schedule: "50 21 * * 1-5" # 9:50 PM UTC
+    # Moved from 21:50 to the 15:15 UTC execution slot: the copier now refuses to submit outside
+    # the US session window, and the 21:xx bot runs still produce the targets the night before.
+    schedule: "15 15 * * 1-5" # 3:15 PM UTC
     systemId: "155809898"
     # Switched 2026-09-22 to three low-beta sleeves, inverse-vol weighted, with the
     # weights fit on 2019-01..2023-06 only. Backtest 2019-01..2026-09 (see
