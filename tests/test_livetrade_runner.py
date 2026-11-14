@@ -341,3 +341,21 @@ def test_mt5_mql5_failed_login_raises_config_error_without_leaking_the_password(
             REGISTRY["mt5_mql5"].build()
         assert "s3cret-pw" not in str(exc.value)
         assert exc.value.__cause__ is None
+
+
+def test_retail_brokers_copy_only_a_scheduled_bot_with_valid_weights():
+    """Helm values: every broker's botWeights parses, sums to <= 1 and names only scheduled bots."""
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    values = yaml.safe_load((Path(__file__).resolve().parents[1] / "helm/tradingbots/values.yaml").read_text())
+    scheduled = {b["name"].lower() for b in values["bots"]}
+    live = values["liveTrade"]
+    for broker in ("etoro", "mt5Mql5", "collective2XauZerifine", "interactiveBrokers"):
+        weights = json.loads(live[broker]["botWeights"])
+        assert 0 < sum(weights.values()) <= 1.0 + 1e-9, broker
+        assert {name.lower() for name in weights} <= scheduled, (broker, weights)
+    for broker in ("etoro", "mt5Mql5", "collective2XauZerifine"):
+        assert json.loads(live[broker]["botWeights"]) == {"InstitutionalFlowBot": 1.0}

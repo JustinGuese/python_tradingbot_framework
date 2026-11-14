@@ -637,6 +637,15 @@ uv run python -m tradingbot.livetrade.discover_symbols --apply
 
 ---
 
+## 🎯 Which bot each venue copies
+
+| Venue | Book | Why |
+|---|---|---|
+| Interactive Brokers | TARegimeMultiAsset / TSMOM / GoldenButterfly blend | Low beta (0.13), the only candidate with full-sample alpha t >= 2 (`docs/backtests/c2-blend-2026-09.md`) |
+| eToro, MT5/MQL5, Collective2 | InstitutionalFlowBot alone | Retail audience judges on return and drawdown. H2 2023-2026: CAGR +21.8%, max DD -11.9%, beta 0.44, alpha vs QQQ +9.0% (t 1.48, unproven). It lags QQQ in a rally (`docs/backtests/retail-blend-2026-11.md`) |
+
+The bot is price/volume large-cap momentum with a QQQ 200-day trend gate. When the gate is off the copied book is 100% cash (SHV) and looks idle.
+
 ## 🛡 Going Live Checklist
 
 1.  **Dry Run**: Run for at least 3-5 days with `LIVETRADE_DRY_RUN=true`.
