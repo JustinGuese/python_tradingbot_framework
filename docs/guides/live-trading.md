@@ -121,21 +121,26 @@ carries only its own connection details and schedule:
 
 ```yaml
 liveTrade:
-  # shared across all brokers
-  botWeights: '{"SomeBot": 0.5, "OtherBot": 0.5}'
+  # shared across all brokers (defaults to validated low-beta blend)
+  botWeights: '{"TARegimeMultiAssetBot": 0.39, "TSMOMTrendBot": 0.24, "GoldenButterflyMomBot": 0.37}'
   dryRun: "false"
   strictMapping: "true"
   portfolioFraction: "1.0"
 
   collective2:
-    enabled: true
+    enabled: false
     schedule: "10 21 * * 1-5"
     systemId: "155809898"
   interactiveBrokers:
     enabled: true
+    schedule: "0 15 * * 1-5" # 15:00 UTC mid-session slot
     # ...
   etoro:
-    enabled: false
+    enabled: true
+    schedule: "5 15 * * 1-5" # 15:05 UTC mid-session slot
+  mt5Mql5:
+    enabled: true
+    schedule: "10 15 * * 1-5" # 15:10 UTC mid-session slot
   darwinex:
     enabled: false
 ```
@@ -470,8 +475,8 @@ The framework supports MetaTrader 5 via an in-cluster Wine bridge running the `m
 - **CronJob:** `livetrade-mt5-mql5` carries the required pod label, connects to `mt5-bridge:8001`, logs into the MT5 account, and syncs positions.
 
 ### 2. Execution Timing & Market Hours
-- **Schedule:** `0 15 * * 1-5` (15:00 UTC).
-- **In-Session Trading:** MT5 rejects market orders with retcode `10018` (`TRADE_RETCODE_MARKET_CLOSED`) when the market is closed. Therefore, this copier runs in US market hours in both EST (10:00 AM) and EDT (11:00 AM), trading the target weights computed by the blend the previous night.
+- **Schedule:** `10 15 * * 1-5` (15:10 UTC).
+- **In-Session Trading:** MT5 rejects market orders with retcode `10018` (`TRADE_RETCODE_MARKET_CLOSED`) when the market is closed. Therefore, this copier runs in US market hours in both EST (10:10 AM) and EDT (11:10 AM), trading the target weights computed by the blend the previous night. Runs in the staggered mid-session execution slot at 15:10 UTC.
 
 ### 3. Picking an MT5 Broker (`coverage` tool)
 MT5 brokers differ substantially in the assets they list. Many retail MT5 brokers only carry FX and index CFDs, with no US ETFs (for example, Darwinex Zero and MetaQuotes-Demo lack US ETFs). To verify whether an MT5 broker supports the strategy blend:
@@ -535,6 +540,49 @@ Set these credentials in your secret store:
 
 ---
 
+## ⏱️ Execution Window & Timing Design
+
+To align execution with empirical market dynamics and avoid the high volatility and wide spreads of opening auctions:
+
+### 1. Target vs. Execution Separation
+- **Target Calculation (21:xx UTC):** Daily strategy bot CronJobs run post-market (21:00–21:55 UTC) after the US market close. They compute target portfolios based on the previous close's data and persist them in PostgreSQL (`bots.portfolio`).
+- **Next-Day Mid-Session Execution (15:00–15:10 UTC):** Venue copiers execute the **next trading day mid-session**, never at the market open.
+
+### 2. Execution Slot Window (15:00–15:10 UTC)
+Copiers are assigned dedicated, staggered mid-session execution slots:
+- **15:00 UTC:** `interactiveBrokers` (TWS socket API)
+- **15:05 UTC:** `etoro` (REST API)
+- **15:10 UTC:** `mt5Mql5` (RPyC bridge to MT5 terminal)
+
+*(Crypto/always-open venues such as Hyperliquid execute at 00:05 UTC daily; Collective2 publishes strategy targets at 21:50 UTC).*
+
+### 3. Why 15:00–15:10 UTC Works Year-Round
+The 15:00–15:10 UTC window satisfies the operating constraints of both US equities and European UCITS listings without Daylight Saving Time (DST) friction:
+- **US Market Open Buffer:**
+  - Winter (EST / UTC-5): US open is 14:30 UTC. 15:00 UTC is **+30 minutes** after open.
+  - Summer (EDT / UTC-4): US open is 13:30 UTC. 15:00 UTC is **+90 minutes** after open.
+  - In both seasons, trading occurs well after the initial 30-minute market opening auction, avoiding extreme bid/ask spreads and opening price imbalances.
+- **London / UCITS Close Buffer:**
+  - Summer (BST / UTC+1): London Stock Exchange closes at 15:30 UTC. 15:00 UTC is **30 minutes before close**.
+  - Winter (GMT / UTC+0): London Stock Exchange closes at 16:30 UTC. 15:00 UTC is **90 minutes before close**.
+  - UCITS ETF orders on LSE (used by IBKR retail accounts) execute comfortably within regular trading hours.
+- **Zero DST Juggling:** The 15:00–15:10 UTC window remains valid year-round regardless of US and UK/EU clock changes.
+
+### 4. Window Guard (`ExecutionPolicy.in_window`)
+Every copier run evaluates `ExecutionPolicy.in_window(now)`:
+- Enforces the strict window `[session_open + 30m, session_close - 15m]` according to the NYSE market calendar (`tradingbot.utils.market_calendar`).
+- Outside this window, or on weekends/holidays, the copier cleanly aborts order placement with an informative log message explaining why.
+- Brokers marked `always_open = True` (e.g. crypto/perps on Hyperliquid) are exempt from this window check.
+- Interactive Brokers deferral warnings (e.g. warning 399 "Order will not be placed until...") are classified as deferred orders rather than silent failures.
+
+### 5. Marketable Limit Orders
+To prevent slippage in fast markets, copiers submit **marketable limit orders** (with `DAY` time-in-force) instead of raw market orders whenever supported by the broker adapter (`supports_limit_orders = True`):
+- **BUY:** $\text{Limit Price} = \text{Last Price} \times (1 + \text{band\_pct})$
+- **SELL:** $\text{Limit Price} = \text{Last Price} \times (1 - \text{band\_pct})$
+- The default limit band is `0.15%` (`0.0015`), configurable via `LIVETRADE_LIMIT_BAND_PCT`.
+
+---
+
 ## 📅 Venue Schedule Overview
 
 The table below summarizes all supported live-trading, signal-publishing, and tournament venues across the platform:
@@ -542,12 +590,12 @@ The table below summarizes all supported live-trading, signal-publishing, and to
 | Venue / Strategy | Type | Schedule (Cron) | Time (UTC) | Description / Notes | Status in `values.yaml` |
 | --- | --- | --- | --- | --- | --- |
 | `collective2` | Mirror Copier | `10 21 * * 1-5` | 21:10 UTC | Shared default blend; superseded by XAUZerifine | Disabled |
-| `interactiveBrokers` | Paper (DU) / Live | `20 21 * * 1-5` | 21:20 UTC | TWS socket API (`ib_async`), C2 blend (0.5 portfolio fraction) | Enabled (Paper) |
-| `etoro` | Demo / Real | `30 21 * * 1-5` | 21:30 UTC | Public REST API, C2 blend with asset substitutions (PDBC, long FX, SHV) | Enabled (Demo) |
+| `interactiveBrokers` | Paper (DU) / Live | `0 15 * * 1-5` | 15:00 UTC | Mid-session slot, TWS socket API (`ib_async`), marketable limit orders, C2 blend (0.5 portfolio fraction) | Enabled (Paper) |
+| `etoro` | Demo / Real | `5 15 * * 1-5` | 15:05 UTC | Mid-session slot, Public REST API, C2 blend with asset substitutions (PDBC, long FX, SHV) | Enabled (Demo) |
 | `darwinex` | Demo / Real | `40 21 * * 1-5` | 21:40 UTC | DXtrade REST API (forex/CFDs only, lacks US ETFs) | Disabled |
-| `collective2XauZerifine` | Signal Provider | `50 21 * * 1-5` | 21:50 UTC | C2 Strategy 155809898, low-beta multi-asset blend | Enabled |
-| `hyperliquid` | Perps Vault | `5 0 * * *` | 00:05 UTC | Hyperliquid perps vault copier (`AdaptiveMeanReversionBTCBot`) | Disabled |
-| `mt5Mql5` | Signal Provider | `0 15 * * 1-5` | 15:00 UTC | MT5 via Wine bridge, US session execution, C2 blend | Enabled (Demo) |
+| `collective2XauZerifine` | Signal Provider | `50 21 * * 1-5` | 21:50 UTC | C2 Strategy 155809898, low-beta multi-asset blend (error 1020 pending paid Trade Leader plan) | Enabled |
+| `hyperliquid` | Perps Vault | `5 0 * * *` | 00:05 UTC | Hyperliquid perps vault copier (`AdaptiveMeanReversionBTCBot`), always-open crypto market | Disabled |
+| `mt5Mql5` | Signal Provider | `10 15 * * 1-5` | 15:10 UTC | Mid-session slot, MT5 via Wine bridge, US session execution, C2 blend | Enabled (Demo) |
 | `numerai` | Tournament Signals | `0 22 * * 1-5` | 22:00 UTC | Numerai Signals 12-1 momentum tournament submission (unstaked) | Enabled |
 
 ---
