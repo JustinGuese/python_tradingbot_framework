@@ -24,7 +24,7 @@ I would cut to two legs:
 1. **One small real-money account on IBKR** as the master record, with broker statements as the audit trail.
 2. **Darwinex Zero through the existing MT5 bridge** as the distribution wrapper. Darwinex is the regulated manager and pays you a performance fee, so you need no licence of your own. Check its current terms and instrument list first.
 
-Drop C2 unless you decide the plan fee is worth paying, and park the MQL5 demo and Hyperliquid legs.
+Keep Collective2 ENABLED per user decision (requires activating a paid Trade Leader plan to resolve error 1020), and park the MQL5 demo and Hyperliquid legs.
 
 ## What I would do differently
 
@@ -35,7 +35,7 @@ Drop C2 unless you decide the plan fee is worth paying, and park the MQL5 demo a
 - **Cut the fleet to about ten bots.** A paper slot should require a passing backtest first. The 50 `Quantsmd*` templates and most option variants add noise and trial count, not information.
 - **Extend the history to cover 2008.** The blend's backtest covers 2019–2026 only.
 - **Align execution with the backtest.** The backtest fills at the signal bar's close; the copiers trade after the close or the next day. Measure that gap.
-- **Fix the shared default weights.** In [values.yaml](helm/tradingbots/values.yaml) the default `botWeights` is still the paused 3x bot plus the QQQ clone, with `dryRun: "false"`. Any new broker without an override inherits it.
+- **Fix the shared default weights.** (Done in S2) Updated `liveTrade.botWeights` in [values.yaml](helm/tradingbots/values.yaml) to the validated blend (`TARegimeMultiAssetBot: 0.39, TSMOMTrendBot: 0.24, GoldenButterflyMomBot: 0.37`), removing the paused 3x bot and QQQ clone.
 
 ## Strategies to try next
 
@@ -72,4 +72,24 @@ Log in at mql5.com and go to Signals → Create Signal.
 Enter the MT5 login (MT5_MQL5_LOGIN) and pick the MetaQuotes-Demo server.
 Give it the investor password (read-only). Never enter the master trading password. It's in your .env.secret, so I'm not printing it here.
 Choose Free signal. A free signal can be registered from a demo account. It gives you a public, audited track record with no real money at risk. A paid signal needs a real funded account and MQL5 seller verification (ID and address).
-Do this after the bot has placed real trades. A signal with an empty history looks dead, and the audit starts counting from registration. So wait for the 15:00 UTC run to fill, then register.
+Do this after the bot has placed real trades. A signal with an empty history looks dead, and the audit starts counting from registration. So wait for the 15:10 UTC run to fill, then register.
+
+---
+
+## 6. Real-Money IBKR Master Account
+
+Establish a live, real-money Interactive Brokers account as the primary master track record and audit trail:
+
+1. **Account Provisioning:** Open and fund a dedicated live IBKR account (U-account prefix, distinct from the paper `DU6347896` account).
+2. **Credentials & Gateway:** Configure live account credentials in IB Gateway (`interactivebrokersgateway` namespace) with dedicated API access to prevent mobile/TWS session displacement.
+3. **Instrument Approvals & UCITS Mapping:** For EU/MiFID retail accounts, ensure USD-denominated UCITS ETF trading permissions are granted (CSPX, IDTL, IDTM, IB01). Verify all mapped lines via `discover_symbols --broker ib`.
+4. **Helm Configuration:** Update `helm/tradingbots/values.yaml` under `liveTrade.interactiveBrokers` (or configure a parallel `interactiveBrokersLive` entry) with the real `accountId` and verified `portfolioFraction`.
+5. **Institutional Audit Trail:** Export and store monthly/annual broker activity statements as cryptographically verifiable performance proof for allocators. Monitor live vs paper execution tracking and slippage using `scripts/live_vs_paper_tracking.py`.
+
+---
+
+## 7. Collective2 Trade Leader Subscription
+
+- **User Decision:** Collective2 stays **ENABLED** (`collective2XauZerifine`).
+- **Resolution for Error 1020:** Log into Collective2 account settings and upgrade strategy `155809898` to an active paid **Trade Leader** plan.
+- The copier is active and running at 21:50 UTC; once the Trade Leader plan is active, target orders will be accepted without API rejection.
