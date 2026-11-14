@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ib_async import LimitOrder
 from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
 STK_META = {"symbol": "AAPL", "type": "stock", "sec_type": "STK", "exchange": "SMART", "currency": "USD"}
@@ -79,17 +80,18 @@ def test_ib_get_positions_skips_zero_and_sums_duplicates(broker):
     assert broker.get_positions() == {"AAPL": 7.0}
 
 
-def _place(broker, qty, side="BUY", contract=None):
+def _place(broker, qty, side="BUY", contract=None, limit_price=None):
     contract = contract or MagicMock(name="contract")
     trade = MagicMock()
     trade.orderStatus.status = "Submitted"
+    trade.log = []
     broker.ib.placeOrder.return_value = trade
     with (
         patch.object(broker.symbol_mapper, "unmap_symbol", return_value="AAPL"),
         patch.object(broker, "map_symbol", return_value=STK_META),
         patch.object(broker, "_resolve_stk_contract", return_value=contract),
     ):
-        broker.place_order("AAPL", qty, side)
+        res = broker.place_order("AAPL", qty, side, limit_price=limit_price)
     return trade
 
 
@@ -127,6 +129,75 @@ def test_ib_place_order_raises_when_gateway_rejects(broker):
         pytest.raises(RuntimeError, match="insufficient buying power"),
     ):
         broker.place_order("AAPL", 5.0, "BUY")
+
+
+def test_ib_supports_limit_orders(broker):
+    assert InteractiveBrokersBroker.supports_limit_orders is True
+    assert broker.supports_limit_orders is True
+
+
+def test_ib_place_order_limit_order_built_with_price_and_tif(broker):
+    _place(broker, 10.5, side="BUY", limit_price=150.25)
+    order = broker.ib.placeOrder.call_args[0][1]
+    assert isinstance(order, LimitOrder)
+    assert order.action == "BUY"
+    assert order.totalQuantity == 10.0
+    assert order.lmtPrice == 150.25
+    assert order.tif == "DAY"
+    assert order.orderType == "LMT"
+    assert order.account == "DU123"
+
+
+def test_ib_place_order_invalid_limit_price_raises(broker):
+    with pytest.raises(ValueError, match="Limit price must be positive"):
+        broker.place_order("AAPL", 5.0, "BUY", limit_price=0.0)
+    with pytest.raises(ValueError, match="Limit price must be positive"):
+        broker.place_order("AAPL", 5.0, "BUY", limit_price=-10.0)
+
+
+def test_ib_399_warning_classified_as_deferral():
+    # 1. ErrorCode == 399
+    trade_code = SimpleNamespace(log=[SimpleNamespace(errorCode=399, message="Warning: not placed")])
+    assert InteractiveBrokersBroker.is_deferred(trade_code) is True
+
+    # 2. 399 in message text
+    trade_msg = SimpleNamespace(
+        log=[SimpleNamespace(message="Warning 399: your order will not be placed at the exchange until next session")]
+    )
+    assert InteractiveBrokersBroker.is_deferred(trade_msg) is True
+
+    # 3. Phrasing without code
+    trade_text = SimpleNamespace(log=[SimpleNamespace(message="Order will not be placed until 2026-11-16 09:30:00")])
+    assert InteractiveBrokersBroker.is_deferred(trade_text) is True
+
+    # 4. whyHeld field
+    trade_held = SimpleNamespace(orderStatus=SimpleNamespace(whyHeld="Warning 399: not placed until open"), log=[])
+    assert InteractiveBrokersBroker.is_deferred(trade_held) is True
+
+    # 5. Non-deferral error
+    trade_err = SimpleNamespace(log=[SimpleNamespace(message="insufficient buying power")])
+    assert InteractiveBrokersBroker.is_deferred(trade_err) is False
+    assert InteractiveBrokersBroker.is_deferred(SimpleNamespace(log=[])) is False
+    assert InteractiveBrokersBroker.is_deferred(None) is False
+
+
+def test_ib_place_order_warning_399_treated_as_deferral(broker):
+    trade = MagicMock()
+    trade.orderStatus.status = "Inactive"
+    trade.log = [
+        SimpleNamespace(
+            errorCode=399,
+            message="Warning: your order will not be placed at the exchange until Monday 09:30:00 US/Eastern",
+        )
+    ]
+    broker.ib.placeOrder.return_value = trade
+    with (
+        patch.object(broker.symbol_mapper, "unmap_symbol", return_value="AAPL"),
+        patch.object(broker, "map_symbol", return_value=STK_META),
+        patch.object(broker, "_resolve_stk_contract", return_value=MagicMock()),
+    ):
+        status = broker.place_order("AAPL", 5.0, "BUY", limit_price=150.25)
+    assert status == "deferred"
 
 
 def test_ib_cancel_open_orders_only_own_client_id(broker):

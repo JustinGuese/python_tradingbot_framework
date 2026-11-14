@@ -5,14 +5,24 @@ from typing import Any, Literal
 
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.mt5.client import (
+    ORDER_FILLING_FOK,
+    ORDER_FILLING_IOC,
+    ORDER_FILLING_RETURN,
     ORDER_TYPE_BUY,
     ORDER_TYPE_SELL,
+    SYMBOL_FILLING_FOK,
+    SYMBOL_FILLING_IOC,
     TRADE_ACTION_DEAL,
     TRADE_ACTION_REMOVE,
     TRADE_RETCODE_DONE,
+    TRADE_RETCODE_DONE_PARTIAL,
+    TRADE_RETCODE_PLACED,
+    TRADE_RETCODE_TIMEOUT,
     AccountInfo,
+    AsyncResultTimeout,
     MT5Client,
     SymbolInfo,
+    describe_retcode,
 )
 from tradingbot.livetrade.symbol_map import SymbolMapper
 from tradingbot.utils.data_service import DataService
@@ -28,6 +38,8 @@ class MT5Broker(LiveBroker):
     Works with local MetaTrader5 or remote mt5linux bridge over RPyC.
     """
 
+    supports_limit_orders: bool = True
+
     def __init__(
         self,
         client: MT5Client,
@@ -39,6 +51,7 @@ class MT5Broker(LiveBroker):
         data_service: DataService | None = None,
         rate_provider: Callable[[], float] | None = None,
         cash_proxy: str | None = None,
+        default_deviation: int = 20,
     ):
         self.client = client
         self.name = name
@@ -48,6 +61,7 @@ class MT5Broker(LiveBroker):
         self.symbol_mapper = symbol_mapper or SymbolMapper()
         self.data_service = data_service or DataService()
         self.rate_provider = rate_provider
+        self.default_deviation = default_deviation
         self._cash_proxy_override: Any = cash_proxy if cash_proxy is not None else _UNSET
 
     @property
@@ -167,16 +181,33 @@ class MT5Broker(LiveBroker):
     def _determine_filling_mode(self, symbol_info: SymbolInfo) -> int:
         """
         Select supported order filling mode:
-        SYMBOL_FILLING_FOK = 1 -> ORDER_FILLING_FOK (0)
         SYMBOL_FILLING_IOC = 2 -> ORDER_FILLING_IOC (1)
+        SYMBOL_FILLING_FOK = 1 -> ORDER_FILLING_FOK (0)
         Default -> ORDER_FILLING_RETURN (2)
         """
         filling_mode = getattr(symbol_info, "filling_mode", 0)
-        if filling_mode & 1:
-            return 0
-        if filling_mode & 2:
-            return 1
-        return 2
+        if filling_mode & SYMBOL_FILLING_IOC:
+            return ORDER_FILLING_IOC
+        if filling_mode & SYMBOL_FILLING_FOK:
+            return ORDER_FILLING_FOK
+        return ORDER_FILLING_RETURN
+
+    @staticmethod
+    def _is_timeout(exc: Exception) -> bool:
+        if isinstance(exc, (TimeoutError, AsyncResultTimeout)):
+            return True
+        exc_type = type(exc).__name__
+        if "timeout" in exc_type.lower() or "expired" in exc_type.lower():
+            return True
+        msg = str(exc).lower()
+        return "result expired" in msg or "timeout" in msg or "timed out" in msg
+
+    @staticmethod
+    def _is_timeout_code_or_msg(code: int, msg: str) -> bool:
+        if code == TRADE_RETCODE_TIMEOUT:
+            return True
+        msg_lower = msg.lower()
+        return "timeout" in msg_lower or "expired" in msg_lower or "timed out" in msg_lower
 
     def place_order(
         self,
@@ -184,14 +215,16 @@ class MT5Broker(LiveBroker):
         quantity: float,
         side: Literal["BUY", "SELL"],
         symbol_type: str | None = None,
+        limit_price: float | None = None,
     ) -> None:
         """
-        Place a market order.
+        Place a market/marketable limit order.
         - Rounds volume to volume_step and clamps to volume_min/max.
         - Skips with a warning if below volume_min.
-        - Sets deviation and supported filling mode.
-        - SELL closes tickets by position id and never oversells.
-        - Rejections raise RuntimeError.
+        - Sets deviation (expanded to cover limit_price if specified) and supported filling mode.
+        - BUY confirms execution via position lookup if timeout occurs.
+        - SELL closes tickets by position id, confirms via position lookup on timeout, and never oversells.
+        - Rejections raise RuntimeError with descriptive retcode mapping.
         """
         if quantity <= 0:
             logger.warning(f"Order quantity {quantity} for {broker_symbol} must be positive; skipping.")
@@ -214,6 +247,7 @@ class MT5Broker(LiveBroker):
         vol_step = getattr(sym_info, "volume_step", 0.01) or 0.01
         vol_min = getattr(sym_info, "volume_min", 0.01) or 0.01
         vol_max = getattr(sym_info, "volume_max", 1000.0) or 1000.0
+        point = getattr(sym_info, "point", 0.01) or 0.01
         filling_mode = self._determine_filling_mode(sym_info)
 
         if side == "BUY":
@@ -229,7 +263,25 @@ class MT5Broker(LiveBroker):
                 vol = vol_max
 
             tick = self.client.symbol_info_tick(broker_symbol)
-            price = tick.ask if tick and tick.ask else getattr(sym_info, "ask", 0.0)
+            market_price = tick.ask if tick and tick.ask else getattr(sym_info, "ask", 0.0)
+
+            price = market_price
+            deviation = self.default_deviation
+
+            if limit_price is not None:
+                if price <= 0:
+                    price = limit_price
+                if point > 0 and price > 0:
+                    points_diff = int(round(abs(limit_price - price) / point))
+                    deviation = max(deviation, points_diff)
+
+            # Record initial positions before order for confirmation on potential timeout
+            raw_positions_before = self.client.positions_get(symbol=broker_symbol)
+            initial_vol = sum(
+                float(getattr(p, "volume", 0.0))
+                for p in (raw_positions_before or ())
+                if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY
+            )
 
             req = {
                 "action": TRADE_ACTION_DEAL,
@@ -237,15 +289,67 @@ class MT5Broker(LiveBroker):
                 "volume": vol,
                 "type": ORDER_TYPE_BUY,
                 "price": price,
-                "deviation": 20,
+                "deviation": deviation,
                 "type_filling": filling_mode,
             }
-            res = self.client.order_send(req)
-            if res is None or getattr(res, "retcode", None) != TRADE_RETCODE_DONE:
-                retcode = getattr(res, "retcode", "None")
+
+            res = None
+            timed_out = False
+            timeout_reason = ""
+
+            try:
+                res = self.client.order_send(req)
+            except Exception as exc:
+                if self._is_timeout(exc):
+                    timed_out = True
+                    timeout_reason = str(exc)
+                else:
+                    raise
+
+            if not timed_out:
+                if res is None:
+                    err_code, err_msg = self.client.last_error()
+                    if self._is_timeout_code_or_msg(err_code, err_msg):
+                        timed_out = True
+                        timeout_reason = f"({err_code}) {err_msg}"
+                    else:
+                        raise RuntimeError(f"MT5 BUY order failed: order_send returned None ({err_code}: {err_msg})")
+                elif (
+                    getattr(res, "retcode", None) == TRADE_RETCODE_TIMEOUT
+                    or "expired" in str(getattr(res, "comment", "")).lower()
+                    or "timeout" in str(getattr(res, "comment", "")).lower()
+                ):
+                    timed_out = True
+                    timeout_reason = f"retcode={getattr(res, 'retcode', None)}, comment='{getattr(res, 'comment', '')}'"
+
+            if timed_out:
+                logger.warning(
+                    f"MT5 BUY order for {broker_symbol} timed out ({timeout_reason}); "
+                    "confirming execution via position lookup..."
+                )
+                raw_positions_after = self.client.positions_get(symbol=broker_symbol)
+                current_vol = sum(
+                    float(getattr(p, "volume", 0.0))
+                    for p in (raw_positions_after or ())
+                    if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY
+                )
+                if current_vol >= initial_vol + vol - 1e-6 or (current_vol > initial_vol + 1e-8):
+                    logger.info(
+                        f"MT5 BUY order confirmed via position lookup: volume is {current_vol} (was {initial_vol})."
+                    )
+                    return
+                else:
+                    logger.error(
+                        f"MT5 BUY order timed out and position was not updated (expected >= {initial_vol + vol}, found {current_vol})."
+                    )
+                    raise RuntimeError(f"MT5 BUY order timed out: {timeout_reason}")
+
+            retcode = getattr(res, "retcode", None)
+            if retcode not in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL, TRADE_RETCODE_PLACED):
                 comment = getattr(res, "comment", "Unknown")
-                logger.error(f"MT5 BUY order rejected: retcode={retcode}, comment='{comment}'")
-                raise RuntimeError(f"MT5 BUY order rejected with retcode {retcode}: {comment}")
+                desc = describe_retcode(retcode)
+                logger.error(f"MT5 BUY order rejected: retcode={retcode} ({desc}), comment='{comment}'")
+                raise RuntimeError(f"MT5 BUY order rejected with retcode {retcode} ({desc}): {comment}")
             return
 
         if side == "SELL":
@@ -284,7 +388,17 @@ class MT5Broker(LiveBroker):
 
             # Close tickets by position id
             tick = self.client.symbol_info_tick(broker_symbol)
-            price = tick.bid if tick and tick.bid else getattr(sym_info, "bid", 0.0)
+            market_price = tick.bid if tick and tick.bid else getattr(sym_info, "bid", 0.0)
+
+            price = market_price
+            deviation = self.default_deviation
+
+            if limit_price is not None:
+                if price <= 0:
+                    price = limit_price
+                if point > 0 and price > 0:
+                    points_diff = int(round(abs(limit_price - price) / point))
+                    deviation = max(deviation, points_diff)
 
             for pos in sorted(long_positions, key=lambda p: getattr(p, "ticket", 0)):
                 if vol_to_sell <= 1e-8:
@@ -306,15 +420,75 @@ class MT5Broker(LiveBroker):
                     "type": ORDER_TYPE_SELL,
                     "position": pos_id,
                     "price": price,
-                    "deviation": 20,
+                    "deviation": deviation,
                     "type_filling": filling_mode,
                 }
-                res = self.client.order_send(req)
-                if res is None or getattr(res, "retcode", None) != TRADE_RETCODE_DONE:
-                    retcode = getattr(res, "retcode", "None")
+
+                res = None
+                timed_out = False
+                timeout_reason = ""
+
+                try:
+                    res = self.client.order_send(req)
+                except Exception as exc:
+                    if self._is_timeout(exc):
+                        timed_out = True
+                        timeout_reason = str(exc)
+                    else:
+                        raise
+
+                if not timed_out:
+                    if res is None:
+                        err_code, err_msg = self.client.last_error()
+                        if self._is_timeout_code_or_msg(err_code, err_msg):
+                            timed_out = True
+                            timeout_reason = f"({err_code}) {err_msg}"
+                        else:
+                            raise RuntimeError(f"MT5 SELL order failed: order_send returned None ({err_code}: {err_msg})")
+                    elif (
+                        getattr(res, "retcode", None) == TRADE_RETCODE_TIMEOUT
+                        or "expired" in str(getattr(res, "comment", "")).lower()
+                        or "timeout" in str(getattr(res, "comment", "")).lower()
+                    ):
+                        timed_out = True
+                        timeout_reason = f"retcode={getattr(res, 'retcode', None)}, comment='{getattr(res, 'comment', '')}'"
+
+                if timed_out:
+                    logger.warning(
+                        f"MT5 SELL order for {broker_symbol} (ticket {pos_id}) timed out ({timeout_reason}); "
+                        "confirming execution via position lookup..."
+                    )
+                    raw_positions_after = self.client.positions_get(symbol=broker_symbol)
+                    matching_pos = [p for p in (raw_positions_after or ()) if getattr(p, "ticket", None) == pos_id]
+                    total_after = sum(
+                        float(getattr(p, "volume", 0.0))
+                        for p in (raw_positions_after or ())
+                        if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY
+                    )
+                    confirmed = False
+                    if not matching_pos:
+                        confirmed = True
+                    elif float(getattr(matching_pos[0], "volume", 0.0)) <= pos_vol - lot_vol + 1e-6:
+                        confirmed = True
+                    elif total_after <= total_open_vol - lot_vol + 1e-6:
+                        confirmed = True
+
+                    if confirmed:
+                        logger.info(f"MT5 SELL order confirmed via position lookup for ticket {pos_id}.")
+                        vol_to_sell = round(vol_to_sell - lot_vol, 8)
+                        continue
+                    else:
+                        logger.error(
+                            f"MT5 SELL order timed out and position was not closed/reduced for ticket {pos_id}."
+                        )
+                        raise RuntimeError(f"MT5 SELL order timed out: {timeout_reason}")
+
+                retcode = getattr(res, "retcode", None)
+                if retcode not in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL, TRADE_RETCODE_PLACED):
                     comment = getattr(res, "comment", "Unknown")
-                    logger.error(f"MT5 SELL order rejected: retcode={retcode}, comment='{comment}'")
-                    raise RuntimeError(f"MT5 SELL order rejected with retcode {retcode}: {comment}")
+                    desc = describe_retcode(retcode)
+                    logger.error(f"MT5 SELL order rejected: retcode={retcode} ({desc}), comment='{comment}'")
+                    raise RuntimeError(f"MT5 SELL order rejected with retcode {retcode} ({desc}): {comment}")
 
                 vol_to_sell = round(vol_to_sell - lot_vol, 8)
 

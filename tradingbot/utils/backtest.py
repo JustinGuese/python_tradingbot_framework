@@ -11,6 +11,7 @@ from .alpha_report import alpha_stats
 from .botclass import Bot
 from .config import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT, EXECUTION_CONFIG
 from .portfolio_manager import should_trade
+from .trial_registry import compute_params_hash, record_trial, trial_count
 
 logger = logging.getLogger(__name__)
 
@@ -486,6 +487,25 @@ def _save_backtest_to_db(
         )
 
 
+def _record_backtest_trial(
+    bot: Bot,
+    result: dict,
+    n: int,
+) -> None:
+    """Record trial in backtest_trials registry; failures are swallowed."""
+    try:
+        record_trial(
+            bot=bot,
+            params=getattr(bot, "params", {}) or {},
+            alpha=result.get("alpha"),
+            alpha_t=result.get("alpha_t"),
+            beta=result.get("beta"),
+            n=n,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to record backtest trial: {exc}")
+
+
 def backtest_bot(
     bot: Bot,
     initial_capital: float = 10000.0,
@@ -502,6 +522,7 @@ def backtest_bot(
     save_results_to_db: bool = True,
     return_series: bool = False,
     benchmark_close: pd.Series | None = None,
+    record_trial: bool = True,
 ) -> dict:
     """
     Backtest a trading bot over historical data.
@@ -528,6 +549,8 @@ def backtest_bot(
                        for the alpha metrics. Optional: when omitted it is taken
                        from `data` if present there, else fetched — but only
                        when `data` is None too.
+        record_trial: Whether to record this trial to backtest_trials registry
+                      (default: True, failures never break a backtest).
 
     Returns:
         Dictionary with keys: yearly_return, buy_hold_return, sharpe_ratio,
@@ -839,6 +862,13 @@ def backtest_bot(
                 data_for_qs=data_dict[tickers[0]],
             )
 
+        if record_trial:
+            _record_backtest_trial(
+                bot=bot,
+                result=result,
+                n=len(portfolio_values),
+            )
+
         # Added after the DB save so the persisted `result` stays exactly the nine
         # scalars `backtest_results` expects.
         if return_series:
@@ -1011,6 +1041,13 @@ def backtest_bot(
             portfolio_values=portfolio_values,
             portfolio_timestamps=portfolio_timestamps,
             data_for_qs=data,
+        )
+
+    if record_trial:
+        _record_backtest_trial(
+            bot=bot,
+            result=result,
+            n=len(portfolio_values),
         )
 
     if return_series:
