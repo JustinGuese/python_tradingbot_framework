@@ -139,6 +139,19 @@ def test_split_multiplies_a_position_held_through_the_ex_date(sqlite_db, db_sess
     assert _portfolio(db_session)["VGT"] == pytest.approx(1.6)
 
 
+def test_split_doubles_short_holding_cash_untouched(sqlite_db, db_session):
+    """A 2:1 split on a short holding doubles the quantity (still negative), cash untouched."""
+    _bot(db_session, portfolio={"USD": 500.0, "TSLA": -10.0})
+    _event(db_session, symbol="TSLA", ratio=2.0, pre_close=200.0)
+
+    [r] = splits.apply_splits("B", today=TODAY)
+    assert r.qty_at_ex == pytest.approx(-10.0)
+    assert r.qty_added == pytest.approx(-10.0)
+    p = _portfolio(db_session)
+    assert p["TSLA"] == pytest.approx(-20.0)
+    assert p["USD"] == pytest.approx(500.0)
+
+
 def test_late_application_keeps_what_was_bought_after_the_split(sqlite_db, db_session):
     # The bot held 1 old share, missed the split and "bought the dip": 2 new shares the next day.
     _bot(db_session, portfolio={"USD": 0.0, "VGT": 3.0})
