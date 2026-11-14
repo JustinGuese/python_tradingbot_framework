@@ -140,7 +140,7 @@ class LiveTradeCopier:
         orders = self._calculate_orders(broker_target_weights, current_positions, total_equity)
 
         # Abort if outside the execution window (crypto brokers exempt via broker.always_open = True)
-        is_always_open = getattr(self.broker, "always_open", False) is True or getattr(self.broker, "always_open", False) == True
+        is_always_open = getattr(self.broker, "always_open", False) is True
         if not is_always_open:
             in_win, reason = self.execution_policy.explain_window()
             if not in_win:
