@@ -76,3 +76,12 @@ def test_option_rows_dropped():
         ["A\t037833100\t100\t1\t", "A\t037833100\t900\t1\tCall", "A\t594918104\t50\t1\tPut"],
     )
     assert len(h) == 1 and h[0]["put_call"] is None and h[0]["value_usd"] == 100.0
+
+
+def test_new_holdings_amendment_does_not_replace_the_full_filing():
+    sub = SUB_H + "O\t14-FEB-2022\t13F-HR\t7\t31-DEC-2021\nN\t01-MAR-2022\t13F-HR/A\t7\t31-DEC-2021\n"
+    cov = "ACCESSION_NUMBER\tISAMENDMENT\tAMENDMENTTYPE\tFILINGMANAGER_NAME\nO\tN\t\tF\nN\tY\tNEW HOLDINGS\tF\n"
+    inf = INF_H + "O\t037833100\t150000\t1000\t\nN\t594918104\t300000\t1000\t\n"
+    f, h = parse_quarter(sub, cov, inf)
+    assert [x["accession"] for x in keep_latest_amendments(f)] == ["O"]
+    assert {x["accession"] for x in h} == {"O"}

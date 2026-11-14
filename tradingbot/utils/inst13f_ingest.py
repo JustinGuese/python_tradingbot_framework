@@ -101,6 +101,10 @@ def parse_quarter(submission: str, coverpage: str, infotable: str) -> tuple[list
             continue
         acc = r["ACCESSION_NUMBER"]
         c = cover.get(acc, {})
+        # A "NEW HOLDINGS" amendment lists only the added positions; treating it as
+        # a restatement would replace the full original filing with a partial one.
+        if sub_type.endswith("/A") and c.get("AMENDMENTTYPE", "").upper().startswith("NEW"):
+            continue
         filed = _parse_date(r["FILING_DATE"])
         filings[acc] = {
             "accession": acc,
