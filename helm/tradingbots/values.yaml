@@ -660,6 +660,29 @@ bots:
   # docs/backtests/institutionalflowbot.md.
   schedule: "15 21 * * 5" # Fridays 9:15 PM UTC
 
+# TradingView trend bots (Batch 3, 2026-11). Paper only, 1h base bars,
+# judged on alpha vs QQQ. UNPROVEN: see docs/backtests/tv-trend-2026-11.md.
+# Runs on hourly bars during market hours (13:00-20:00 UTC, Mon-Fri).
+- name: supertrendmtfbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Multi-timeframe Supertrend (1h base + 1D HTF filter). Long when both are +1.
+  schedule: "5 13-20 * * 1-5"
+
+- name: ultimatemabot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Ultimate MA trend bot (1h base + 4h HTF filter). Long when both slopes are +1.
+  schedule: "5 13-20 * * 1-5"
+
+- name: alphatrendbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # AlphaTrend indicator bot (1h base). Enter on buy cross, hold until sell cross.
+  schedule: "5 13-20 * * 1-5"
+
+- name: slingshotchandelierbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Slingshot EMA Channel + Chandelier Exit. Enter on pullback, exit on stop / bear.
+  schedule: "5 13-20 * * 1-5"
+
 - name: fundamentalssnapshot
   # Not a bot: records S&P 100 valuation/ownership fundamentals into
   # stock_fundamentals once a day. yfinance serves no fundamentals history, so
