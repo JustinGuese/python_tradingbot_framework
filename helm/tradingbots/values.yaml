@@ -903,13 +903,14 @@ liveTrade:
   # GoldenButterflyMomBot 0.37).
   # Asset substitutions: DBC is substituted by PDBC, FXE/FXA/FXB by long FX pairs.
   # FXF/FXY are not tradeable on eToro so their weight is held in SHV.
-  # Keep as DEMO account (demo: true); real money is demo: false plus real-account keys.
+  # LIVE since 2026-11-18 (demo: false, real-account keys). The demo user key is kept in the
+  # secret as ETORO_DEMO_USER_KEY for rollback (demo: true + swap ETORO_USER_KEY back).
   etoro:
     enabled: true
     # Mid-session execution slot at 15:05 UTC (5 min after IB at 15:00 UTC).
     # Runs within the mid-session window [open+30m, close-15m] for next-day execution of 21:xx targets.
     schedule: "5 15 * * 1-5" # 3:05 PM UTC
-    demo: true
+    demo: false
     dryRun: "false"
     botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
