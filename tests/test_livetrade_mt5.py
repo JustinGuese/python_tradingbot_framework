@@ -346,3 +346,28 @@ def test_filling_mode_prefers_ioc():
     # Neither supported (bitmask 0) -> RETURN
     sym_none = SymbolInfo(filling_mode=0)
     assert broker._determine_filling_mode(sym_none) == ORDER_FILLING_RETURN
+
+
+@pytest.mark.parametrize(
+    ("trade_mode", "expected"),
+    [(0, False), (1, True), (2, False), (3, False), (4, True)],
+)
+def test_is_tradeable_honours_server_trade_mode(trade_mode, expected):
+    """A listed symbol the server has disabled (MetaQuotes-Demo: SPY, UUP) is not tradeable.
+
+    Otherwise the copier submits the buy every run and gets retcode 10017.
+    """
+    fake = FakeMT5(symbols={})
+    fake.add_symbol("SPY", trade_mode=trade_mode)
+    broker = MT5Broker(fake)
+
+    assert broker.is_tradeable("SPY") is expected
+
+
+def test_is_tradeable_false_when_symbol_info_unavailable():
+    fake = FakeMT5(symbols={})
+    fake.add_symbol("SPY")
+    broker = MT5Broker(fake)
+    fake.symbol_info = lambda name: None  # type: ignore[method-assign]
+
+    assert broker.is_tradeable("SPY") is False

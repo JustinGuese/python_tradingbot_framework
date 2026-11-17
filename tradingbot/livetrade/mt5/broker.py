@@ -581,9 +581,35 @@ class MT5Broker(LiveBroker):
 
         return None
 
+    # SYMBOL_TRADE_MODE_*: 0 disabled, 1 long only, 2 short only, 3 close only, 4 full.
+    # The copier is long-only, so only 1 and 4 can take a BUY.
+    _BUYABLE_TRADE_MODES = frozenset({1, 4})
+
     def is_tradeable(self, yf_symbol: str) -> bool:
-        """Whether MT5 lists this symbol (exact or suffixed)."""
-        return self._resolve_symbol(yf_symbol) is not None
+        """Whether MT5 lists this symbol AND the server lets us open a long in it.
+
+        A listed symbol can still be switched off server-side (MetaQuotes-Demo lists SPY
+        and UUP with trade_mode 0). Reporting those as tradeable made the copier send
+        the buy every run, get "Trade disabled" (10017), and leave the weight idle.
+        Reporting them untradeable routes the weight through the copier's drop-and-park
+        path instead.
+        """
+        resolved = self._resolve_symbol(yf_symbol)
+        if resolved is None:
+            return False
+        try:
+            info = self.client.symbol_info(resolved)
+        except Exception as exc:
+            # Don't guess: an unreadable symbol is neither listed-and-open nor known closed.
+            logger.warning(f"symbol_info({resolved}) failed ({exc}); treating {yf_symbol} as untradeable.")
+            return False
+        if info is None:
+            return False
+        mode = getattr(info, "trade_mode", 4)
+        if mode not in self._BUYABLE_TRADE_MODES:
+            logger.warning(f"MT5 symbol {resolved} has trade_mode={mode} (not buyable); treating as untradeable.")
+            return False
+        return True
 
     def map_symbol(self, yf_symbol: str) -> dict | None:
         """Translate yfinance symbol to MT5 metadata; selects symbol before use."""
