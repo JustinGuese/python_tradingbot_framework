@@ -18,6 +18,7 @@ class LiveBroker(ABC):
     # venue that cannot hold US ETFs; LIVETRADE_CASH_PROXY overrides either way.
     cash_proxy: str | None = "SHV"
     supports_limit_orders: bool = False
+    supports_short: bool = False
     always_open: bool = False
 
     def __init_subclass__(cls, **kwargs):
@@ -226,7 +227,7 @@ class LiveBroker(ABC):
         self,
         broker_symbol: str,
         quantity: float,
-        side: Literal["BUY", "SELL"],
+        side: Literal["BUY", "SELL", "SHORT", "COVER"],
         symbol_type: str | None = None,
         limit_price: float | None = None,
     ) -> None:
@@ -235,7 +236,7 @@ class LiveBroker(ABC):
         Parameters:
             broker_symbol: Symbol formatted for the venue.
             quantity: Order size.
-            side: 'BUY' or 'SELL'.
+            side: 'BUY', 'SELL', 'SHORT', or 'COVER'.
             symbol_type: Optional instrument type (e.g. 'stock', 'cfd').
             limit_price: Optional marketable limit price. Only passed if supports_limit_orders is True.
         """

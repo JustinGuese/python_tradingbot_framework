@@ -17,6 +17,7 @@ from .data_service import DataService
 from .db import Bot as BotModel
 from .db import PortfolioWorth, get_db_session
 from .helpers import ensure_utc_series, ensure_utc_timestamp
+from .margin import MissingPriceError
 from .weights import normalize_weights
 
 logger = logging.getLogger(__name__)
@@ -70,8 +71,12 @@ def calculate_portfolio_worth(
             if not historic_data.empty:
                 # Get the latest price before or at the date
                 price = historic_data.iloc[-1]["close"]
+                if quantity < 0 and (price is None or price <= 0):
+                    raise MissingPriceError(f"Missing price for short holding {symbol} at {date}")
                 total_value += quantity * price
             else:
+                if quantity < 0:
+                    raise MissingPriceError(f"Missing price for short holding {symbol} at {date}")
                 # If no historic data, skip this holding (or use 0)
                 logger.warning(f"No historic data for {symbol} at {date}")
         return total_value
@@ -82,9 +87,17 @@ def calculate_portfolio_worth(
 
         total_value = cash
         for symbol, quantity in holdings.items():
-            if symbol in prices:
-                total_value += quantity * prices[symbol]
+            price = prices.get(symbol)
+            if price is None or price <= 0:
+                try:
+                    price = data_service.get_latest_price(symbol)
+                except Exception:
+                    price = None
+            if price is not None and price > 0:
+                total_value += quantity * price
             else:
+                if quantity < 0:
+                    raise MissingPriceError(f"Missing price for short holding {symbol}")
                 logger.warning(f"Could not get price for {symbol}")
 
         return total_value

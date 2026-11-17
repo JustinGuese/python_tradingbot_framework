@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from . import option_math as om
 from . import options
 from .bot_repository import BotRepository
-from .config import EXECUTION_CONFIG, PORTFOLIO_CONFIG, ExecutionConfig
+from .config import EXECUTION_CONFIG, PORTFOLIO_CONFIG, SHORTABLE, ExecutionConfig
 from .data_service import DataService
 from .db import get_db_session
+from .margin import MissingPriceError, initial_ok
 from .weights import require_normalized
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,7 @@ class PortfolioManager:
                 # from historic_data; the execution price is recorded nowhere else.
                 price=execution_price,
                 is_buy=True,
+                action="BUY",
                 session=sess,
             )
             logger.info(
@@ -347,6 +349,7 @@ class PortfolioManager:
                 price=execution_price,
                 is_buy=False,
                 profit=net_proceeds,  # net cash credited, NOT realized P&L
+                action="SELL",
                 session=sess,
             )
             logger.info(
@@ -517,6 +520,7 @@ class PortfolioManager:
                 price=settle_price,
                 is_buy=qty < 0,  # a short is closed by buying it back
                 profit=proceeds if qty > 0 else None,
+                action="COVER" if qty < 0 else "SELL",
                 session=sess,
             )
         logger.info("SETTLED %s %s: %.0f units at %.4f -> $%.2f", reason, key, qty, settle_price, proceeds)
@@ -559,6 +563,7 @@ class PortfolioManager:
                 price=0.0 if not cash_part else intrinsic * cash_part / qty,
                 is_buy=qty < 0,
                 profit=None,
+                action="COVER" if qty < 0 else "SELL",
                 session=sess,
             )
             if abs(physical_shares) > 1e-6:
@@ -569,6 +574,7 @@ class PortfolioManager:
                     price=contract.strike,
                     is_buy=physical_shares > 0,
                     profit=-physical_shares * contract.strike if physical_shares < 0 else None,
+                    action="BUY" if physical_shares > 0 else "SELL",
                     session=sess,
                 )
         logger.info(
@@ -588,90 +594,210 @@ class PortfolioManager:
     # Multi-leg options: spreads, condors, closing a whole book
     # ------------------------------------------------------------------
 
-    def trade_option_legs(self, legs: list[tuple[str, float]], session: Session | None = None) -> float:
+    def trade_legs(
+        self,
+        legs: list[tuple[str, float]],
+        session: Session | None = None,
+        *,
+        max_gross: float = 1.0,
+        shortable: tuple[str, ...] | list[str] | set[str] | None = None,
+    ) -> float:
         """
-        Change several option positions in ONE locked transaction.
+        Change several positions in ONE locked transaction.
 
         Args:
             legs: (symbol, signed share-equivalent change). For an OCC contract
-                +200 buys two contracts (to open or to close a short), -200
-                sells two (to close a long or to open a short); whole contracts
-                only. The underlying's own symbol trades shares — allowed only
-                when the trade or the book holds options on it (buy-writes,
-                collars, delta hedges), and the only way to go short stock.
+                +200 buys two contracts, -200 sells two; whole contracts only.
+                For stock symbols, positive buys shares, negative sells or shorts.
+                Whole shares only on the short side.
+            session: Optional existing database session.
+            max_gross: Maximum gross leverage ratio allowed (default: 1.0).
+            shortable: Optional allowlist of shortable symbols (default: config.SHORTABLE).
 
         Returns:
-            Net cash flow: positive for a credit, negative for a debit.
-
-        This is the only path that can make a holding negative. Each option leg
-        fills at the ask when buying and the bid when selling (last price +/-
-        option slippage without a market); stock legs use the stock cost model. If the trade opens or grows any position,
-        it is refused as a whole — nothing is written — when the cash left
-        would not cover options.margin_requirement of the resulting book. That
-        also refuses anything with unbounded risk, such as a naked short call.
-        Pure reductions always go through, so a position can always be closed.
+            Net cash flow: positive for a net credit, negative for a net debit.
         """
         legs = [(k, float(q)) for k, q in legs if abs(q) > 1e-9]
         if not legs:
             return 0.0
-        traded_underlyings = {options.parse_occ(k).underlying for k, _ in legs if options.is_option_symbol(k)}
-        stock_keys = [k for k, _ in legs if not options.is_option_symbol(k)]
+
         for key, qty in legs:
             if key == "USD":
-                raise ValueError("trade_option_legs cannot trade USD")
+                raise ValueError("trade_legs cannot trade USD")
             if options.is_option_symbol(key) and options.whole_contract_qty(abs(qty)) != round(abs(qty)):
                 raise ValueError(f"{key}: {qty} is not a whole number of contracts")
-        # Reference prices before the row lock: pricing may refetch a chain.
-        refs = {key: self.data_service.get_latest_price(key) for key, _ in legs}
+
+        allowed_shortable = set(shortable) if shortable is not None else set(SHORTABLE)
+
+        # Pre-fetch reference prices before row lock
+        refs = {}
+        for key, _ in legs:
+            price = self.data_service.get_latest_price(key)
+            if price is None or price <= 0:
+                raise MissingPriceError(f"Missing or non-positive price for {key!r}: {price}")
+            refs[key] = price
 
         def _execute(sess: Session) -> float:
             row = self.bot_repository.get_bot_locked(sess, self.bot_name)
             cfg = self.execution_config
             portfolio = row.portfolio.copy()
-            allowed = traded_underlyings | options.option_underlyings(portfolio)
-            naked = [k for k in stock_keys if k not in allowed]
-            if naked:
-                raise ValueError(f"trade_option_legs trades stock only beside options on it, got {naked}")
-            cash = portfolio.get("USD", 0)
+            cash = portfolio.get("USD", 0.0)
             fills = []
             grows = False
+
             for key, qty in legs:
+                is_option = options.is_option_symbol(key)
                 is_buy = qty > 0
                 price = self._leg_fill(key, refs[key], is_buy=is_buy)
                 notional = abs(qty) * price
                 flow = (-notional if is_buy else notional) - notional * cfg.commission_pct
                 old = portfolio.get(key, 0.0)
                 new = old + qty
-                grows = grows or abs(new) > abs(old) + 1e-9
+
+                # Check whole shares and shortable allowlist on the short side for stock
+                if not is_option and (new < -1e-9 or (old < -1e-9 and qty < 0)):
+                    if abs(qty - round(qty)) > 1e-6 or abs(new - round(new)) > 1e-6:
+                        raise ValueError(f"Whole shares only on the short side for {key}: got qty={qty}, new={new}")
+                    if new < -1e-9 and new < old:
+                        if key not in allowed_shortable:
+                            raise ValueError(f"Symbol {key!r} is not shortable")
+
+                if abs(new) > abs(old) + 1e-9:
+                    grows = True
+
                 if abs(new) < 1e-6:
                     portfolio.pop(key, None)
                 else:
                     portfolio[key] = new
+
                 cash += flow
-                fills.append((key, qty, price, flow))
+                fills.append((key, qty, price, flow, old, new))
+
             portfolio["USD"] = cash
 
-            required = options.margin_requirement(portfolio)
-            if grows and cash + 1e-6 < required:
-                raise ValueError(
-                    f"Refused option trade {[(k, q) for k, q in legs]}: cash after ${cash:,.2f} "
-                    f"< margin required ${required:,.2f}"
+            # Margin checks:
+            # 1. Options margin for option structures
+            option_unders = options.option_underlyings(portfolio)
+            if option_unders:
+                opt_req = sum(
+                    om.max_loss(options.payoff_legs(options.structure_positions(portfolio, u))) for u in option_unders
                 )
+                if grows and cash + 1e-6 < opt_req:
+                    raise ValueError(
+                        f"Refused option trade {[(k, q) for k, q in legs]}: cash after ${cash:,.2f} "
+                        f"< margin required ${opt_req:,.2f}"
+                    )
+
+            # 2. Reg T / gross margin for unstructured stocks
+            if grows:
+                held_stocks = [
+                    s
+                    for s, q in portfolio.items()
+                    if s != "USD" and abs(q) > 1e-6 and not options.is_option_symbol(s) and s not in option_unders
+                ]
+                if held_stocks:
+                    prices_for_margin = dict(refs)
+                    missing_prices = [s for s in held_stocks if s not in prices_for_margin]
+                    if missing_prices:
+                        prices_for_margin.update(self.data_service.get_latest_prices_batch(missing_prices))
+                    if not initial_ok(portfolio, prices_for_margin, max_gross=max_gross):
+                        raise ValueError(f"Refused trade: margin check failed (max_gross={max_gross})")
 
             row.portfolio = portfolio
             self.bot_repository.update_bot(row, session=sess)
-            for key, qty, price, flow in fills:
-                self.bot_repository.log_trade(
-                    bot_name=self.bot_name,
-                    symbol=key,
-                    quantity=abs(qty),
-                    price=price,
-                    is_buy=qty > 0,
-                    profit=flow if qty < 0 else None,
-                    session=sess,
-                )
+
+            for key, qty, price, flow, old, new in fills:
+                is_option = options.is_option_symbol(key)
+                if is_option:
+                    action = "BUY" if qty > 0 else "SELL"
+                    self.bot_repository.log_trade(
+                        bot_name=self.bot_name,
+                        symbol=key,
+                        quantity=abs(qty),
+                        price=price,
+                        is_buy=qty > 0,
+                        profit=flow if qty < 0 else None,
+                        action=action,
+                        session=sess,
+                    )
+                else:
+                    if old >= -1e-9 and new >= -1e-9:
+                        action = "BUY" if qty > 0 else "SELL"
+                        self.bot_repository.log_trade(
+                            bot_name=self.bot_name,
+                            symbol=key,
+                            quantity=abs(qty),
+                            price=price,
+                            is_buy=qty > 0,
+                            profit=flow if qty < 0 else None,
+                            action=action,
+                            session=sess,
+                        )
+                    elif old <= 1e-9 and new <= 1e-9:
+                        action = "COVER" if qty > 0 else "SHORT"
+                        self.bot_repository.log_trade(
+                            bot_name=self.bot_name,
+                            symbol=key,
+                            quantity=abs(qty),
+                            price=price,
+                            is_buy=qty > 0,
+                            profit=flow if qty < 0 else None,
+                            action=action,
+                            session=sess,
+                        )
+                    else:
+                        # Crossing zero
+                        if old > 0 and new < 0:
+                            sell_flow = abs(old) * price * (1.0 - cfg.commission_pct)
+                            self.bot_repository.log_trade(
+                                bot_name=self.bot_name,
+                                symbol=key,
+                                quantity=abs(old),
+                                price=price,
+                                is_buy=False,
+                                profit=sell_flow,
+                                action="SELL",
+                                session=sess,
+                            )
+                            short_flow = abs(new) * price * (1.0 - cfg.commission_pct)
+                            self.bot_repository.log_trade(
+                                bot_name=self.bot_name,
+                                symbol=key,
+                                quantity=abs(new),
+                                price=price,
+                                is_buy=False,
+                                profit=short_flow,
+                                action="SHORT",
+                                session=sess,
+                            )
+                        elif old < 0 and new > 0:
+                            self.bot_repository.log_trade(
+                                bot_name=self.bot_name,
+                                symbol=key,
+                                quantity=abs(old),
+                                price=price,
+                                is_buy=True,
+                                profit=None,
+                                action="COVER",
+                                session=sess,
+                            )
+                            self.bot_repository.log_trade(
+                                bot_name=self.bot_name,
+                                symbol=key,
+                                quantity=abs(new),
+                                price=price,
+                                is_buy=True,
+                                profit=None,
+                                action="BUY",
+                                session=sess,
+                            )
                 logger.info(
-                    "%s %.0f of %s at %.4f (cash %+.2f)", "BOUGHT" if qty > 0 else "SOLD", abs(qty), key, price, flow
+                    "%s %.4f of %s at %.4f (cash %+.2f)",
+                    "BOUGHT" if qty > 0 else "SOLD",
+                    abs(qty),
+                    key,
+                    price,
+                    flow,
                 )
             return sum(f[3] for f in fills)
 
@@ -679,6 +805,110 @@ class PortfolioManager:
             return _execute(session)
         with get_db_session() as sess:
             return _execute(sess)
+
+    def trade_option_legs(self, legs: list[tuple[str, float]], session: Session | None = None) -> float:
+        """
+        Change several option positions in ONE locked transaction.
+        Options wrapper around trade_legs; enforces that stock is traded only beside options on it.
+        """
+        legs = [(k, float(q)) for k, q in legs if abs(q) > 1e-9]
+        if not legs:
+            return 0.0
+        traded_underlyings = {options.parse_occ(k).underlying for k, _ in legs if options.is_option_symbol(k)}
+        stock_keys = [k for k, _ in legs if not options.is_option_symbol(k)]
+        portfolio = self._portfolio(session)
+        allowed = traded_underlyings | options.option_underlyings(portfolio)
+        naked = [k for k in stock_keys if k not in allowed]
+        if naked:
+            raise ValueError(f"trade_option_legs trades stock only beside options on it, got {naked}")
+        return self.trade_legs(legs, session=session)
+
+    def short(
+        self,
+        symbol: str,
+        quantity_usd: float,
+        cached_data: pd.DataFrame | None = None,
+        session: Session | None = None,
+        *,
+        shortable: tuple[str, ...] | list[str] | set[str] | None = None,
+        max_gross: float = 1.0,
+    ) -> float:
+        """
+        Short a quantity of the specified symbol.
+
+        Args:
+            symbol: Trading symbol to short
+            quantity_usd: Dollar amount of the short position to open
+            cached_data: Optional cached DataFrame for price lookup
+            session: Optional existing database session
+            shortable: Optional allowlist of shortable symbols (default: config.SHORTABLE)
+            max_gross: Maximum gross leverage ratio (default: 1.0)
+
+        Returns:
+            Net cash proceeds credited.
+        """
+        if options.is_option_symbol(symbol):
+            raise ValueError(f"Cannot short option contract {symbol!r} with short(); use trade_option_legs")
+
+        allowed_shortable = set(shortable) if shortable is not None else set(SHORTABLE)
+        if symbol not in allowed_shortable:
+            raise ValueError(f"Symbol {symbol!r} is not shortable")
+
+        price = self.data_service.get_latest_price(symbol, cached_data)
+        if price is None or price <= 0:
+            raise MissingPriceError(f"Missing or non-positive price for {symbol!r}: {price}")
+
+        shares = math.floor(quantity_usd / price)
+        if shares <= 0:
+            logger.warning(f"Calculated short quantity for {symbol} is <= 0")
+            return 0.0
+
+        return self.trade_legs(
+            [(symbol, -float(shares))],
+            session=session,
+            max_gross=max_gross,
+            shortable=allowed_shortable,
+        )
+
+    def cover(
+        self,
+        symbol: str,
+        quantity_usd: float = -1,
+        cached_data: pd.DataFrame | None = None,
+        session: Session | None = None,
+    ) -> float:
+        """
+        Cover a short position in the specified symbol.
+
+        Args:
+            symbol: Trading symbol to cover
+            quantity_usd: Amount in USD to cover (-1 means cover entire short position)
+            cached_data: Optional cached DataFrame for price lookup
+            session: Optional existing database session
+
+        Returns:
+            Net cash flow (negative, cost of covering).
+        """
+        portfolio = self._portfolio(session)
+        holding = portfolio.get(symbol, 0.0)
+        if holding >= -1e-9:
+            logger.warning(f"No short position in {symbol} to cover")
+            return 0.0
+
+        price = self.data_service.get_latest_price(symbol, cached_data)
+        if price is None or price <= 0:
+            raise MissingPriceError(f"Missing or non-positive price for {symbol!r}: {price}")
+
+        abs_holding = abs(holding)
+        if quantity_usd == -1:
+            shares = abs_holding
+        else:
+            shares = min(abs_holding, float(math.floor(quantity_usd / price)))
+
+        if shares <= 0:
+            return 0.0
+
+        return self.trade_legs([(symbol, float(shares))], session=session)
 
     def open_structure(self, pick: options.StructurePick, max_risk_usd: float) -> int:
         """
@@ -761,7 +991,13 @@ class PortfolioManager:
             row.portfolio = portfolio
             self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
-                bot_name=self.bot_name, symbol=symbol, quantity=-qty, price=price, is_buy=True, session=sess
+                bot_name=self.bot_name,
+                symbol=symbol,
+                quantity=-qty,
+                price=price,
+                is_buy=True,
+                action="COVER",
+                session=sess,
             )
             return -cost
 
@@ -804,13 +1040,28 @@ class PortfolioManager:
         return options.build_book(underlying, legs, prices, spot, entries, shares=shares)
 
     def total_value(self) -> float:
-        """Cash plus every holding (short option legs negative) at the latest price."""
+        """Cash plus every holding (short positions negative) at the latest price."""
         portfolio = self._portfolio()
         held = [s for s, q in portfolio.items() if s != "USD" and abs(q) > 1e-6]
         prices = self.data_service.get_latest_prices_batch(held) if held else {}
-        return portfolio.get("USD", 0) + sum(portfolio[s] * prices.get(s, 0.0) for s in held)
+        val = float(portfolio.get("USD", 0.0))
+        for s in held:
+            qty = portfolio[s]
+            p = prices.get(s)
+            if qty < -1e-9 and (p is None or p <= 0):
+                raise MissingPriceError(f"Missing price for short holding {s!r}")
+            val += qty * (p or 0.0)
+        return val
 
-    def rebalance_portfolio(self, target_portfolio: dict[str, float], only_over_50_usd: bool = False) -> None:
+    def rebalance_portfolio(
+        self,
+        target_portfolio: dict[str, float],
+        only_over_50_usd: bool = False,
+        *,
+        allow_short: bool = False,
+        max_gross: float = 1.0,
+        shortable: tuple[str, ...] | list[str] | set[str] | None = None,
+    ) -> None:
         """
         Rebalance portfolio to match target weights in a single transaction with row locking.
 
@@ -818,6 +1069,9 @@ class PortfolioManager:
             target_portfolio: Dictionary mapping symbols to target weights (e.g., {"VWCE": 0.8, "GLD": 0.1, "USD": 0.1})
                            Weights must sum to 1.0 (100%)
             only_over_50_usd: If True, filter out assets with target value <= $50
+            allow_short: Whether short positions are allowed (default False)
+            max_gross: Maximum gross leverage ratio allowed (default 1.0)
+            shortable: Optional allowlist of shortable symbols (default config.SHORTABLE)
         """
         # Step 1: Validate weights sum to 1.0. Caller-supplied input, so reject
         # rather than silently rescale — a target that does not sum to 1 means the
@@ -829,12 +1083,29 @@ class PortfolioManager:
             # selection and rolling inside the rebalance. Not supported — held
             # contracts absent from the target are sold like any other exit.
             raise ValueError(f"rebalancePortfolio cannot target option contracts {contracts}; use buy/sell(option=...)")
-        shorts = [k for k, q in self._portfolio().items() if k != "USD" and q < -1e-9]
-        if shorts:
-            # A weight-based rebalance values and exits long holdings; a short leg
-            # would be ignored in the total and "exited" via buy() of a raw
-            # contract. Spread books are managed with close_options instead.
-            raise ValueError(f"rebalancePortfolio cannot run on a book with short option legs {shorts}")
+
+        # Short option legs (spreads, condors) are never rebalanced by weight: a weight-based rebalance
+        # would ignore them in the total and "exit" them via buy() of a raw contract. Spread books are
+        # managed with close_options. Short STOCK positions are handled below only for opted-in bots.
+        held_shorts = [k for k, q in self._portfolio().items() if k != "USD" and q < -1e-9]
+        short_option_legs = [k for k in held_shorts if options.is_option_symbol(k)]
+        if short_option_legs:
+            raise ValueError(f"rebalancePortfolio cannot run on a book with short option legs {short_option_legs}")
+        if held_shorts and not allow_short:
+            raise ValueError(
+                f"rebalancePortfolio cannot run on a book with short positions {held_shorts} unless allow_short"
+            )
+
+        if not allow_short:
+            for s, w in target_portfolio.items():
+                if w < -1e-9:
+                    raise ValueError(f"Target portfolio contains negative weight for {s} but allow_short is False")
+
+        allowed_shortable = set(shortable) if shortable is not None else set(SHORTABLE)
+        if allow_short:
+            for s, w in target_portfolio.items():
+                if s != "USD" and w < -1e-9 and s not in allowed_shortable:
+                    raise ValueError(f"Symbol {s!r} is not shortable")
 
         # Step 2: Resolve prices BEFORE taking the row lock.
         #
@@ -844,8 +1115,16 @@ class PortfolioManager:
         # so every other writer for the same bot — the copier, the worth
         # calculator, a concurrent run — blocked for as long as a third party took
         # to respond, with the statement timeout as the only ceiling.
-        preview_symbols = sorted(set(target_portfolio) | set(self._portfolio()))
+        current_book = self._portfolio()
+        preview_symbols = sorted(set(target_portfolio) | set(current_book))
         prices = self.data_service.get_latest_prices_batch([s for s in preview_symbols if s != "USD"])
+
+        # Fail closed if a short holding lacks a price
+        for s in preview_symbols:
+            if s != "USD" and current_book.get(s, 0.0) < -1e-9:
+                p = prices.get(s)
+                if p is None or p <= 0:
+                    raise MissingPriceError(f"Missing price for short holding {s!r}")
 
         with get_db_session() as session:
             # Lock bot row for the entire duration of rebalance
@@ -875,7 +1154,9 @@ class PortfolioManager:
 
             for symbol in all_involved_symbols:
                 qty = row.portfolio.get(symbol, 0)
-                if qty > 0:
+                if abs(qty) < 1e-9:
+                    current_values[symbol] = 0.0
+                elif qty > 0:
                     price = prices.get(symbol)
                     if price:
                         val = qty * price
@@ -883,7 +1164,14 @@ class PortfolioManager:
                         total_portfolio_value += val
                     else:
                         logger.warning(f"Could not get price for {symbol}, assuming zero value")
-                        current_values[symbol] = 0
+                        current_values[symbol] = 0.0
+                else:
+                    price = prices.get(symbol)
+                    if price is None or price <= 0:
+                        raise MissingPriceError(f"Missing price for short holding {symbol!r}")
+                    val = qty * price
+                    current_values[symbol] = val
+                    total_portfolio_value += val
 
             if total_portfolio_value <= 0:
                 logger.warning("Portfolio worth is zero, cannot rebalance")
@@ -896,7 +1184,7 @@ class PortfolioManager:
                 excluded_weight = 0.0
 
                 for sym, weight in actual_targets.items():
-                    if sym == "USD" or (weight * total_portfolio_value) > PORTFOLIO_CONFIG.min_asset_value_usd:
+                    if sym == "USD" or abs(weight * total_portfolio_value) > PORTFOLIO_CONFIG.min_asset_value_usd:
                         filtered_weights[sym] = weight
                     else:
                         excluded_weight += weight
@@ -915,55 +1203,110 @@ class PortfolioManager:
 
             # Step 4: Calculate target values and differences
             target_values = {s: total_portfolio_value * w for s, w in actual_targets.items()}
-
-            trades_to_sell = {}  # symbol -> USD amount
-            trades_to_buy = {}
-
             cfg = self.execution_config
-            skipped = 0
-            skipped_usd = 0.0
 
-            for symbol in all_involved_symbols:
-                target_val = target_values.get(symbol, 0)
-                current_val = current_values.get(symbol, 0)
-                diff = target_val - current_val
+            if not allow_short:
+                trades_to_sell = {}  # symbol -> USD amount
+                trades_to_buy = {}
+                skipped = 0
+                skipped_usd = 0.0
 
-                # No target but a live position == full liquidation, never banded.
-                # This is also how the min_asset_value_usd filter above expresses
-                # "close this position": it drops the symbol from actual_targets.
-                is_full_exit = target_val <= 0 < current_val
-                reference_val = max(target_val, current_val)
+                for symbol in all_involved_symbols:
+                    target_val = target_values.get(symbol, 0)
+                    current_val = current_values.get(symbol, 0)
+                    diff = target_val - current_val
 
-                if not should_trade(diff, reference_val, cfg, is_full_exit=is_full_exit):
-                    if abs(diff) > 0:
-                        skipped += 1
-                        skipped_usd += abs(diff)
-                    continue
+                    # No target but a live position == full liquidation, never banded.
+                    # This is also how the min_asset_value_usd filter above expresses
+                    # "close this position": it drops the symbol from actual_targets.
+                    is_full_exit = target_val <= 0 < current_val
+                    reference_val = max(target_val, current_val)
 
-                if diff < 0:
-                    trades_to_sell[symbol] = abs(diff)
-                else:
-                    trades_to_buy[symbol] = diff
+                    if not should_trade(diff, reference_val, cfg, is_full_exit=is_full_exit):
+                        if abs(diff) > 0:
+                            skipped += 1
+                            skipped_usd += abs(diff)
+                        continue
 
-            logger.info(
-                "Rebalancing %s: Total Value $%.2f, %d sells, %d buys, "
-                "%d skipped inside no-trade band ($%.2f notional; band = max($%.2f, %.1f%% of position))",
-                self.bot_name,
-                total_portfolio_value,
-                len(trades_to_sell),
-                len(trades_to_buy),
-                skipped,
-                skipped_usd,
-                cfg.min_trade_usd,
-                cfg.rebalance_band_pct * 100,
-            )
+                    if diff < 0:
+                        trades_to_sell[symbol] = abs(diff)
+                    else:
+                        trades_to_buy[symbol] = diff
 
-            # Step 5: Execute trades (Sells first)
-            for symbol, usd_amt in trades_to_sell.items():
-                self.sell(symbol, quantity_usd=usd_amt, session=session)
+                logger.info(
+                    "Rebalancing %s: Total Value $%.2f, %d sells, %d buys, "
+                    "%d skipped inside no-trade band ($%.2f notional; band = max($%.2f, %.1f%% of position))",
+                    self.bot_name,
+                    total_portfolio_value,
+                    len(trades_to_sell),
+                    len(trades_to_buy),
+                    skipped,
+                    skipped_usd,
+                    cfg.min_trade_usd,
+                    cfg.rebalance_band_pct * 100,
+                )
 
-            # Re-read cash after sells
-            for symbol, usd_amt in trades_to_buy.items():
-                self.buy(symbol, quantity_usd=usd_amt, session=session)
+                # Step 5: Execute trades (Sells first)
+                for symbol, usd_amt in trades_to_sell.items():
+                    self.sell(symbol, quantity_usd=usd_amt, session=session)
 
-            logger.info("Rebalance complete")
+                # Re-read cash after sells
+                for symbol, usd_amt in trades_to_buy.items():
+                    self.buy(symbol, quantity_usd=usd_amt, session=session)
+
+                logger.info("Rebalance complete")
+            else:
+                legs = []
+                skipped = 0
+                skipped_usd = 0.0
+
+                for symbol in all_involved_symbols:
+                    target_val = target_values.get(symbol, 0.0)
+                    current_val = current_values.get(symbol, 0.0)
+                    current_qty = row.portfolio.get(symbol, 0.0)
+                    diff = target_val - current_val
+
+                    price = prices.get(symbol)
+                    if price is None or price <= 0:
+                        if target_val < -1e-9 or current_qty < -1e-9:
+                            raise MissingPriceError(f"Missing price for short symbol {symbol!r}")
+                        logger.warning(f"Could not get price for {symbol}, skipping")
+                        continue
+
+                    is_full_exit = abs(target_val) <= 1e-9 and abs(current_qty) > 1e-9
+                    reference_val = max(abs(target_val), abs(current_val))
+
+                    if not should_trade(diff, reference_val, cfg, is_full_exit=is_full_exit):
+                        if abs(diff) > 0:
+                            skipped += 1
+                            skipped_usd += abs(diff)
+                        continue
+
+                    if target_val > 1e-9:
+                        target_shares = target_val / price
+                    elif target_val < -1e-9:
+                        target_shares = float(round(target_val / price))
+                    else:
+                        target_shares = 0.0
+
+                    delta = target_shares - current_qty
+                    if abs(delta) > 1e-9:
+                        legs.append((symbol, delta))
+
+                logger.info(
+                    "Rebalancing %s (shorts allowed): Total Value $%.2f, %d legs, %d skipped inside no-trade band",
+                    self.bot_name,
+                    total_portfolio_value,
+                    len(legs),
+                    skipped,
+                )
+
+                if legs:
+                    self.trade_legs(
+                        legs,
+                        session=session,
+                        max_gross=max_gross,
+                        shortable=allowed_shortable,
+                    )
+
+                logger.info("Rebalance complete")

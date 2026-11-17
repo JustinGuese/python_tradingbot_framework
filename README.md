@@ -88,6 +88,7 @@ Live paper bots with at least 4 weeks of history, sorted by CAGR, from the
 | option_EarningsCalendarBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
 | option_IndexVolBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
 | option_MispricingScanBot | 39 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
+| BuybackHedgedBot | 0 | 0.0% | 0% | 0.0% | 0.00 | 0.00 | 0.0% | too short |
 | SharpePortfolioOptWeeklyBot | 330 | +0.3% | 0% | −7.8% | −1.12 | 0.13 | −6.8% | unproven |
 | EURUSDTreeBot | 333 | −3.5% | −4% | −8.8% | −2.35 | 0.01 | −4.6% | pause candidate |
 | option_MispricingBot | 39 | −0.5% | −4% | −9.2% | −1.24 | −0.05 | −0.8% | too short |
@@ -355,8 +356,9 @@ def makeOneIteration(self):
 | `makeOneIteration()`                                                                                | Override for custom logic.                                                            |
 | `local_backtest()`                                                                                  | Simulates strategy performance on historical data.                                    |
 | `local_development()`                                                                               | Optimize hyperparameters + backtest.                                                  |
-| `buy(symbol)` / `sell(symbol)`                                                                      | Automated portfolio and DB logging.                                                   |
-| `rebalancePortfolio(weights)`                                                                       | Rebalance to target weights.                                                          |
+| `buy(symbol)` / `sell(symbol)`                                                                      | Automated portfolio and DB logging (long positions).                                  |
+| `short(symbol)` / `cover(symbol)`                                                                  | Short selling and covering for opted-in bots (`ALLOW_SHORT=True`).                    |
+| `rebalancePortfolio(weights)`                                                                       | Rebalance to target weights (supports signed weights when `ALLOW_SHORT=True`).        |
 | `run_ai(system_prompt, user_message)`                                                               | Runs AI with tools (main LLM); returns model response. Requires `OPENROUTER_API_KEY`. |
 | `run_ai_simple(system_prompt, user_message)`                                                        | Single-turn, no tools (cheap LLM); for summarization, extraction, classification.     |
 | `run_ai_simple_with_fallback(system_prompt, user_message, sanity_check=..., fallback_to_main=True)` | Cheap LLM first; validates output; retries with main LLM if sanity check fails.       |
@@ -404,13 +406,13 @@ See [AI Tools Guide](docs/guides/ai-tools.md) and [AITools API](docs/api/aitools
 
 ### Portfolio Structure
 
-Portfolio is stored as JSON in the database:
+Portfolio is stored as JSON in the database (negative quantities represent short positions):
 
 ```python
 portfolio = {
-    "USD": 10000.0,  # Cash
-    "QQQ": 5.5,  # Holdings (quantity, not value)
-    "AAPL": 10.0,  # More holdings
+    "USD": 10000.0,  # Cash (including short sale proceeds held as collateral)
+    "QQQ": -5.0,  # Short position (negative quantity)
+    "AAPL": 10.0,  # Long position
 }
 ```
 
@@ -436,6 +438,13 @@ See [Technical Analysis Guide](docs/guides/technical-analysis.md) for complete l
 - [Quick Start Guide](docs/getting-started/quick-start.md) - Complete local development workflow with PostgreSQL setup, bot creation at different abstraction levels, backtesting, and hyperparameter tuning
 - [Installation](docs/getting-started/installation.md) - System requirements and dependency installation
 - [Creating a Bot](docs/getting-started/creating-a-bot.md) - Detailed bot creation patterns and examples
+
+### Architecture
+
+- [Architecture Overview](docs/architecture/overview.md) - System components and data flow
+- [Bot Class System](docs/architecture/bot-class-system.md) - Class hierarchy, lifecycle, and controls
+- [Database Models](docs/architecture/database-models.md) - PostgreSQL schema and tables
+- [Short Selling](docs/architecture/short-selling.md) - Reg T margin model, borrow fees, and broker execution
 
 ### Deployment
 
@@ -696,6 +705,7 @@ proposals to test, not changes to ship.
 - **aihedgefundbot.py** - AI-driven portfolio rebalancing
 - **deepseektoolbot.py** - AI with tools (research + submit weights); cheap LLM sanity-check and main-LLM retry
 - **gptbasedstrategytabased.py** - GPT-based strategy with technical analysis
+- **buybackhedgedbot.py** - Market-neutral buyback drift sleeve hedged with short QQQ (`ALLOW_SHORT=True`, `MAX_GROSS=2.0`)
 
 See [Example Bots](docs/examples/example-bots.md) for implementation details.
 

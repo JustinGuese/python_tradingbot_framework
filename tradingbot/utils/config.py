@@ -4,10 +4,13 @@ Configuration, constants, and global setup for the trading bot system.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .universes import SP100
 
 # ------------------------------------------------------------------
 # Constants
@@ -126,6 +129,44 @@ TRADEABLE = [
     "DBE",
 ]
 
+# Short selling defaults and universes (PLAN.md S0)
+SHORT_BORROW_RATE_PCT = 1.0  # per year (1.0 = 1%)
+SHORT_MAINT_PCT = 0.30  # maintenance margin ratio on shorts
+SHORT_INIT_PCT = 0.50  # Reg T initial margin ratio
+SHORT_BORROW_OVERRIDES: dict[str, float] = {}
+
+LIQUID_ETFS: tuple[str, ...] = (
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "XLK",
+    "XLF",
+    "XLE",
+    "XLV",
+    "XLY",
+    "XLP",
+    "XLI",
+    "XLU",
+    "XLB",
+    "XLRE",
+    "XLC",
+    "GLD",
+    "SLV",
+    "TLT",
+    "IEF",
+    "SHY",
+    "SHV",
+    "VTI",
+    "VOO",
+    "VEA",
+    "VWO",
+    "EEM",
+    "EFA",
+)
+
+SHORTABLE: tuple[str, ...] = tuple(dict.fromkeys(LIQUID_ETFS + SP100))
+
 # ------------------------------------------------------------------
 # Configuration Objects
 # ------------------------------------------------------------------
@@ -229,9 +270,67 @@ class ExecutionConfig:
         return max(self.min_trade_usd, self.rebalance_band_pct * abs(reference_usd))
 
 
+def _env_json_dict(name: str, default: dict[str, float]) -> dict[str, float]:
+    """Read a JSON-encoded symbol->rate dict from environment, falling back to default."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return dict(default)
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return {str(k): float(v) for k, v in data.items()}
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Invalid %s=%r; using default %s: %s", name, raw, default, exc)
+    return dict(default)
+
+
+@dataclass(frozen=True)
+class ShortConfig:
+    """
+    Configuration for short selling, margin, and borrow fees (PLAN.md S0).
+
+    Attributes:
+        borrow_rate_pct: Default borrow rate per year (1.0 = 1% per annum).
+        maint_pct: Short maintenance margin ratio (default 0.30 = 30%).
+        init_pct: Reg T initial margin ratio for shorts (default 0.50 = 50%).
+        borrow_overrides: Dict mapping symbol -> annual borrow rate percent.
+    """
+
+    borrow_rate_pct: float = SHORT_BORROW_RATE_PCT
+    maint_pct: float = SHORT_MAINT_PCT
+    init_pct: float = SHORT_INIT_PCT
+    borrow_overrides: dict[str, float] = field(default_factory=dict)
+
+    @classmethod
+    def from_env(cls) -> ShortConfig:
+        return cls(
+            borrow_rate_pct=_env_float("SHORT_BORROW_RATE_PCT", SHORT_BORROW_RATE_PCT, lo=0.0, hi=100.0),
+            maint_pct=_env_float("SHORT_MAINT_PCT", SHORT_MAINT_PCT, lo=0.0, hi=1.0),
+            init_pct=_env_float("SHORT_INIT_PCT", SHORT_INIT_PCT, lo=0.0, hi=1.0),
+            borrow_overrides=_env_json_dict("SHORT_BORROW_OVERRIDES", SHORT_BORROW_OVERRIDES),
+        )
+
+    @property
+    def SHORT_BORROW_RATE_PCT(self) -> float:
+        return self.borrow_rate_pct
+
+    @property
+    def SHORT_MAINT_PCT(self) -> float:
+        return self.maint_pct
+
+    @property
+    def SHORT_INIT_PCT(self) -> float:
+        return self.init_pct
+
+    @property
+    def SHORT_BORROW_OVERRIDES(self) -> dict[str, float]:
+        return self.borrow_overrides
+
+
 DATA_CONFIG = DataConfig()
 PORTFOLIO_CONFIG = PortfolioConfig()
 EXECUTION_CONFIG = ExecutionConfig.from_env()
+SHORT_CONFIG = ShortConfig.from_env()
 
 
 # ------------------------------------------------------------------

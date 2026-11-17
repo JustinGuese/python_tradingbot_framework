@@ -9,7 +9,20 @@ import pandas as pd
 
 from .alpha_report import alpha_stats
 from .botclass import Bot
-from .config import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT, EXECUTION_CONFIG
+from .config import (
+    DEFAULT_COMMISSION_PCT,
+    DEFAULT_SLIPPAGE_PCT,
+    EXECUTION_CONFIG,
+    SHORT_CONFIG,
+    SHORTABLE,
+)
+from .margin import (
+    book_values,
+    cover_order,
+    initial_ok,
+    maintenance_breach,
+    spendable_cash,
+)
 from .portfolio_manager import should_trade
 from .trial_registry import compute_params_hash, record_trial, trial_count
 
@@ -568,7 +581,7 @@ def backtest_bot(
           equity_curve:    [{"t": iso8601, "v": portfolio value in USD}, ...]
           buy_hold_curve:  same shape, same timestamps — equal-weight buy-and-hold
                            over the tradeable tickers, scaled to initial_capital
-          trades:          [{"t", "symbol", "side": "buy"|"sell", "qty", "price"}, ...]
+          trades:          [{"t", "symbol", "side": "buy"|"sell"|"short"|"cover", "qty", "price"}, ...]
                            where price is the execution price actually paid or
                            received (slippage included), not the bar's close.
 
@@ -672,6 +685,12 @@ def backtest_bot(
         first_prices: dict[str, float] = {}
         nrtrades = 0
 
+        allow_short = bool(getattr(bot, "ALLOW_SHORT", False))
+        max_gross = float(getattr(bot, "MAX_GROSS", 1.0))
+        shortable_conf = getattr(bot, "SHORTABLE", None)
+        shortable_set = set(SHORTABLE if shortable_conf is None else shortable_conf)
+        periods_per_year = _get_periods_per_year(bot.interval)
+
         for ts in common_ts:
             rows = {t: indexed[t].loc[ts] for t in tickers}
 
@@ -699,6 +718,38 @@ def backtest_bot(
             if has_ta_columns and any(rows[t]["trend_adx"] == 0.0 for t in tickers):
                 continue
 
+            if allow_short:
+                # Per-bar borrow fee on existing short positions held from previous bar
+                for ticker in tradeable:
+                    holding = portfolio.get(ticker, 0.0)
+                    if holding < -1e-9:
+                        rate_pct = SHORT_CONFIG.borrow_overrides.get(ticker, SHORT_CONFIG.borrow_rate_pct)
+                        fee = abs(holding) * prices[ticker] * (rate_pct / 100.0 / periods_per_year)
+                        portfolio["USD"] = portfolio.get("USD", 0.0) - fee
+
+                # Force-cover on maintenance breach
+                if maintenance_breach(portfolio, prices):
+                    while maintenance_breach(portfolio, prices):
+                        sym = cover_order(portfolio, prices)
+                        if sym is None:
+                            break
+                        short_qty = abs(portfolio[sym])
+                        exec_price = prices[sym] * (1 + slippage_pct)
+                        cover_cost = short_qty * exec_price
+                        commission = cover_cost * commission_pct
+                        portfolio["USD"] = portfolio.get("USD", 0.0) - (cover_cost + commission)
+                        portfolio[sym] = 0.0
+                        nrtrades += 1
+                        trade_log.append(
+                            {
+                                "t": _iso(ts),
+                                "symbol": sym,
+                                "side": "cover",
+                                "qty": float(short_qty),
+                                "price": float(exec_price),
+                            }
+                        )
+
             total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
 
             # Resolve this bar into a target USD value per ticker, a per-ticker
@@ -723,16 +774,53 @@ def backtest_bot(
                     # return: every target is its current value, so neither
                     # phase below trades and the bar is still recorded.
                     targets = {t: portfolio.get(t, 0.0) * prices[t] for t in tradeable}
-                    band_ref = dict(targets)
+                    band_ref = {t: abs(targets[t]) for t in tradeable}
                     full_exit = set()
                 else:
-                    weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
-                    targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
-                    # Band against the LARGER of target and current value, so
-                    # trimming a big position uses a band scaled to that position
-                    # rather than to the small target it is heading for.
-                    band_ref = {t: max(targets[t], portfolio.get(t, 0.0) * prices[t]) for t in tradeable}
-                    full_exit = {t for t in tradeable if targets[t] <= 0.0}
+                    if allow_short:
+                        raw_map = dict(raw_weights or {})
+                        weights = bot._coerce_target_weights(raw_map, allowed=set(tradeable))
+                        if any(v < 0 for v in raw_map.values() if isinstance(v, (int, float))) and not any(
+                            v < 0 for v in weights.values()
+                        ):
+                            # S1b fallback: coerce allowing negative weights
+                            w_signed: dict[str, float] = {}
+                            allowed_set = set(tradeable)
+                            for s, v in raw_map.items():
+                                if s == "USD" or s not in allowed_set:
+                                    continue
+                                try:
+                                    val = float(v)
+                                    if np.isfinite(val):
+                                        w_signed[s] = val
+                                except (TypeError, ValueError):
+                                    continue
+                            gross = sum(abs(v) for v in w_signed.values())
+                            if gross > max_gross and gross > 0:
+                                scale = max_gross / gross
+                                w_signed = {s: v * scale for s, v in w_signed.items()}
+                            w_signed["USD"] = 1.0 - sum(w_signed.values())
+                            weights = w_signed
+
+                        # Drop negative weights for non-shortable symbols
+                        for t in tradeable:
+                            if weights.get(t, 0.0) < -1e-9 and t not in shortable_set:
+                                logger.warning(f"Symbol {t} is not shortable; dropping short target")
+                                weights[t] = 0.0
+
+                        targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
+                        band_ref = {t: max(abs(targets[t]), abs(portfolio.get(t, 0.0) * prices[t])) for t in tradeable}
+                        full_exit = {
+                            t for t in tradeable if abs(targets[t]) < 1e-9 and abs(portfolio.get(t, 0.0)) > 1e-9
+                        }
+                    else:
+                        weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
+                        targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
+                        # Band against the LARGER of target and current value, so
+                        # trimming a big position uses a band scaled to that position
+                        # rather than to the small target it is heading for.
+                        band_ref = {t: max(targets[t], portfolio.get(t, 0.0) * prices[t]) for t in tradeable}
+                        full_exit = {t for t in tradeable if targets[t] <= 0.0}
             else:
                 # Decide for every tradeable ticker before trading any of them, so
                 # exits can fund entries — mirroring the live path, where
@@ -760,64 +848,211 @@ def backtest_bot(
                 full_exit = {t for t, d in decisions.items() if d == -1}
 
             # Phase 1: exits and trims.
-            for ticker in tradeable:
-                price = prices[ticker]
-                holding = portfolio.get(ticker, 0.0)
-                if holding <= 0:
-                    continue
-                holding_value = holding * price
-                wanted = targets[ticker]
-                excess = holding_value - wanted
-                if excess <= (0.0 if ticker in full_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])):
-                    continue
-                qty = min(holding, excess / price)
-                execution_price = price * (1 - slippage_pct)
-                cash_proceeds = qty * execution_price
-                net_proceeds = cash_proceeds - cash_proceeds * commission_pct
-                portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
-                portfolio[ticker] = holding - qty
-                nrtrades += 1
-                trade_log.append(
-                    {
-                        "t": _iso(ts),
-                        "symbol": ticker,
-                        "side": "sell",
-                        "qty": float(qty),
-                        "price": float(execution_price),
-                    }
-                )
+            if allow_short:
+                # 1a: Long exits and trims
+                for ticker in tradeable:
+                    price = prices[ticker]
+                    holding = portfolio.get(ticker, 0.0)
+                    if holding <= 0:
+                        continue
+                    holding_value = holding * price
+                    wanted = targets[ticker]
+                    wanted_long = max(0.0, wanted)
+                    excess = holding_value - wanted_long
+                    is_exit = (ticker in full_exit) or (wanted <= 0.0)
+                    if excess <= (0.0 if is_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])):
+                        continue
+                    qty = min(holding, excess / price)
+                    execution_price = price * (1 - slippage_pct)
+                    cash_proceeds = qty * execution_price
+                    net_proceeds = cash_proceeds - cash_proceeds * commission_pct
+                    portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
+                    portfolio[ticker] = holding - qty
+                    nrtrades += 1
+                    trade_log.append(
+                        {
+                            "t": _iso(ts),
+                            "symbol": ticker,
+                            "side": "sell",
+                            "qty": float(qty),
+                            "price": float(execution_price),
+                        }
+                    )
+
+                # 1b: Short covers and trims
+                for ticker in tradeable:
+                    price = prices[ticker]
+                    holding = portfolio.get(ticker, 0.0)
+                    if holding >= -1e-9:
+                        continue
+                    holding_value = holding * price
+                    wanted = targets[ticker]
+                    wanted_short = min(0.0, wanted)
+                    if wanted_short <= holding_value:
+                        continue
+                    cover_val = wanted_short - holding_value
+                    is_exit = (ticker in full_exit) or (wanted >= 0.0)
+                    if cover_val <= (0.0 if is_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])):
+                        continue
+                    qty = min(abs(holding), cover_val / price)
+                    execution_price = price * (1 + slippage_pct)
+                    cost = qty * execution_price
+                    commission = cost * commission_pct
+                    portfolio["USD"] = portfolio.get("USD", 0.0) - (cost + commission)
+                    portfolio[ticker] = holding + qty
+                    nrtrades += 1
+                    trade_log.append(
+                        {
+                            "t": _iso(ts),
+                            "symbol": ticker,
+                            "side": "cover",
+                            "qty": float(qty),
+                            "price": float(execution_price),
+                        }
+                    )
+            else:
+                for ticker in tradeable:
+                    price = prices[ticker]
+                    holding = portfolio.get(ticker, 0.0)
+                    if holding <= 0:
+                        continue
+                    holding_value = holding * price
+                    wanted = targets[ticker]
+                    excess = holding_value - wanted
+                    if excess <= (
+                        0.0 if ticker in full_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])
+                    ):
+                        continue
+                    qty = min(holding, excess / price)
+                    execution_price = price * (1 - slippage_pct)
+                    cash_proceeds = qty * execution_price
+                    net_proceeds = cash_proceeds - cash_proceeds * commission_pct
+                    portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
+                    portfolio[ticker] = holding - qty
+                    nrtrades += 1
+                    trade_log.append(
+                        {
+                            "t": _iso(ts),
+                            "symbol": ticker,
+                            "side": "sell",
+                            "qty": float(qty),
+                            "price": float(execution_price),
+                        }
+                    )
 
             # Phase 2: entries and top-ups, funded by the proceeds above.
-            # No decision filter is needed: for a hold the target is capped at
-            # the current value and for an exit it is zero, so both give a
-            # shortfall <= 0 and skip below exactly as the old `if decision != 1`
-            # made them.
-            for ticker in tradeable:
-                price = prices[ticker]
-                holding = portfolio.get(ticker, 0.0)
-                shortfall = targets[ticker] - holding * price
-                if shortfall <= EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker]):
-                    continue
-                cash = portfolio.get("USD", 0.0)
-                buy_amount = min(shortfall, cash)
-                if buy_amount <= 0:
-                    continue
-                commission_cost = buy_amount * commission_pct
-                available = buy_amount - commission_cost
-                execution_price = price * (1 + slippage_pct)
-                bought_qty = available / execution_price
-                portfolio["USD"] = cash - buy_amount
-                portfolio[ticker] = holding + bought_qty
-                nrtrades += 1
-                trade_log.append(
-                    {
-                        "t": _iso(ts),
-                        "symbol": ticker,
-                        "side": "buy",
-                        "qty": float(bought_qty),
-                        "price": float(execution_price),
-                    }
-                )
+            if allow_short:
+                # Check initial_ok once on the resulting book before executing expansions
+                simulated = dict(portfolio)
+                has_expansions = False
+                for ticker in tradeable:
+                    price = prices[ticker]
+                    holding = portfolio.get(ticker, 0.0)
+                    wanted = targets[ticker]
+                    if wanted > 0 and wanted > holding * price:
+                        has_expansions = True
+                        diff = wanted - max(0.0, holding * price)
+                        simulated[ticker] = holding + diff / price
+                        simulated["USD"] = simulated.get("USD", 0.0) - diff
+                    elif wanted < 0 and wanted < holding * price and ticker in shortable_set:
+                        has_expansions = True
+                        diff = abs(wanted) - abs(min(0.0, holding * price))
+                        simulated[ticker] = holding - diff / price
+                        simulated["USD"] = simulated.get("USD", 0.0) + diff
+
+                can_expand = True
+                if has_expansions and not initial_ok(simulated, prices, max_gross):
+                    can_expand = False
+                    logger.warning("Target portfolio breaches initial margin / max_gross; refusing entries")
+
+                if can_expand:
+                    # 2a: Long entries and top-ups
+                    for ticker in tradeable:
+                        price = prices[ticker]
+                        holding = portfolio.get(ticker, 0.0)
+                        wanted = targets[ticker]
+                        if wanted <= 0:
+                            continue
+                        holding_val = max(0.0, holding * price)
+                        shortfall = wanted - holding_val
+                        if shortfall <= EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker]):
+                            continue
+                        cash = spendable_cash(portfolio, prices)
+                        buy_amount = min(shortfall, cash)
+                        if buy_amount <= 0:
+                            continue
+                        commission_cost = buy_amount * commission_pct
+                        available = buy_amount - commission_cost
+                        execution_price = price * (1 + slippage_pct)
+                        bought_qty = available / execution_price
+                        portfolio["USD"] = portfolio.get("USD", 0.0) - buy_amount
+                        portfolio[ticker] = holding + bought_qty
+                        nrtrades += 1
+                        trade_log.append(
+                            {
+                                "t": _iso(ts),
+                                "symbol": ticker,
+                                "side": "buy",
+                                "qty": float(bought_qty),
+                                "price": float(execution_price),
+                            }
+                        )
+
+                    # 2b: Short entries and top-ups
+                    for ticker in tradeable:
+                        price = prices[ticker]
+                        holding = portfolio.get(ticker, 0.0)
+                        wanted = targets[ticker]
+                        if wanted >= 0 or ticker not in shortable_set:
+                            continue
+                        holding_val = min(0.0, holding * price)
+                        shortfall = abs(wanted) - abs(holding_val)
+                        if shortfall <= EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker]):
+                            continue
+                        execution_price = price * (1 - slippage_pct)
+                        short_qty = shortfall / price
+                        gross_proceeds = short_qty * execution_price
+                        commission_cost = gross_proceeds * commission_pct
+                        net_proceeds = gross_proceeds - commission_cost
+                        portfolio["USD"] = portfolio.get("USD", 0.0) + net_proceeds
+                        portfolio[ticker] = holding - short_qty
+                        nrtrades += 1
+                        trade_log.append(
+                            {
+                                "t": _iso(ts),
+                                "symbol": ticker,
+                                "side": "short",
+                                "qty": float(short_qty),
+                                "price": float(execution_price),
+                            }
+                        )
+            else:
+                for ticker in tradeable:
+                    price = prices[ticker]
+                    holding = portfolio.get(ticker, 0.0)
+                    shortfall = targets[ticker] - holding * price
+                    if shortfall <= EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker]):
+                        continue
+                    cash = portfolio.get("USD", 0.0)
+                    buy_amount = min(shortfall, cash)
+                    if buy_amount <= 0:
+                        continue
+                    commission_cost = buy_amount * commission_pct
+                    available = buy_amount - commission_cost
+                    execution_price = price * (1 + slippage_pct)
+                    bought_qty = available / execution_price
+                    portfolio["USD"] = cash - buy_amount
+                    portfolio[ticker] = holding + bought_qty
+                    nrtrades += 1
+                    trade_log.append(
+                        {
+                            "t": _iso(ts),
+                            "symbol": ticker,
+                            "side": "buy",
+                            "qty": float(bought_qty),
+                            "price": float(execution_price),
+                        }
+                    )
 
             current_total = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
             portfolio_values.append(current_total)

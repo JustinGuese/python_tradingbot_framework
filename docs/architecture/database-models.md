@@ -26,12 +26,34 @@ class Trade(Base):
     id: int  # Auto-increment primary key
     bot_name: str  # Foreign key to Bot.name
     symbol: str  # Trading symbol
-    isBuy: bool  # True for buy, False for sell
+    isBuy: bool  # True for buy/cover, False for sell/short
     quantity: float  # Number of shares/units
     price: float  # Price per unit
     timestamp: datetime  # Execution time
-    profit: float  # Profit (for sells, nullable)
+    profit: float  # Net proceeds credited on sell/short (nullable)
+    action: str  # Trade intent: "BUY", "SELL", "SHORT", or "COVER" (nullable)
 ```
+
+The `action` column explicitly records whether an order was a long buy (`BUY`), long exit (`SELL`), short sale opening/expansion (`SHORT`), or short position covering (`COVER`). This disambiguates executions in logs and audit trails without requiring inspection of position state before the trade.
+
+## CashAdjustment Model
+
+Records daily cash adjustments for carry operations, including short borrow fees and payments in lieu of dividends on short holdings.
+
+```python
+class CashAdjustment(Base):
+    bot_name: str  # Foreign key to Bot.name (composite PK)
+    date: date  # Calendar date of adjustment (composite PK)
+    symbol: str  # Trading symbol (composite PK)
+    kind: str  # "borrow_fee" or "dividend" (composite PK)
+    amount: float  # Amount in USD (negative = debit, positive = credit)
+    created_at: datetime
+```
+
+**Composite Primary Key**: `(bot_name, date, symbol, kind)`. This makes carry accruals idempotent: rerunning daily maintenance jobs skips existing adjustments and prevents double-debiting.
+
+- **`borrow_fee`**: Daily borrow financing charge based on short market value and borrow rate (`amount < 0`).
+- **`dividend`**: Payment in lieu of dividend debited on the ex-dividend date for short equity holdings (`amount < 0`).
 
 ## HistoricData Model
 
