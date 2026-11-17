@@ -10,6 +10,8 @@ Tests:
 from __future__ import annotations
 
 import copy
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -158,3 +160,86 @@ def test_single_signal_bots_use_only_their_kind(sample_frames):
     assert SupertrendDailyBot.KIND == "supertrend"
     w = compute_weights(sample_frames, min_votes=1, kinds=("supertrend",))
     assert "USD" not in w and all(0 < x <= 0.2 for x in w.values())
+
+
+def test_compute_weights_defensive_rotation_active(sample_frames: dict[str, pd.DataFrame]) -> None:
+    """When risk assets are partially allocated, active defensives are allocated up to gross_cap."""
+    dates = sample_frames["SPY"].index
+    close_gld = np.linspace(100, 180, len(dates))
+    gld_frame = pd.DataFrame(
+        {
+            "open": close_gld - 0.5,
+            "high": close_gld + 1.0,
+            "low": close_gld - 1.0,
+            "close": close_gld,
+            "volume": 1000.0,
+        },
+        index=dates,
+    )
+    frames = dict(sample_frames)
+    frames["GLD"] = gld_frame
+
+    w = compute_weights(frames, min_votes=2, gross_cap=1.0, use_defensive=True)
+
+    assert "USD" not in w
+    assert "TLT" not in w
+    assert "SPY" in w and w["SPY"] <= 0.200001
+    assert "QQQ" in w and w["QQQ"] <= 0.200001
+    assert "GLD" in w and w["GLD"] <= 0.200001
+    assert sum(w.values()) <= 1.000001
+    assert w["GLD"] == pytest.approx(0.20)
+
+
+def test_compute_weights_defensive_rotation_full_risk(sample_frames: dict[str, pd.DataFrame]) -> None:
+    """When risk assets use entire gross_cap, defensives receive 0 allocation."""
+    dates = sample_frames["SPY"].index
+    frames = {}
+    for name in ["R1", "R2", "R3", "R4", "R5"]:
+        c = np.linspace(100, 200, len(dates))
+        frames[name] = pd.DataFrame(
+            {"open": c - 0.5, "high": c + 1.0, "low": c - 1.0, "close": c, "volume": 1000.0},
+            index=dates,
+        )
+    c_gld = np.linspace(100, 200, len(dates))
+    frames["GLD"] = pd.DataFrame(
+        {"open": c_gld - 0.5, "high": c_gld + 1.0, "low": c_gld - 1.0, "close": c_gld, "volume": 1000.0},
+        index=dates,
+    )
+
+    w = compute_weights(
+        frames,
+        min_votes=2,
+        gross_cap=1.0,
+        use_defensive=True,
+        defensive_assets=("GLD",),
+    )
+
+    assert "USD" not in w
+    for name in ["R1", "R2", "R3", "R4", "R5"]:
+        assert name in w and w[name] == pytest.approx(0.20)
+    assert "GLD" not in w
+    assert sum(w.values()) <= 1.000001
+
+
+def test_compute_weights_defensive_rotation_disabled(sample_frames: dict[str, pd.DataFrame]) -> None:
+    """When use_defensive=False, defensive assets are treated as normal voting assets."""
+    dates = sample_frames["SPY"].index
+    close_gld = np.linspace(100, 180, len(dates))
+    frames = dict(sample_frames)
+    frames["GLD"] = pd.DataFrame(
+        {
+            "open": close_gld - 0.5,
+            "high": close_gld + 1.0,
+            "low": close_gld - 1.0,
+            "close": close_gld,
+            "volume": 1000.0,
+        },
+        index=dates,
+    )
+
+    w_off = compute_weights(frames, min_votes=2, gross_cap=1.0, use_defensive=False)
+    assert "USD" not in w_off
+    assert set(w_off.keys()) == {"SPY", "QQQ", "GLD"}
+    assert sum(w_off.values()) <= 1.000001
+    for k in w_off:
+        assert w_off[k] <= 0.200001

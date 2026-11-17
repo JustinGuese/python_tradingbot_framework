@@ -11,6 +11,8 @@ from tradingbot.utils.tv_signals import UNIVERSE_WIDE
 
 DEFAULT_GROSS_CAP = 1.0
 DEFAULT_MIN_ROWS = 60
+DEFAULT_USE_DEFENSIVE = True
+DEFAULT_DEFENSIVE_ASSETS: tuple[str, ...] = ("TLT", "IEF", "GLD", "SHV")
 
 
 class TvSingleSignalDailyBot(Bot):
@@ -24,7 +26,14 @@ class TvSingleSignalDailyBot(Bot):
     BACKTEST_PERIOD: ClassVar[str | None] = "max"
     param_grid: ClassVar[dict] = {"gross_cap": [0.8, 1.0]}
 
-    def __init__(self, gross_cap: float = DEFAULT_GROSS_CAP, min_rows: int = DEFAULT_MIN_ROWS, **kwargs):
+    def __init__(
+        self,
+        gross_cap: float = DEFAULT_GROSS_CAP,
+        min_rows: int = DEFAULT_MIN_ROWS,
+        use_defensive: bool = DEFAULT_USE_DEFENSIVE,
+        defensive_assets: tuple[str, ...] = DEFAULT_DEFENSIVE_ASSETS,
+        **kwargs,
+    ):
         super().__init__(
             type(self).__name__,
             tickers=list(UNIVERSE_WIDE),
@@ -36,6 +45,8 @@ class TvSingleSignalDailyBot(Bot):
         )
         self.gross_cap = gross_cap
         self.min_rows = min_rows
+        self.use_defensive = use_defensive
+        self.defensive_assets = defensive_assets
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
         frames = {
@@ -55,4 +66,6 @@ class TvSingleSignalDailyBot(Bot):
             gross_cap=self.gross_cap,
             min_rows=self.min_rows,
             kinds=(self.KIND,),
+            use_defensive=self.use_defensive,
+            defensive_assets=self.defensive_assets,
         )
