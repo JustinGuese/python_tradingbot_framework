@@ -59,7 +59,9 @@ def to_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
             out[c] = out["close"]
 
     if "volume" in cols_map:
-        out["volume"] = pd.to_numeric(frame[cols_map["volume"]].to_numpy(), errors="coerce").fillna(0.0)
+        out["volume"] = pd.Series(
+            pd.to_numeric(frame[cols_map["volume"]].to_numpy(), errors="coerce"), index=idx
+        ).fillna(0.0)
     else:
         out["volume"] = 0.0
 

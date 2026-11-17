@@ -238,3 +238,17 @@ def test_active_weights_and_edge_cases():
 
     with pytest.raises(ValueError, match="period n must be at least 2"):
         hma(pd.Series([1.0, 2.0]), 1)
+
+
+def test_to_ohlcv_keeps_volume_column_and_zero_fills_nan():
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=3, tz="UTC"),
+            "open": [1, 2, 3],
+            "high": [1, 2, 3],
+            "low": [1, 2, 3],
+            "close": [1, 2, 3],
+            "volume": [5, None, 7],
+        }
+    )
+    assert to_ohlcv(frame)["volume"].tolist() == [5.0, 0.0, 7.0]
