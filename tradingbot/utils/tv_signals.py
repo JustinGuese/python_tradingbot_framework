@@ -20,7 +20,8 @@ from tradingbot.utils.tv_alphatrend import alphatrend
 from tradingbot.utils.tv_core import to_ohlcv
 from tradingbot.utils.tv_slingshot_chandelier import chandelier_exit, slingshot
 from tradingbot.utils.tv_supertrend import htf_supertrend_direction, supertrend
-from tradingbot.utils.tv_ultimate_ma import SUPPORTED_KINDS as UMA_SUPPORTED_KINDS, ultimate_ma
+from tradingbot.utils.tv_ultimate_ma import SUPPORTED_KINDS as UMA_SUPPORTED_KINDS
+from tradingbot.utils.tv_ultimate_ma import ultimate_ma
 
 # Cross-asset ETF universe with daily history back to ~2007 (no leveraged/inverse).
 UNIVERSE_WIDE: list[str] = [
@@ -51,10 +52,21 @@ UNIVERSE_EX_EQUITY: list[str] = ["GLD", "SLV", "DBC", "USO", "TLT", "IEF", "HYG"
 
 # Expanded non-equity universe: 21 liquid non-equity ETFs across bonds, commodities, and FX.
 # Study: docs/backtests/tv-widen-2026-11.md (PLAN-widen.md).
-UNIVERSE_EX_EQUITY_WIDE: list[str] = UNIVERSE_EX_EQUITY + [
-    "SHY", "TIP", "LQD", "EMB", "BWX",          # bonds
-    "CPER", "DBA", "UNG", "PPLT",               # commodities
-    "FXE", "FXY", "FXF", "FXA",                 # currencies
+UNIVERSE_EX_EQUITY_WIDE: list[str] = [
+    *UNIVERSE_EX_EQUITY,
+    "SHY",
+    "TIP",
+    "LQD",
+    "EMB",
+    "BWX",  # bonds
+    "CPER",
+    "DBA",
+    "UNG",
+    "PPLT",  # commodities
+    "FXE",
+    "FXY",
+    "FXF",
+    "FXA",  # currencies
 ]
 
 SUPPORTED_KINDS: tuple[str, ...] = (
@@ -144,7 +156,7 @@ def signal_flags(
     elif kind_clean == "alphatrend":
         period = int(p.get("period", 14))
         mult = float(p.get("mult", 1.0))
-        use_mfi = p.get("use_mfi", None)
+        use_mfi = p.get("use_mfi")
         at = alphatrend(clean_ohlcv, period=period, mult=mult, use_mfi=use_mfi)
         buys = at["buy"].to_numpy(dtype=bool)
         sells = at["sell"].to_numpy(dtype=bool)

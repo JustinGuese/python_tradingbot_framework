@@ -44,8 +44,14 @@ Pre-registered study evaluating Idea 6 from `PLAN-widen.md` (Step S2).
 
 Holdout ran once: NO (Sealed until shortlist review)
 
-## Observations
-- **Beta Reduction:** Filtering the TSMOM sleeve by Supertrend and AlphaTrend cuts equity beta roughly in half (from ~0.35 to 0.16 on Validate).
-- **Alpha Lift:** Agreement filtering filters out whipsaws and false momentum breakouts, lifting Validate sleeve alpha from -0.53% (t -0.13) to +6.42% (t +1.52).
-- **C2 Blend Improvement:** Substituting `tsmom_and_st_at` into the 0.39/0.37/0.24 blend adds +1.67% annualized alpha and +0.62 to the t-stat over the Validate period, while reducing overall blend max drawdown from -17.3% to -13.8%.
-- **Turnover:** Filtering increases turnover from ~13-21x to ~26-30x per year due to trend state changes, but net alpha after 5 bps costs increases substantially.
+## Verdict (real data; holdout stays sealed)
+
+No variant passes (Validate alpha t >= 2.0). `tsmom_and_st_at` has the best Validate sleeve alpha (+6.4%, t 1.52, beta 0.16 vs 0.35 for the base sleeve),
+and the base sleeve itself is negative on Validate (-0.5%, t -0.13), so the filter is a real improvement over the base sleeve, but not a pass.
+
+- Turnover roughly doubles (13-21x to 26-30x per year); results are after 5 bps costs.
+- Blend effect (TSMOM sleeve replaced in the 0.39/0.37/0.24 blend): Validate blend alpha +0.5% -> +2.1% (t 0.17 -> 0.79); Fit +2.4% -> +2.5%
+  (t 1.52 -> 1.69). Improvement is concentrated in Validate (2019-2023).
+- **Caveat:** the TARegime and GoldenButterfly sleeves are equal-weight proxies, not the live bots' returns, and the TSMOM sleeve is a 12-month sign-rule proxy.
+  Treat the blend numbers as indicative only. Next step if pursued: rebuild with `scripts.onetime_c2_blend_backtest.sleeve_returns`.
+- The effect is consistent with ST AND AT also helping a second strategy, but t is below 2 in both periods. Not shipped.

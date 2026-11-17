@@ -31,29 +31,31 @@ Pre-registered study evaluating Idea 5 from `PLAN-widen.md` (Step S4).
 
 | ticker   | first_date   | last_date   |   n_bars |
 |:---------|:-------------|:------------|---------:|
-| TLT      | 2005-01-03   | 2024-06-28  |     5085 |
-| IEF      | 2005-01-03   | 2024-06-28  |     5085 |
-| SHY      | 2005-01-03   | 2024-06-28  |     5085 |
-| TIP      | 2005-01-03   | 2024-06-28  |     5085 |
-| LQD      | 2005-01-03   | 2024-06-28  |     5085 |
-| ^TNX     | 2005-01-03   | 2024-06-28  |     5085 |
-| ^IRX     | 2005-01-03   | 2024-06-28  |     5085 |
+| TLT      | 2005-01-03   | 2026-11-16  |     5503 |
+| IEF      | 2005-01-03   | 2026-11-16  |     5503 |
+| SHY      | 2005-01-03   | 2026-11-16  |     5503 |
+| TIP      | 2005-01-03   | 2026-11-16  |     5503 |
+| LQD      | 2005-01-03   | 2026-11-16  |     5503 |
+| ^TNX     | 2005-01-03   | 2026-11-16  |     5498 |
+| ^IRX     | 2005-01-03   | 2026-11-16  |     5498 |
 
 ## Results Table (Fit & Validate)
 
 | variant                 | period   | start_date   | end_date   | alpha   |     t |   t_adj |   beta |   corr_tsmom | max_dd   |   avg_gross |
 |:------------------------|:---------|:-------------|:-----------|:--------|------:|--------:|-------:|-------------:|:---------|------------:|
-| trend_agree_bonds       | fit      | 2005-01-03   | 2018-12-31 | -0.41%  | -0.65 |   -2.89 |   0.02 |         0.58 | -9.4%    |        0.5  |
-| trend_agree_bonds       | validate | 2019-01-01   | 2023-12-29 | +3.15%  |  2.87 |    0.63 |   0.01 |         0.68 | -5.0%    |        0.51 |
-| trend_agree_carry_bonds | fit      | 2005-01-03   | 2018-12-31 | -0.07%  | -0.13 |   -2.37 |   0.01 |         0.54 | -6.6%    |        0.38 |
-| trend_agree_carry_bonds | validate | 2019-01-01   | 2023-12-29 | +1.15%  |  1.35 |   -0.89 |   0    |         0.47 | -5.0%    |        0.32 |
+| trend_agree_bonds       | fit      | 2005-01-03   | 2018-12-31 | +2.48%  |  2.51 |    0.27 |  -0.06 |         0.73 | -7.9%    |        0.55 |
+| trend_agree_bonds       | validate | 2019-01-02   | 2023-12-29 | +2.00%  |  1    |   -1.25 |  -0.01 |         0.51 | -11.0%   |        0.52 |
+| trend_agree_carry_bonds | fit      | 2005-01-03   | 2018-12-31 | +2.33%  |  2.4  |    0.16 |  -0.06 |         0.72 | -7.9%    |        0.5  |
+| trend_agree_carry_bonds | validate | 2019-01-02   | 2023-12-29 | -0.14%  | -0.1  |   -2.34 |  -0    |         0.48 | -8.4%    |        0.33 |
 
 ## Holdout Status
 
 Holdout ran once: NO (Sealed until shortlist review)
 
-## Observations & Decision
-- **Yield Curve Carry Filter Impact:** Requiring `^TNX - ^IRX > 0` before entering long bond duration suppresses exposure during curve inversions.
-- **Risk & Correlation:** Both bond variants exhibit negative to low correlation with QQQ and moderate correlation with TSMOM, confirming diversification value.
-- **Multiple Testing Adjustment:** With n=2 pre-registered variants, the Sidak shift is `z_sidak(2) = 2.241`.
-- **Non-Equity Purity:** No equity tickers or 'USD' cash keys are included in portfolio weights.
+## Verdict (real data; holdout stays sealed)
+
+No variant passes. Bond trend agreement (ST AND AT on TLT/IEF/SHY/TIP/LQD) has Fit +2.5% t 2.51 (beta -0.06) but Validate only +2.0% t 1.0.
+Adding the yield-curve slope condition (^TNX - ^IRX > 0) does not help: Fit +2.3% t 2.40, Validate -0.1% t -0.10 (it removes exposure during 2019-2023 inversion periods that were profitable for trend).
+Carry is NOT a useful agreement signal for bonds with this proxy. Commodity and FX carry are not testable with available data (see above).
+
+Note: an earlier draft showed trend_agree_carry_bonds with zero alpha because yield series are stamped 06:00 vs ETF 05:00; indexes are now normalised to dates.

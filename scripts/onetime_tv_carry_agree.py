@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402  (imports follow the sys.path bootstrap)
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -31,7 +32,6 @@ os.environ.setdefault("POSTGRES_URI", "postgresql://ci:ci@localhost:5432/ci")
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 import yfinance as yf
 
 from scripts.onetime_tv_daily_study import (
@@ -39,8 +39,6 @@ from scripts.onetime_tv_daily_study import (
     compute_flags_matrix,
     compute_strategy_returns,
     compute_tsmom_proxy,
-    load_daily_data,
-    max_drawdown,
     weights_from_flags,
 )
 from scripts.onetime_tv_widen_study import (
@@ -187,9 +185,7 @@ def load_carry_study_data(
     ref_ticker = "QQQ" if "QQQ" in dfs else BOND_TICKERS[0]
     master_idx = dfs[ref_ticker].index.sort_values()
 
-    closes = pd.DataFrame(
-        {t: dfs[t]["close"] for t in BOND_TICKERS if t in dfs}
-    ).reindex(master_idx).ffill()
+    closes = pd.DataFrame({t: dfs[t]["close"] for t in BOND_TICKERS if t in dfs}).reindex(master_idx).ffill()
 
     qqq_close = dfs["QQQ"]["close"].reindex(master_idx).ffill()
     qqq_ret = qqq_close.pct_change().dropna()
@@ -211,19 +207,17 @@ def run_variants(
     Returns DataFrame of summary rows per variant and period.
     """
     if dfs is None:
-        try:
-            dfs, master_idx, closes, qqq_ret = load_carry_study_data()
-        except Exception as exc:
-            logger.warning("Could not load real data (%s); falling back to synthetic.", exc)
-            dfs, master_idx, closes, qqq_ret = generate_synthetic_carry_data()
+        dfs, master_idx, closes, qqq_ret = load_carry_study_data()
     else:
         if master_idx is None:
             ref_k = "QQQ" if "QQQ" in dfs else next(iter(dfs))
             master_idx = dfs[ref_k].index.sort_values()
         if closes is None:
-            closes = pd.DataFrame(
-                {t: dfs[t]["close"] for t in BOND_TICKERS if t in dfs and "close" in dfs[t]}
-            ).reindex(master_idx).ffill()
+            closes = (
+                pd.DataFrame({t: dfs[t]["close"] for t in BOND_TICKERS if t in dfs and "close" in dfs[t]})
+                .reindex(master_idx)
+                .ffill()
+            )
         if qqq_ret is None:
             if "QQQ" in dfs and "close" in dfs["QQQ"]:
                 qqq_ret = dfs["QQQ"]["close"].reindex(master_idx).ffill().pct_change().dropna()
@@ -251,8 +245,19 @@ def run_variants(
     irx_df = dfs.get("^IRX") if "^IRX" in dfs else dfs.get("IRX")
 
     if tnx_df is not None and irx_df is not None:
-        tnx_close = tnx_df["close"].reindex(master_idx).ffill()
-        irx_close = irx_df["close"].reindex(master_idx).ffill()
+        # Yield indices are stamped intraday (06:00) vs ETF midnight stamps: normalise to the date first.
+        def _on_dates(df: pd.DataFrame) -> pd.Series:
+            ser = df["close"].copy()
+            ser.index = pd.DatetimeIndex(ser.index).tz_localize(None).normalize()
+            return ser[~ser.index.duplicated(keep="last")]
+
+        norm_idx = pd.DatetimeIndex(master_idx).tz_localize(None).normalize()
+        tnx_close = _on_dates(tnx_df).reindex(norm_idx).ffill()
+        irx_close = _on_dates(irx_df).reindex(norm_idx).ffill()
+        tnx_close.index = master_idx
+        irx_close.index = master_idx
+        if tnx_close.isna().all() or irx_close.isna().all():
+            raise ValueError("Yield series do not align with ETF index; carry proxy would be empty")
         slope = tnx_close - irx_close
         slope_positive = (slope > 0.0).fillna(False)
     else:
@@ -261,7 +266,7 @@ def run_variants(
 
     # Causal broadcast: slope_positive across all bond tickers
     carry_mask = pd.DataFrame(
-        {t: slope_positive for t in BOND_TICKERS},
+        dict.fromkeys(BOND_TICKERS, slope_positive),
         index=master_idx,
     )
     trend_agree_carry_flags = trend_agree_flags & carry_mask
@@ -299,9 +304,7 @@ def run_variants(
 
             # Correlation with TSMOM proxy
             t_common = pd.concat({"s": sub_ret, "ts": sub_tsmom}, axis=1, join="inner").dropna()
-            corr_tsmom = (
-                float(t_common["s"].corr(t_common["ts"])) if len(t_common) > 2 else 0.0
-            )
+            corr_tsmom = float(t_common["s"].corr(t_common["ts"])) if len(t_common) > 2 else 0.0
 
             rows.append(
                 {
@@ -447,12 +450,16 @@ def build_markdown_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TradingView Trend & Carry Study (S4)")
-    parser.add_argument("--save-doc", action="store_true", help="Write report to docs/backtests/tv-carry-agree-2026-11.md")
+    parser.add_argument(
+        "--save-doc", action="store_true", help="Write report to docs/backtests/tv-carry-agree-2026-11.md"
+    )
     parser.add_argument("--holdout", action="store_true", help="Include holdout period (2024-present)")
     parser.add_argument("--variants", type=str, default=None, help="Comma-separated variant shortlist")
     parser.add_argument("--synthetic", action="store_true", help="Run on synthetic data without network fetch")
     args = parser.parse_args()
 
+    if args.synthetic and args.save_doc:
+        parser.error("--save-doc is not allowed with --synthetic (never write fake numbers to docs)")
     if args.holdout and not args.variants:
         parser.error("--holdout requires naming variants via --variants (pre-registered shortlist rule)")
 
@@ -461,11 +468,7 @@ def main() -> None:
     if args.synthetic:
         dfs, master_idx, closes, qqq_ret = generate_synthetic_carry_data()
     else:
-        try:
-            dfs, master_idx, closes, qqq_ret = load_carry_study_data()
-        except Exception as exc:
-            logger.warning("Could not load cache/live data (%s); falling back to synthetic.", exc)
-            dfs, master_idx, closes, qqq_ret = generate_synthetic_carry_data()
+        dfs, master_idx, closes, qqq_ret = load_carry_study_data()
 
     first_dates_df = compute_ticker_first_dates(dfs)
     print("=== Per-Ticker First Data Dates ===")

@@ -22,7 +22,6 @@ from scripts.onetime_tv_widen_study import (
 )
 from tradingbot.utils.tv_signals import (
     UNIVERSE_EX_EQUITY_WIDE,
-    UNIVERSE_WIDE,
 )
 
 
@@ -87,10 +86,34 @@ def test_universe_ex_equity_wide_no_duplicates_no_equities_no_usd() -> None:
 
     # Contains no equity tickers (broad market, sector, individual equities)
     equity_tickers = {
-        "SPY", "QQQ", "IWM", "EFA", "EEM",
-        "XLE", "XLF", "XLK", "XLV", "XLP", "XLU", "XLY", "XLI", "XLB", "XLC", "XLRE",
-        "VTI", "VOO", "IVV", "VEA", "VWO",
-        "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA",
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "XLE",
+        "XLF",
+        "XLK",
+        "XLV",
+        "XLP",
+        "XLU",
+        "XLY",
+        "XLI",
+        "XLB",
+        "XLC",
+        "XLRE",
+        "VTI",
+        "VOO",
+        "IVV",
+        "VEA",
+        "VWO",
+        "AAPL",
+        "MSFT",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "TSLA",
+        "NVDA",
     }
     overlap = set(UNIVERSE_EX_EQUITY_WIDE) & equity_tickers
     assert not overlap, f"UNIVERSE_EX_EQUITY_WIDE contains equity tickers: {overlap}"
@@ -120,6 +143,4 @@ def test_run_variants_default_holdout_sealed() -> None:
     cutoff = pd.Timestamp("2024-01-01").date()
     for _, row in results.iterrows():
         end_date = pd.to_datetime(row["end_date"]).date()
-        assert end_date < cutoff, (
-            f"Variant {row['variant']} period {row['period']} has end date {end_date} >= {cutoff}"
-        )
+        assert end_date < cutoff, f"Variant {row['variant']} period {row['period']} has end date {end_date} >= {cutoff}"

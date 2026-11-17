@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402  (imports follow the sys.path bootstrap)
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -38,7 +39,6 @@ from scripts.onetime_tv_daily_study import (
     compute_strategy_returns,
     compute_tsmom_proxy,
     load_daily_data,
-    max_drawdown,
     weights_from_flags,
 )
 from tradingbot.utils.tv_signals import (
@@ -146,20 +146,14 @@ def alpha_stats(
     alpha = float(resid.mean() * 252.0)
     std_resid = float(resid.std(ddof=1))
 
-    if std_resid > 1e-12:
-        t = float(resid.mean() / std_resid * np.sqrt(n))
-    else:
-        t = 0.0
+    t = float(resid.mean() / std_resid * np.sqrt(n)) if std_resid > 1e-12 else 0.0
 
     z_crit = z_sidak(n_variants)
     t_adj = float(t - z_crit)
 
     std_r = float(r.std(ddof=1))
     std_q = float(q.std(ddof=1))
-    if std_r > 1e-12 and std_q > 1e-12:
-        corr = float(r.corr(q))
-    else:
-        corr = 0.0
+    corr = float(r.corr(q)) if std_r > 1e-12 and std_q > 1e-12 else 0.0
 
     # Max drawdown
     cum = (1.0 + r).cumprod()
@@ -188,7 +182,7 @@ def generate_synthetic_study_data(
     rng = np.random.default_rng(seed)
     idx = pd.bdate_range(start=start, end=end)
     uni = tickers or UNIVERSE_EX_EQUITY_WIDE
-    all_tickers = sorted(set(list(uni) + ["QQQ", "SPY"]))
+    all_tickers = sorted({*uni, "QQQ", "SPY"})
 
     dfs: dict[str, pd.DataFrame] = {}
     n = len(idx)
@@ -251,7 +245,11 @@ def run_variants(
             cache_dir=CACHE_DIR,
             universe=UNIVERSE_EX_EQUITY_WIDE,
         )
-        closes = pd.DataFrame({t: dfs[t]["close"] for t in UNIVERSE_EX_EQUITY_WIDE if t in dfs and "close" in dfs[t]}).reindex(master_idx).ffill()
+        closes = (
+            pd.DataFrame({t: dfs[t]["close"] for t in UNIVERSE_EX_EQUITY_WIDE if t in dfs and "close" in dfs[t]})
+            .reindex(master_idx)
+            .ffill()
+        )
     else:
         if master_idx is None:
             ref_k = "QQQ" if "QQQ" in dfs else next(iter(dfs))
@@ -319,7 +317,11 @@ def run_variants(
 
             # Correlation with TSMOM proxy
             t_common = pd.concat({"s": sub_ret, "ts": sub_tsmom}, axis=1, join="inner").dropna()
-            if len(t_common) > 2 and float(t_common["s"].std(ddof=1)) > 1e-12 and float(t_common["ts"].std(ddof=1)) > 1e-12:
+            if (
+                len(t_common) > 2
+                and float(t_common["s"].std(ddof=1)) > 1e-12
+                and float(t_common["ts"].std(ddof=1)) > 1e-12
+            ):
                 corr_tsmom = float(t_common["s"].corr(t_common["ts"]))
             else:
                 corr_tsmom = 0.0
@@ -449,6 +451,8 @@ def main() -> None:
     parser.add_argument("--synthetic", action="store_true", help="Run on synthetic data without network fetch")
     args = parser.parse_args()
 
+    if args.synthetic and args.save_doc:
+        parser.error("--save-doc is not allowed with --synthetic (never write fake numbers to docs)")
     if args.holdout and not args.variants:
         parser.error("--holdout requires naming variants via --variants (pre-registered shortlist rule)")
 
@@ -457,15 +461,15 @@ def main() -> None:
     if args.synthetic:
         dfs, master_idx, closes, qqq_ret = generate_synthetic_study_data()
     else:
-        # Check if local cache exists for all tickers; if not, fall back to synthetic if swarm execution
-        try:
-            dfs, master_idx, closes, qqq_ret = load_daily_data(
-                cache_dir=CACHE_DIR,
-                universe=UNIVERSE_EX_EQUITY_WIDE,
-            )
-        except Exception as e:
-            logger.warning(f"Could not load live/cache data ({e}); using synthetic data.")
-            dfs, master_idx, closes, qqq_ret = generate_synthetic_study_data()
+        dfs, master_idx, closes, qqq_ret = load_daily_data(
+            cache_dir=CACHE_DIR,
+            universe=UNIVERSE_EX_EQUITY_WIDE,
+        )
+        closes = (
+            pd.DataFrame({t: dfs[t]["close"] for t in UNIVERSE_EX_EQUITY_WIDE if t in dfs and "close" in dfs[t]})
+            .reindex(master_idx)
+            .ffill()
+        )
 
     first_dates_df = compute_ticker_first_dates(dfs)
     print("=== Per-Ticker First Data Dates ===")

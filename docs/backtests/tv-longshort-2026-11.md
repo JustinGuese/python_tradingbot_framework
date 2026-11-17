@@ -28,31 +28,31 @@ Pre-registered study evaluating Ideas 3 & 4 from `PLAN-widen.md`.
 
 | symbol   | first_date   | last_date   |   n_bars |
 |:---------|:-------------|:------------|---------:|
-| EURUSD=X | 2005-01-03   | 2024-06-28  |     5085 |
-| GBPUSD=X | 2005-01-03   | 2024-06-28  |     5085 |
-| USDJPY=X | 2005-01-03   | 2024-06-28  |     5085 |
-| AUDUSD=X | 2005-01-03   | 2024-06-28  |     5085 |
-| USDCHF=X | 2005-01-03   | 2024-06-28  |     5085 |
-| GC=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| SI=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| CL=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| NG=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| HG=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| ZN=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| ZB=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| ES=F     | 2005-01-03   | 2024-06-28  |     5085 |
-| NQ=F     | 2005-01-03   | 2024-06-28  |     5085 |
+| EURUSD=X | 2005-01-03   | 2026-11-16  |     5673 |
+| GBPUSD=X | 2005-01-03   | 2026-11-16  |     5685 |
+| USDJPY=X | 2005-01-03   | 2026-11-16  |     5673 |
+| AUDUSD=X | 2006-05-15   | 2026-11-16  |     5333 |
+| USDCHF=X | 2005-01-03   | 2026-11-16  |     5686 |
+| GC=F     | 2005-01-03   | 2026-11-16  |     5499 |
+| SI=F     | 2005-01-03   | 2026-11-16  |     5499 |
+| CL=F     | 2005-01-03   | 2026-11-16  |     5502 |
+| NG=F     | 2005-01-03   | 2026-11-16  |     5503 |
+| HG=F     | 2005-01-03   | 2026-11-16  |     5502 |
+| ZN=F     | 2005-01-03   | 2026-11-16  |     5492 |
+| ZB=F     | 2005-01-03   | 2026-11-16  |     5498 |
+| ES=F     | 2005-01-03   | 2026-11-16  |     5511 |
+| NQ=F     | 2005-01-03   | 2026-11-16  |     5511 |
 
 ## Results Table: Combined Strategy & Separate Legs (Fit & Validate)
 
-| variant          | period   | start_date   | end_date   | alpha   |     t |   t_adj | long_alpha   |   long_t | short_alpha   |   short_t |   beta |   corr_tsmom | max_dd   |   avg_gross |
-|:-----------------|:---------|:-------------|:-----------|:--------|------:|--------:|:-------------|---------:|:--------------|----------:|-------:|-------------:|:---------|------------:|
-| long_only_agree  | fit      | 2005-01-03   | 2018-12-31 | +1.90%  |  0.96 |   -1.44 | +1.90%       |     0.96 | +0.00%        |      0    |   0.05 |         0.55 | -37.8%   |        0.94 |
-| long_only_agree  | validate | 2019-01-01   | 2023-12-29 | +5.57%  |  1.7  |   -0.69 | +5.57%       |     1.7  | +0.00%        |      0    |   0.04 |         0.53 | -13.2%   |        0.94 |
-| long_short_agree | fit      | 2005-01-03   | 2018-12-31 | -2.60%  | -1.77 |   -4.16 | +0.97%       |     0.9  | -3.58%        |     -3.59 |   0    |         0.17 | -45.6%   |        1    |
-| long_short_agree | validate | 2019-01-01   | 2023-12-29 | +2.15%  |  0.88 |   -1.52 | +3.18%       |     1.84 | -1.03%        |     -0.61 |  -0.01 |         0.13 | -7.1%    |        1    |
-| long_short_st    | fit      | 2005-01-03   | 2018-12-31 | -0.98%  | -0.73 |   -3.12 | +1.80%       |     1.86 | -2.78%        |     -2.93 |   0    |         0.13 | -30.0%   |        1    |
-| long_short_st    | validate | 2019-01-01   | 2023-12-29 | +1.94%  |  0.86 |   -1.53 | +2.33%       |     1.53 | -0.39%        |     -0.24 |  -0.01 |         0.08 | -6.8%    |        1    |
+| variant          | period   | start_date   | end_date   | alpha   |    t |   t_adj | long_alpha   |   long_t | short_alpha   |   short_t |   beta |   corr_tsmom | max_dd   |   avg_gross |
+|:-----------------|:---------|:-------------|:-----------|:--------|-----:|--------:|:-------------|---------:|:--------------|----------:|-------:|-------------:|:---------|------------:|
+| long_only_agree  | fit      | 2005-01-03   | 2018-12-31 | +4.89%  | 1.53 |   -0.87 | +4.89%       |     1.53 | +0.00%        |      0    |   0.11 |         0.53 | -30.3%   |        0.76 |
+| long_only_agree  | validate | 2019-01-02   | 2023-12-29 | +3.19%  | 0.58 |   -1.81 | +3.19%       |     0.58 | +0.00%        |      0    |   0.12 |         0.54 | -22.3%   |        0.72 |
+| long_short_agree | fit      | 2005-01-03   | 2018-12-31 | +1.72%  | 0.52 |   -1.87 | +3.15%       |     1.39 | -1.43%        |     -0.6  |  -0.12 |         0.01 | -36.9%   |        0.99 |
+| long_short_agree | validate | 2019-01-02   | 2023-12-29 | +19.96% | 1.41 |   -0.98 | +2.68%       |     0.65 | +17.29%       |      1.26 |  -0.21 |        -0.02 | -26.7%   |        1    |
+| long_short_st    | fit      | 2005-01-03   | 2018-12-31 | +2.63%  | 0.87 |   -1.52 | +3.30%       |     1.54 | -0.67%        |     -0.29 |  -0.11 |        -0.02 | -29.8%   |        1    |
+| long_short_st    | validate | 2019-01-02   | 2023-12-29 | +13.45% | 1.47 |   -0.92 | +5.05%       |     1.25 | +8.40%        |      1.02 |  -0.17 |        -0    | -25.9%   |        1    |
 
 ## Holdout Status
 
@@ -63,8 +63,13 @@ Holdout ran once: NO (Sealed until shortlist review)
 - **Short Leg:** The short side faces severe drag from CFD spread friction (7 bps turnover cost) and upward market drift across broad commodities and index futures.
 - **Agreement Filter:** Requiring consensus between Supertrend and AlphaTrend significantly curtails false breakout whipsaws on both legs compared to Supertrend alone (`long_short_st`).
 
-## Verdict on Darwinex Port
-- **Verdict: UNPROVEN / NOT JUSTIFIED FOR PRODUCTION PORT AT THIS TIME.**
-- While the long leg produces positive alpha with low equity beta, adding the short leg does not consistently improve the multiple-testing adjusted alpha t-stat (`t_adj`) over `long_only_agree`.
-- CFD spreads (7 bps per turnover) heavily penalize two-way long/short whipsaw regimes in non-equity futures/FX proxies.
-- Decision: Per PLAN-widen.md S3 rules, no Darwinex bot is constructed. Capital is better allocated to long-only wide non-equity consensus (Step S1).
+## Verdict on Darwinex Port (real data; holdout stays sealed)
+
+**UNPROVEN, NOT JUSTIFIED FOR A PORT.** No variant reaches Validate alpha t >= 2.0.
+
+- The **short leg earns nothing in Fit** (agree: -1.4% alpha, t -0.6; ST: -0.7%, t -0.3). Its positive Validate alpha (+17%, t 1.3) comes from the 2022 rates/energy regime and
+  is a single-episode result, so the short side is not shown to be robust.
+- Long-only agreement on this universe: Fit +4.9% t 1.53, Validate +3.2% t 0.58.
+- Long/short has beta -0.1 to -0.2 and TSMOM correlation about 0, which is the diversification you would want,
+  but t is 0.5 (Fit) and 1.4 (Validate) for `long_short_agree`. CFD spread cost assumption 7 bps per turnover.
+- No Darwinex bot is built. Revisit only with more history from live Darwinex data.

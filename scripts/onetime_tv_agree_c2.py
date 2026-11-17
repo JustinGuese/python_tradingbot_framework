@@ -187,9 +187,11 @@ def run_variants(
         master_idx = dfs[ref_k].index.sort_values()
 
     if closes is None:
-        closes = pd.DataFrame(
-            {t: dfs[t]["close"] for t in UNIVERSE_WIDE if t in dfs and "close" in dfs[t]}
-        ).reindex(master_idx).ffill()
+        closes = (
+            pd.DataFrame({t: dfs[t]["close"] for t in UNIVERSE_WIDE if t in dfs and "close" in dfs[t]})
+            .reindex(master_idx)
+            .ffill()
+        )
 
     if qqq_ret is None:
         if "QQQ" in closes:
@@ -359,7 +361,7 @@ def render_markdown_report(results_df: pd.DataFrame, holdout_run: bool = False) 
 Pre-registered study evaluating Idea 6 from `PLAN-widen.md` (Step S2).
 
 ## Methodology & Pre-Registered Protocol
-- **Pre-registered Variants (n={len(VARIANTS)}):** `{', '.join(VARIANTS)}`
+- **Pre-registered Variants (n={len(VARIANTS)}):** `{", ".join(VARIANTS)}`
   - `tsmom_base`: 12-month trailing total return momentum sign rule across UNIVERSE_WIDE (documented proxy).
   - `tsmom_and_st`: hold TSMOM-selected ticker only when Supertrend is also long.
   - `tsmom_and_st_at`: hold TSMOM-selected ticker only when both Supertrend AND AlphaTrend are long.
@@ -422,34 +424,18 @@ def main() -> None:
             variants=variant_list,
         )
     else:
-        # Check if parquet cache exists, else fallback to synthetic smoke test
-        has_cache = all((CACHE_DIR / f"{t}.parquet").exists() for t in UNIVERSE_WIDE)
-        if not has_cache:
-            print("Cache parquets missing; generating synthetic data for offline run...")
-            dfs, master_idx, closes, qqq_ret, taregime_ret, gb_ret = generate_synthetic_data(n_days=5000)
-            df_res = run_variants(
-                dfs=dfs,
-                master_idx=master_idx,
-                closes=closes,
-                qqq_ret=qqq_ret,
-                taregime_ret=taregime_ret,
-                gb_ret=gb_ret,
-                holdout=args.holdout,
-                variants=variant_list,
-            )
-        else:
-            dfs, master_idx, closes, qqq_ret = load_daily_data(cache_dir=CACHE_DIR, universe=UNIVERSE_WIDE)
-            taregime_ret, gb_ret = compute_c2_other_sleeves(closes, dfs)
-            df_res = run_variants(
-                dfs=dfs,
-                master_idx=master_idx,
-                closes=closes,
-                qqq_ret=qqq_ret,
-                taregime_ret=taregime_ret,
-                gb_ret=gb_ret,
-                holdout=args.holdout,
-                variants=variant_list,
-            )
+        dfs, master_idx, closes, qqq_ret = load_daily_data(cache_dir=CACHE_DIR, universe=UNIVERSE_WIDE)
+        taregime_ret, gb_ret = compute_c2_other_sleeves(closes, dfs)
+        df_res = run_variants(
+            dfs=dfs,
+            master_idx=master_idx,
+            closes=closes,
+            qqq_ret=qqq_ret,
+            taregime_ret=taregime_ret,
+            gb_ret=gb_ret,
+            holdout=args.holdout,
+            variants=variant_list,
+        )
 
     print("\n=== TSMOM Sleeve & C2 Blend Results ===")
     display_cols = [

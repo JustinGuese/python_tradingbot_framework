@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# ruff: noqa: E402  (imports follow the sys.path bootstrap)
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -71,22 +72,22 @@ DARWINEX_SYMBOLS: list[str] = [
     "AUDUSD=X",
     "USDCHF=X",
     # Commodities / Metals (5)
-    "GC=F",   # Gold
-    "SI=F",   # Silver
-    "CL=F",   # Crude Oil
-    "NG=F",   # Natural Gas
-    "HG=F",   # Copper
+    "GC=F",  # Gold
+    "SI=F",  # Silver
+    "CL=F",  # Crude Oil
+    "NG=F",  # Natural Gas
+    "HG=F",  # Copper
     # Bond futures (2)
-    "ZN=F",   # 10-Year T-Note Futures
-    "ZB=F",   # 30-Year T-Bond Futures
+    "ZN=F",  # 10-Year T-Note Futures
+    "ZB=F",  # 30-Year T-Bond Futures
     # Index futures (2)
-    "ES=F",   # S&P 500 E-mini Futures
-    "NQ=F",   # Nasdaq 100 E-mini Futures
+    "ES=F",  # S&P 500 E-mini Futures
+    "NQ=F",  # Nasdaq 100 E-mini Futures
 ]
 
 # Cost assumptions per PLAN-widen.md S3
-BASE_TURNOVER_COST = 0.0005   # 5 bps base
-CFD_EXTRA_COST = 0.0002       # 2 bps extra for CFD spread / shorting
+BASE_TURNOVER_COST = 0.0005  # 5 bps base
+CFD_EXTRA_COST = 0.0002  # 2 bps extra for CFD spread / shorting
 SHORT_TURNOVER_COST = 0.0007  # 7 bps total for short turnover
 PER_MARKET_CAP = 0.20
 GROSS_CAP = 1.0
@@ -111,7 +112,6 @@ def generate_synthetic_darwinex_data(
     rng = np.random.default_rng(seed)
     idx = pd.bdate_range(start=start, end=end)
     target_symbols = list(symbols or DARWINEX_SYMBOLS)
-    all_tickers = sorted(set(target_symbols + ["QQQ"]))
 
     dfs: dict[str, pd.DataFrame] = {}
     n = len(idx)
@@ -194,9 +194,11 @@ def load_darwinex_data(
     ref_ticker = "QQQ" if "QQQ" in dfs and not dfs["QQQ"].empty else next(iter(dfs))
     master_idx = dfs[ref_ticker].index.sort_values()
 
-    closes = pd.DataFrame(
-        {s: dfs[s]["close"] for s in target_symbols if s in dfs and "close" in dfs[s]}
-    ).reindex(master_idx).ffill()
+    closes = (
+        pd.DataFrame({s: dfs[s]["close"] for s in target_symbols if s in dfs and "close" in dfs[s]})
+        .reindex(master_idx)
+        .ffill()
+    )
 
     if "QQQ" in dfs and "close" in dfs["QQQ"]:
         qqq_close = dfs["QQQ"]["close"].reindex(master_idx).ffill()
@@ -384,22 +386,21 @@ def run_variants(
     Returns DataFrame of summary rows per variant and period with separated leg stats.
     """
     if dfs is None:
-        try:
-            dfs, master_idx, closes, qqq_ret = load_darwinex_data(
-                cache_dir=CACHE_DIR,
-                symbols=DARWINEX_SYMBOLS,
-                allow_fetch=False,
-            )
-        except Exception:
-            dfs, master_idx, closes, qqq_ret = generate_synthetic_darwinex_data()
+        dfs, master_idx, closes, qqq_ret = load_darwinex_data(
+            cache_dir=CACHE_DIR,
+            symbols=DARWINEX_SYMBOLS,
+            allow_fetch=True,
+        )
     else:
         if master_idx is None:
             ref_k = "QQQ" if "QQQ" in dfs else next(iter(dfs))
             master_idx = dfs[ref_k].index.sort_values()
         if closes is None:
-            closes = pd.DataFrame(
-                {s: dfs[s]["close"] for s in DARWINEX_SYMBOLS if s in dfs and "close" in dfs[s]}
-            ).reindex(master_idx).ffill()
+            closes = (
+                pd.DataFrame({s: dfs[s]["close"] for s in DARWINEX_SYMBOLS if s in dfs and "close" in dfs[s]})
+                .reindex(master_idx)
+                .ffill()
+            )
         if qqq_ret is None:
             if "QQQ" in dfs and "close" in dfs["QQQ"]:
                 qqq_ret = dfs["QQQ"]["close"].reindex(master_idx).ffill().pct_change().dropna()
@@ -626,14 +627,22 @@ def build_markdown_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TradingView Long/Short Study (S3)")
-    parser.add_argument("--save-doc", action="store_true", help="Write report to docs/backtests/tv-longshort-2026-11.md")
+    parser.add_argument(
+        "--save-doc", action="store_true", help="Write report to docs/backtests/tv-longshort-2026-11.md"
+    )
     parser.add_argument("--holdout", action="store_true", help="Include holdout period (2024-present)")
     parser.add_argument("--variants", type=str, default=None, help="Comma-separated variant shortlist")
     parser.add_argument("--synthetic", action="store_true", help="Run on synthetic data without network fetch")
-    parser.add_argument("--cost-long-bp", type=float, default=BASE_TURNOVER_COST, help="Turnover cost for long leg (default 0.0005)")
-    parser.add_argument("--cost-short-bp", type=float, default=SHORT_TURNOVER_COST, help="Turnover cost for short leg (default 0.0007)")
+    parser.add_argument(
+        "--cost-long-bp", type=float, default=BASE_TURNOVER_COST, help="Turnover cost for long leg (default 0.0005)"
+    )
+    parser.add_argument(
+        "--cost-short-bp", type=float, default=SHORT_TURNOVER_COST, help="Turnover cost for short leg (default 0.0007)"
+    )
     args = parser.parse_args()
 
+    if args.synthetic and args.save_doc:
+        parser.error("--save-doc is not allowed with --synthetic (never write fake numbers to docs)")
     if args.holdout and not args.variants:
         parser.error("--holdout requires naming variants via --variants (pre-registered shortlist rule)")
 
@@ -642,15 +651,11 @@ def main() -> None:
     if args.synthetic:
         dfs, master_idx, closes, qqq_ret = generate_synthetic_darwinex_data()
     else:
-        try:
-            dfs, master_idx, closes, qqq_ret = load_darwinex_data(
-                cache_dir=CACHE_DIR,
-                symbols=DARWINEX_SYMBOLS,
-                allow_fetch=False,
-            )
-        except Exception as e:
-            logger.warning(f"Could not load local cache data ({e}); using synthetic data.")
-            dfs, master_idx, closes, qqq_ret = generate_synthetic_darwinex_data()
+        dfs, master_idx, closes, qqq_ret = load_darwinex_data(
+            cache_dir=CACHE_DIR,
+            symbols=DARWINEX_SYMBOLS,
+            allow_fetch=True,
+        )
 
     first_dates_df = compute_ticker_first_dates(dfs)
     print("=== Per-Ticker First Data Dates ===")
