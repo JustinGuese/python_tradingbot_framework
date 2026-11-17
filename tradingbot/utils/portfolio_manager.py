@@ -1079,6 +1079,16 @@ class PortfolioManager:
             # contracts absent from the target are sold like any other exit.
             raise ValueError(f"rebalancePortfolio cannot target option contracts {contracts}; use buy/sell(option=...)")
 
+        # Short option legs (spreads, condors) are never rebalanced by weight: a weight-based rebalance
+        # would ignore them in the total and "exit" them via buy() of a raw contract. Spread books are
+        # managed with close_options. Short STOCK positions are handled below only for opted-in bots.
+        held_shorts = [k for k, q in self._portfolio().items() if k != "USD" and q < -1e-9]
+        short_option_legs = [k for k in held_shorts if options.is_option_symbol(k)]
+        if short_option_legs:
+            raise ValueError(f"rebalancePortfolio cannot run on a book with short option legs {short_option_legs}")
+        if held_shorts and not allow_short:
+            raise ValueError(f"rebalancePortfolio cannot run on a book with short positions {held_shorts} unless allow_short")
+
         if not allow_short:
             for s, w in target_portfolio.items():
                 if w < -1e-9:
