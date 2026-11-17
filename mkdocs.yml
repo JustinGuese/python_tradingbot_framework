@@ -80,6 +80,7 @@ nav:
     - Overview: architecture/overview.md
     - Bot Class System: architecture/bot-class-system.md
     - Database Models: architecture/database-models.md
+    - Short Selling: architecture/short-selling.md
   - API Reference:
     - Core Classes:
       - Bot: api/bot.md

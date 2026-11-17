@@ -159,8 +159,8 @@ class LiveTradeCopier:
         """
         if not self.cash_proxy:
             return
-        invested = sum(m["weight"] for m in broker_target_weights.values())
-        idle = 1.0 - invested - self.cash_buffer
+        gross = sum(abs(m["weight"]) for m in broker_target_weights.values())
+        idle = 1.0 - gross - self.cash_buffer
         if idle <= 0:
             return
         if not self.broker.is_tradeable(self.cash_proxy):
@@ -216,8 +216,13 @@ class LiveTradeCopier:
                     continue
                 val = float(portfolio[s]) * price
                 bot_total_value += val
-                if s in structured or float(portfolio[s]) < 0:
+                if is_option_symbol(s):
+                    continue
+                if s in structured:
                     logger.info(f"{bot_name}: {s} is part of an option structure; not copied")
+                    continue
+                if float(portfolio[s]) < 0 and getattr(self.broker, "supports_short", False) is not True:
+                    logger.info(f"{bot_name}: {s} short dropped; {self.broker.name} does not support short selling")
                     continue
                 symbol_values[s] = val
 
@@ -237,28 +242,59 @@ class LiveTradeCopier:
         """Diff target vs current to produce order list."""
         orders = []
         all_symbols = set(target_weights.keys()) | set(current_positions.keys())
+        supports_limit = getattr(self.broker, "supports_limit_orders", False) is True
+        broker_supports_short = getattr(self.broker, "supports_short", False) is True
 
         for symbol in all_symbols:
             target_meta = target_weights.get(symbol, {"weight": 0.0, "type": "stock"})
             target_weight = target_meta["weight"]
             current_qty = current_positions.get(symbol, 0.0)
 
-            # Full liquidation: not in target, just sell the whole position.
+            # Positions read check: if current positions show an unexpected short position
+            # on a non-short broker, abort that symbol (never double it).
+            if current_qty < 0 and not broker_supports_short:
+                if getattr(self.broker, "name", None) == "hyperliquid":
+                    pass  # Hyperliquid perps use signed positions with BUY/SELL to flatten
+                else:
+                    logger.error(
+                        f"Unexpected short position {current_qty} for {symbol} on non-short broker "
+                        f"{self.broker.name}; aborting symbol"
+                    )
+                    continue
+
+            # Full liquidation: not in target.
             # No price lookup needed — broker knows the quantity.
-            if target_weight == 0.0 and current_qty > 0:
-                order_data = {
-                    "symbol": symbol,
-                    "quantity": current_qty,
-                    "side": "SELL",
-                    "value": 0.0,  # unknown without a price; not used for execution
-                    "type": target_meta["type"],
-                }
-                if getattr(self.broker, "supports_limit_orders", False) is True:
-                    p = self.broker.get_latest_price(symbol)
-                    if p > 0:
-                        order_data["limit_price"] = self.execution_policy.marketable_limit("SELL", p)
-                orders.append(order_data)
-                continue
+            if target_weight == 0.0:
+                if current_qty > 0:
+                    order_data = {
+                        "symbol": symbol,
+                        "quantity": current_qty,
+                        "side": "SELL",
+                        "value": 0.0,  # unknown without a price; not used for execution
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        p = self.broker.get_latest_price(symbol)
+                        if p > 0:
+                            order_data["limit_price"] = self.execution_policy.marketable_limit("SELL", p)
+                    orders.append(order_data)
+                    continue
+                elif current_qty < 0 and broker_supports_short:
+                    order_data = {
+                        "symbol": symbol,
+                        "quantity": abs(current_qty),
+                        "side": "COVER",
+                        "value": 0.0,  # unknown without a price; not used for execution
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        p = self.broker.get_latest_price(symbol)
+                        if p > 0:
+                            order_data["limit_price"] = self.execution_policy.marketable_limit("BUY", p)
+                    orders.append(order_data)
+                    continue
+                elif current_qty == 0:
+                    continue
 
             target_value = total_equity * target_weight
             current_price = self.broker.get_latest_price(symbol)
@@ -266,14 +302,76 @@ class LiveTradeCopier:
                 logger.error(f"No price available for {symbol}; skipping")
                 continue
 
+            target_qty = target_value / current_price
             current_value = current_qty * current_price
             diff_value = target_value - current_value
 
             if abs(diff_value) < self.min_order_usd:
                 continue
 
+            # Position flips across zero
+            if current_qty > 0 and target_qty < 0:
+                sell_val = current_qty * current_price
+                if sell_val >= self.min_order_usd:
+                    o = {
+                        "symbol": symbol,
+                        "quantity": current_qty,
+                        "side": "SELL",
+                        "value": sell_val,
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        o["limit_price"] = self.execution_policy.marketable_limit("SELL", current_price)
+                    orders.append(o)
+
+                short_val = abs(target_value)
+                if short_val >= self.min_order_usd:
+                    o = {
+                        "symbol": symbol,
+                        "quantity": abs(target_qty),
+                        "side": "SHORT",
+                        "value": short_val,
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        o["limit_price"] = self.execution_policy.marketable_limit("SELL", current_price)
+                    orders.append(o)
+                continue
+
+            if current_qty < 0 and target_qty > 0:
+                cover_val = abs(current_qty) * current_price
+                if cover_val >= self.min_order_usd:
+                    o = {
+                        "symbol": symbol,
+                        "quantity": abs(current_qty),
+                        "side": "COVER",
+                        "value": cover_val,
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        o["limit_price"] = self.execution_policy.marketable_limit("BUY", current_price)
+                    orders.append(o)
+
+                buy_val = target_value
+                if buy_val >= self.min_order_usd:
+                    o = {
+                        "symbol": symbol,
+                        "quantity": target_qty,
+                        "side": "BUY",
+                        "value": buy_val,
+                        "type": target_meta["type"],
+                    }
+                    if supports_limit:
+                        o["limit_price"] = self.execution_policy.marketable_limit("BUY", current_price)
+                    orders.append(o)
+                continue
+
+            # Same side or starting from 0
             qty_to_trade = diff_value / current_price
-            side: Literal["BUY", "SELL"] = "BUY" if qty_to_trade > 0 else "SELL"
+            if broker_supports_short and (target_qty < 0 or current_qty < 0):
+                side: Literal["BUY", "SELL", "SHORT", "COVER"] = "SHORT" if qty_to_trade < 0 else "COVER"
+            else:
+                side: Literal["BUY", "SELL", "SHORT", "COVER"] = "BUY" if qty_to_trade > 0 else "SELL"
 
             order_data = {
                 "symbol": symbol,
@@ -282,8 +380,9 @@ class LiveTradeCopier:
                 "value": abs(diff_value),
                 "type": target_meta["type"],
             }
-            if getattr(self.broker, "supports_limit_orders", False) is True:
-                order_data["limit_price"] = self.execution_policy.marketable_limit(side, current_price)
+            if supports_limit:
+                limit_side = "BUY" if side in ("BUY", "COVER") else "SELL"
+                order_data["limit_price"] = self.execution_policy.marketable_limit(limit_side, current_price)
 
             orders.append(order_data)
 
@@ -291,6 +390,8 @@ class LiveTradeCopier:
 
     def _execute_orders(self, orders: list[dict]) -> None:
         sells = [o for o in orders if o["side"] == "SELL"]
+        covers = [o for o in orders if o["side"] == "COVER"]
+        shorts = [o for o in orders if o["side"] == "SHORT"]
         buys = [o for o in orders if o["side"] == "BUY"]
         supports_limit = getattr(self.broker, "supports_limit_orders", False) is True
 
@@ -299,7 +400,8 @@ class LiveTradeCopier:
             if supports_limit and limit_price is None:
                 p = self.broker.get_latest_price(o["symbol"])
                 if p > 0:
-                    limit_price = self.execution_policy.marketable_limit(o["side"], p)
+                    limit_side = "BUY" if o["side"] in ("BUY", "COVER") else "SELL"
+                    limit_price = self.execution_policy.marketable_limit(limit_side, p)
 
             if self.dry_run:
                 limit_info = f", limit=${limit_price:.2f}" if (supports_limit and limit_price is not None) else ""
@@ -320,17 +422,26 @@ class LiveTradeCopier:
         for o in sells:
             _submit(o)
 
-        # Let sells settle (cash become available) before issuing buys.
+        # Let sells settle (cash become available) before issuing buys/covers/shorts.
         # Skipped on dry run and when there's nothing to wait for.
-        if sells and buys and not self.dry_run and self.settle_delay_seconds > 0:
+        has_post_sell = bool(covers or shorts or buys)
+        if sells and has_post_sell and not self.dry_run and self.settle_delay_seconds > 0:
             logger.info(f"Waiting {self.settle_delay_seconds:.0f}s for sells to settle before buying...")
             time.sleep(self.settle_delay_seconds)
+
+        # Covers are never scaled down by the buy-cash clamp.
+        for o in covers:
+            _submit(o)
+
+        for o in shorts:
+            _submit(o)
 
         # Buys are sized against total equity, but brokers enforce margin/cash
         # at submission time. If sells haven't fully settled (common on C2
         # paper accounts) the broker rejects with a PreMarginCheck error.
         # Clamp total buy notional to currently-available cash, with a small
         # safety buffer for slippage between price snapshot and fill.
+        # Covers are never scaled down by this clamp.
         if buys and not self.dry_run:
             try:
                 available_cash = self.broker.get_cash()

@@ -32,6 +32,7 @@ class InteractiveBrokersBroker(LiveBroker):
     """
 
     supports_limit_orders: bool = True
+    supports_short: bool = True
 
     def __init__(
         self,
@@ -54,6 +55,7 @@ class InteractiveBrokersBroker(LiveBroker):
         self._eligible: dict[str, bool] = {}
         self._yf_prices: dict[str, float] = {}
         self.supports_limit_orders = True
+        self.supports_short = True
 
     @property
     def account_ref(self) -> str:
@@ -341,11 +343,81 @@ class InteractiveBrokersBroker(LiveBroker):
 
     _is_deferred = is_deferred
 
+    def _is_shortable(self, contract: Contract, timeout: float = 1.0) -> bool:
+        """Check if contract is shortable via reqMktData tick 46.
+
+        Tick type 46 (Shortable) > 2.5 rule:
+          > 2.5: shortable (at least 1000 shares available)
+          <= 2.5 or missing: not shortable / skip
+        """
+        try:
+            ticker = self.ib.reqMktData(contract, genericTickList="236", snapshot=False)
+        except Exception as e:
+            logger.warning(f"reqMktData failed for {contract.symbol}: {e}")
+            return False
+
+        if ticker is None:
+            logger.warning(f"reqMktData returned no ticker for {contract.symbol}")
+            return False
+
+        def _get_shortable_val(t) -> float | None:
+            val = getattr(t, "shortable", None)
+            if val is not None and not util.isNan(val):
+                if "Mock" in type(val).__name__:
+                    return None
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+            for tick in getattr(t, "ticks", []):
+                if getattr(tick, "tickType", None) == 46:
+                    tick_val = getattr(tick, "price", getattr(tick, "value", None))
+                    if tick_val is not None and not util.isNan(tick_val):
+                        if "Mock" in type(tick_val).__name__:
+                            continue
+                        try:
+                            return float(tick_val)
+                        except (TypeError, ValueError):
+                            continue
+            return None
+
+        val = _get_shortable_val(ticker)
+        if val is None and timeout > 0:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                self.ib.sleep(0.1)
+                val = _get_shortable_val(ticker)
+                if val is not None:
+                    break
+
+        try:
+            self.ib.cancelMktData(contract)
+        except Exception as e:
+            logger.debug(f"cancelMktData failed for {contract.symbol}: {e}")
+
+        if val is None:
+            logger.warning(f"Shortable tick (46) missing for {contract.symbol}; skipping short order")
+            return False
+
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid shortable tick value {val!r} for {contract.symbol}; skipping short order")
+            return False
+
+        if val > 2.5:
+            return True
+
+        logger.warning(
+            f"Symbol {contract.symbol} is not shortable: tick 46 value={val:.2f} <= 2.5; skipping short order"
+        )
+        return False
+
     def place_order(
         self,
         broker_symbol: str,
         quantity: float,
-        side: Literal["BUY", "SELL"],
+        side: Literal["BUY", "SELL", "SHORT", "COVER"],
         symbol_type: str | None = None,
         limit_price: float | None = None,
     ) -> str | None:
@@ -355,12 +427,13 @@ class InteractiveBrokersBroker(LiveBroker):
         if not meta:
             raise ValueError(f"Could not map {broker_symbol} to IB contract metadata")
 
-        # Contract resolution: SELLs reuse the held position's contract (correct
-        # exchange/conId); STK BUYs ask IB via reqContractDetails, which avoids
-        # guessing SMART/USD for non-US listings; anything else falls back to
-        # the symbol_map metadata.
+        # Contract resolution:
+        # SELLs and COVERs reuse the held position's contract (correct exchange/conId);
+        # STK BUYs ask IB via reqContractDetails, which avoids guessing SMART/USD for non-US listings;
+        # SHORTs on an empty position build a new contract;
+        # anything else falls back to the symbol_map metadata.
         contract = None
-        if side == "SELL":
+        if side in ("SELL", "COVER", "SHORT"):
             for p in self.ib.positions(self.account_id):
                 if p.contract.symbol == broker_symbol and float(p.position) != 0.0:
                     contract = p.contract
@@ -376,23 +449,46 @@ class InteractiveBrokersBroker(LiveBroker):
         if contract is None:
             contract = self._build_contract(meta)
 
-        # Stocks must be integer-quantity; floor residuals.
         final_qty = abs(quantity)
-        if meta.get("sec_type") == "STK":
+
+        # For COVER, cap quantity at the open short position (buys at most the open short).
+        if side == "COVER":
+            open_short = 0.0
+            for p in self.ib.positions(self.account_id):
+                if p.contract.symbol == broker_symbol and float(p.position) < 0.0:
+                    open_short += abs(float(p.position))
+            if open_short <= 0.0:
+                logger.warning(f"Skipping COVER for {broker_symbol}: no open short position to cover")
+                return None
+            final_qty = min(final_qty, open_short)
+
+        # Stocks and shorts/covers must be integer-quantity; floor residuals.
+        if side in ("SHORT", "COVER") or meta.get("sec_type") == "STK":
             if final_qty < 1.0:
                 logger.warning(
                     f"Skipping {side} for {broker_symbol}: quantity {final_qty:.4f} is < 1 "
-                    f"(fractional STK not supported via API)"
+                    f"(fractional {meta.get('sec_type', 'STK')} not supported via API)"
                 )
                 return None
             final_qty = float(int(final_qty))
 
+        # Check shortable tick rule via reqMktData for SHORT orders.
+        if side == "SHORT":
+            if not self._is_shortable(contract):
+                logger.warning(
+                    f"Skipping SHORT for {broker_symbol}: contract is not shortable (tick 46 missing or <= 2.5)"
+                )
+                return None
+
+        # Map to IB order action: SHORT -> SELL, COVER -> BUY.
+        ib_side: Literal["BUY", "SELL"] = "SELL" if side in ("SELL", "SHORT") else "BUY"
+
         if limit_price is not None:
             if float(limit_price) <= 0:
                 raise ValueError(f"Limit price must be positive, got {limit_price}")
-            order = LimitOrder(side, final_qty, float(limit_price), tif="DAY")
+            order = LimitOrder(ib_side, final_qty, float(limit_price), tif="DAY")
         else:
-            order = MarketOrder(side, final_qty)
+            order = MarketOrder(ib_side, final_qty)
         if self.account_id:
             order.account = self.account_id
 

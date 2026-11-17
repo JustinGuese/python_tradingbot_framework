@@ -117,12 +117,57 @@ bot.buy(symbol="QQQ")
 # Buy specific amount
 bot.buy(symbol="QQQ", quantityUSD=1000)
 
-# Sell all holdings
+# Sell all holdings (clamps at zero, never goes short)
 bot.sell(symbol="QQQ")
 
-# Rebalance portfolio
+# Short specific amount (opted-in bots only, whole shares)
+bot.short(symbol="QQQ", quantityUSD=1000)
+
+# Cover short position (-1 covers full position)
+bot.cover(symbol="QQQ", quantityUSD=-1)
+
+# Rebalance portfolio (supports signed weights when ALLOW_SHORT=True)
 bot.rebalancePortfolio({"QQQ": 0.8, "GLD": 0.1, "USD": 0.1})
 ```
+
+## Short Selling Controls
+
+The `Bot` base class provides class-level controls for strategies utilizing short selling or market-neutral hedging:
+
+```python
+class MyHedgedBot(Bot):
+    ALLOW_SHORT: ClassVar[bool] = True
+    MAX_GROSS: ClassVar[float] = 2.0
+    SHORTABLE: ClassVar[set[str] | None] = {"QQQ", "SPY"}
+```
+
+- **`ALLOW_SHORT: ClassVar[bool] = False`**:
+  Guard flag. Defaults to `False` so all existing bots remain strictly long-only. When `False`, any negative weight passed to `targetWeights` is clamped to `0.0` (treated as an exit signal), and any attempt to cross zero into a short position raises an exception. Opted-in bots set `ALLOW_SHORT = True` to enable short execution and negative target weights.
+- **`MAX_GROSS: ClassVar[float] = 1.0`**:
+  Gross leverage ceiling:
+  $$\text{gross} = \frac{\text{long\_value} + \text{short\_value}}{\text{equity}} \le \text{MAX\_GROSS}$$
+  Long-only bots default to 1.0. A dollar-neutral hedge (e.g., 100% long stocks + 100% short index ETF) sets `MAX_GROSS = 2.0`. If a bot's `targetWeights` produce a gross exposure exceeding `MAX_GROSS`, weights are automatically scaled down proportionally.
+- **`SHORTABLE: ClassVar[set[str] | list[str] | tuple[str, ...] | None] = None`**:
+  Allowlist of shortable symbols. When set to `None`, defaults to `tradingbot.utils.config.SHORTABLE` (liquid ETFs and S&P 100 components). Symbols outside this allowlist cannot be shorted.
+
+## Signed Target Weights
+
+Strategies using `targetWeights` or `rebalancePortfolio()` can express directional hedges or short legs using signed weights when `ALLOW_SHORT = True`:
+
+```python
+weights = {
+    "AAPL": 0.50,  # 50% long
+    "MSFT": 0.50,  # 50% long
+    "QQQ": -1.00,  # 100% short index hedge
+    "USD": 1.00,  # 100% cash (proceeds + initial capital)
+}
+# Signed sum: 0.50 + 0.50 - 1.00 + 1.00 = 1.0 (normalized)
+# Gross exposure: |0.50| + |0.50| + |-1.00| = 2.0 (fits MAX_GROSS=2.0)
+```
+
+1. **Signed Normalization**: The signed sum of weights (including cash `"USD"`) must equal `1.0` within `WEIGHT_SUM_TOLERANCE` (`require_normalized`).
+2. **Gross Validation**: If `ALLOW_SHORT = True`, total gross exposure $\sum |w_i|$ is validated against `MAX_GROSS`.
+3. **Atomic Execution**: `rebalance_portfolio` executes position reductions and covers before expansions, ensuring capital is freed prior to entering new long or short positions.
 
 ### Portfolio Access
 

@@ -645,6 +645,12 @@ bots:
   # See docs/backtests/event-buyback-2026-11.md.
   schedule: "10 21 * * 1-5" # after the 21:00 UTC scan and the US close
 
+- name: buybackhedgedbot
+  # Paper only. Buyback drift long book hedged by a short QQQ position sized to beta ~0.
+  # Reuses buybackdriftbot signals; gross <= 2.0. See PLAN-shorts2.md.
+  schedule: "10 21 * * 1-5" # after the 21:00 UTC scan and the US close
+  suspend: false
+
 - name: macroeventsleevebot
   # Paper only. UUP/TLT/GLD held only around FOMC / CPI releases, cash otherwise.
   # UNPROVEN (legs picked after seeing 40 variants); see
