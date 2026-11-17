@@ -42,16 +42,17 @@ from tradingbot.utils.tv_signals import (
 
 logger = logging.getLogger(__name__)
 
-# Winning hyperparameters from S1b walk-forward tuning (docs/backtests/tv-daily-tune-2026-11.md)
+# S1b ship rule: tuned params for ultimate_ma / slingshot_chandelier; defaults kept for
+# supertrend / alphatrend (tuned winners lost to defaults out of sample).
 WINNING_SIGNAL_PARAMS: dict[str, dict[str, Any]] = {
-    "supertrend": {"period": 7, "mult": 3.0},
+    "supertrend": {"period": 10, "mult": 3.0},
     "ultimate_ma": {"kind": "sma", "length": 50, "slope_bars": 1},
-    "alphatrend": {"period": 10, "mult": 2.0},
+    "alphatrend": {"period": 14, "mult": 1.0},
     "slingshot_chandelier": {"fast": 40, "slow": 80, "ch_period": 14, "ch_mult": 3.0},
 }
 
 WINNING_MIN_HOLD: dict[str, int] = {
-    "supertrend": 10,
+    "supertrend": 0,
     "ultimate_ma": 5,
     "alphatrend": 0,
     "slingshot_chandelier": 10,
