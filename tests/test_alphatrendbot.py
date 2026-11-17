@@ -78,7 +78,7 @@ def test_two_runs_on_identical_data_give_identical_weights():
 
     assert run1 == run2
     assert set(run1.keys()) == {"QQQ", "SPY"}
-    for ticker, weight in run1.items():
+    for weight in run1.values():
         assert weight == pytest.approx(0.2)
 
 
@@ -115,7 +115,7 @@ def test_weights_security_and_bounds():
     assert all(w >= 0.0 for w in weights.values())
     assert sum(weights.values()) <= 1.0 + 1e-9
     assert set(weights.keys()).issubset(set(UNIVERSE))
-    for ticker, weight in weights.items():
+    for weight in weights.values():
         assert weight == pytest.approx(0.2)
 
 

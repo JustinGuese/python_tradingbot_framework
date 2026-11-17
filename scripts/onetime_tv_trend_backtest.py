@@ -26,10 +26,7 @@ Results document: docs/backtests/tv-trend-2026-11.md
 from __future__ import annotations
 
 import argparse
-import importlib
-import json
 import logging
-import os
 import sys
 import time
 import warnings

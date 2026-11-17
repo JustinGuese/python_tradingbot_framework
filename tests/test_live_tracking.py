@@ -8,9 +8,8 @@ Step S1c of PLAN.md:
   * In-memory DB integration & edge cases
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-import numpy as np
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
@@ -18,7 +17,6 @@ from sqlalchemy.orm import sessionmaker
 
 from tradingbot.utils.db import Base, LiveEquity, PortfolioWorth
 from tradingbot.utils.live_tracking import (
-    TrackingMetrics,
     build_paper_blend_series,
     compute_tracking_metrics,
     format_tracking_table,
@@ -85,7 +83,7 @@ def test_drift_and_tracking_perfect_match():
     """When live tracks paper 1:1, drift is 0, TE is 0, beta is 1.0."""
     dates = pd.date_range("2026-10-01", periods=10, freq="B")  # business days
     returns = [0.01, -0.005, 0.02, -0.01, 0.015, -0.02, 0.005, 0.01, -0.005, 0.02]
-    all_dates = [dates[0] - timedelta(days=1)] + list(dates)
+    all_dates = [dates[0] - timedelta(days=1), *list(dates)]
     levels = [100.0]
     for r in returns:
         levels.append(levels[-1] * (1.0 + r))
@@ -117,7 +115,7 @@ def test_drift_and_tracking_perfect_match():
 def test_drift_on_constant_divergence():
     """Live drifts +1% per day above paper (which is flat at 0%)."""
     dates = pd.date_range("2026-10-01", periods=5, freq="B")
-    all_dates = [dates[0] - timedelta(days=1)] + list(dates)
+    all_dates = [dates[0] - timedelta(days=1), *list(dates)]
 
     paper = pd.Series([100.0] * 6, index=all_dates)
     live = pd.Series([100.0 * (1.01**i) for i in range(6)], index=all_dates)
@@ -140,7 +138,7 @@ def test_drift_on_constant_divergence():
 def test_flat_broker_while_blend_invested():
     """Broker places zero trades (all cash), while blend is actively invested."""
     dates = pd.date_range("2026-10-01", periods=6, freq="B")
-    all_dates = [dates[0] - timedelta(days=1)] + list(dates)
+    all_dates = [dates[0] - timedelta(days=1), *list(dates)]
 
     # Broker is stuck at 60,000 cash (like Collective2 in TODOS.md)
     live = pd.Series([60_000.0] * 7, index=all_dates)
@@ -172,7 +170,7 @@ def test_flat_broker_while_blend_invested():
 # --------------------------------------------------------------------------- #
 def test_build_paper_blend_series():
     dates = pd.date_range("2026-10-01", periods=4, freq="B")
-    all_dates = [dates[0] - timedelta(days=1)] + list(dates)
+    all_dates = [dates[0] - timedelta(days=1), *list(dates)]
 
     # Bot A: +1% each day
     # Bot B: +3% each day
@@ -181,7 +179,7 @@ def test_build_paper_blend_series():
 
     # 50/50 blend -> expected daily return = 0.5 * 0.01 + 0.5 * 0.03 = +2%
     weights = {"BotA": 0.5, "BotB": 0.5}
-    blend_worth, invested = build_paper_blend_series(
+    blend_worth, _invested = build_paper_blend_series(
         worth_by_bot={"BotA": worth_a, "BotB": worth_b},
         weights=weights,
     )

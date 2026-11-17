@@ -14,7 +14,6 @@ import pandas as pd
 import pytest
 
 from tradingbot.utils.tv_signals import (
-    DEFAULT_PARAMS,
     SUPPORTED_KINDS,
     UNIVERSE_WIDE,
     apply_min_hold,
@@ -67,7 +66,7 @@ def test_universe_wide_members() -> None:
         "HYG",
         "UUP",
     ]
-    assert UNIVERSE_WIDE == expected
+    assert expected == UNIVERSE_WIDE
     assert len(UNIVERSE_WIDE) == 19
     # No leveraged or inverse ETFs
     for ticker in UNIVERSE_WIDE:

@@ -54,10 +54,7 @@ def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     vol_col = cols_map.get("volume")
 
     if vol_col is not None:
-        if "timestamp" in cols_map:
-            axis = frame[cols_map["timestamp"]]
-        else:
-            axis = frame.index
+        axis = frame[cols_map["timestamp"]] if "timestamp" in cols_map else frame.index
 
         try:
             idx = pd.DatetimeIndex(pd.to_datetime(axis))

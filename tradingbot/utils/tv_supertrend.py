@@ -180,9 +180,6 @@ def htf_supertrend_direction(
 
     htf_st = supertrend(htf_df, period=period, mult=mult)
     aligned = align_htf(htf_st["direction"], df.index, rule)
-    if isinstance(aligned, pd.DataFrame):
-        res = aligned.iloc[:, 0]
-    else:
-        res = aligned
+    res = aligned.iloc[:, 0] if isinstance(aligned, pd.DataFrame) else aligned
     res.name = "direction"
     return res

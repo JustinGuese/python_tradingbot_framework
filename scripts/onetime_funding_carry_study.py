@@ -12,7 +12,6 @@ from __future__ import annotations
 import time
 
 import httpx
-import numpy as np
 import pandas as pd
 import yfinance as yf
 

@@ -24,7 +24,7 @@ START = "2008-01-01"
 
 
 def load() -> pd.DataFrame:
-    px = yf.download(ASSETS + ["QQQ"], start=START, auto_adjust=True, progress=False)["Close"]
+    px = yf.download([*ASSETS, "QQQ"], start=START, auto_adjust=True, progress=False)["Close"]
     return px.dropna(subset=["QQQ"]).ffill(limit=3)
 
 

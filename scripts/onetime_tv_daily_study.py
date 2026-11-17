@@ -26,14 +26,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import numpy as np
-import pandas as pd
-import yfinance as yf
+import numpy as np  # noqa: E402  # sys.path set above
+import pandas as pd  # noqa: E402
+import yfinance as yf  # noqa: E402
 
-from tradingbot.utils.alpha_report import alpha_stats
-from tradingbot.utils.tv_core import to_ohlcv
-from tradingbot.utils.tv_signals import (
-    DEFAULT_PARAMS,
+from tradingbot.utils.alpha_report import alpha_stats  # noqa: E402
+from tradingbot.utils.tv_core import to_ohlcv  # noqa: E402
+from tradingbot.utils.tv_signals import (  # noqa: E402
     SUPPORTED_KINDS,
     UNIVERSE_WIDE,
     apply_min_hold,

@@ -20,7 +20,6 @@ from tradingbot.utils.tv_core import (
     hma,
     mfi,
     resample_ohlcv,
-    rma,
     rsi,
     sma,
     t3,

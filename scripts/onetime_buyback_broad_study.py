@@ -277,7 +277,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Path to write markdown output")
     args = parser.parse_args()
 
-    metrics, report_md = run_study()
+    _metrics, report_md = run_study()
     out_path = args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report_md, encoding="utf-8")

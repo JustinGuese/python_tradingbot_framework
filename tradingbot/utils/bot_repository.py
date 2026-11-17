@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from .db import Bot as BotModel
-from .db import CashAdjustment, RunLog, Trade, get_db_session
+from .db import RunLog, Trade, get_db_session
 
 
 class BotRepository:

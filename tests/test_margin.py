@@ -17,7 +17,6 @@ from tradingbot.utils.config import (
 )
 from tradingbot.utils.db import CashAdjustment, Trade
 from tradingbot.utils.margin import (
-    MissingPriceError,
     book_values,
     cover_order,
     initial_ok,

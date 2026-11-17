@@ -46,7 +46,7 @@ def min_warmup_bars(
     """Calculate minimum base bars required for Ultimate MA to warm up."""
     kind_clean = str(kind).lower().strip()
     if kind_clean == "hma":
-        base_need = length + int(math.isqrt(length)) + slope_bars
+        base_need = length + math.isqrt(length) + slope_bars
     elif kind_clean in ("tema",):
         base_need = length * 3 + slope_bars
     elif kind_clean in ("t3",):

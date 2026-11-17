@@ -124,7 +124,7 @@ def test_chandelier_exit_close_below_stop_flips_direction():
 
     # Direction flips to -1.0 exactly on bar 15, and sell signal fires
     assert ce["direction"].iloc[15] == -1.0
-    assert ce["sell"].iloc[15] is True or ce["sell"].iloc[15] == True
+    assert ce["sell"].iloc[15] == True  # noqa: E712  # exact bool compare; truthiness would pass NaN
     assert not ce["buy"].iloc[15]
 
     # Subsequent bars remain bearish, but sell signal is False (fires only on flip)

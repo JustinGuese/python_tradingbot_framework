@@ -9,7 +9,7 @@ Key invariants tested:
 5. Holding duration: positions age out after hold_sessions.
 """
 
-from datetime import date, datetime
+from datetime import date
 from zoneinfo import ZoneInfo
 
 import pandas as pd

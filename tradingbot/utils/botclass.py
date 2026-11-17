@@ -43,7 +43,6 @@ from .portfolio_manager import PortfolioManager
 from .weights import (
     WEIGHT_SUM_TOLERANCE,
     gross_weight,
-    net_weight,
     normalize_weights,
     positive_weight_sum,
     require_normalized,

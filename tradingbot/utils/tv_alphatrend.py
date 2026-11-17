@@ -29,10 +29,7 @@ def _prepare_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     vol_col = cols_map.get("volume")
 
     if vol_col is not None:
-        if "timestamp" in cols_map:
-            axis = df[cols_map["timestamp"]]
-        else:
-            axis = df.index
+        axis = df[cols_map["timestamp"]] if "timestamp" in cols_map else df.index
 
         try:
             idx = pd.DatetimeIndex(pd.to_datetime(axis))
@@ -118,10 +115,7 @@ def alphatrend(
         )
 
     # Momentum series
-    if momentum_type == "mfi":
-        mom = mfi(ohlcv, period)
-    else:
-        mom = rsi(ohlcv["close"], period)
+    mom = mfi(ohlcv, period) if momentum_type == "mfi" else rsi(ohlcv["close"], period)
 
     # ATR matching Kivanc's Pine: ATR = ta.sma(ta.tr, AP)
     tr = true_range(ohlcv)
@@ -152,10 +146,7 @@ def alphatrend(
         if np.isnan(prev):
             val = up if m >= 50.0 else dn
         else:
-            if m >= 50.0:
-                val = prev if up < prev else up
-            else:
-                val = prev if dn > prev else dn
+            val = (prev if up < prev else up) if m >= 50.0 else (prev if dn > prev else dn)
 
         at_arr[i] = val
         prev = val

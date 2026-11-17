@@ -192,6 +192,7 @@ def test_load_prices_from_db_keeps_only_fresh_deep_symbols(sqlite_db, db_session
 def test_submit_signals_with_multi_country_universe(mock_napi, monkeypatch):
     """Test S3b: submit_signals extracts country codes from global Numerai tickers."""
     from unittest.mock import patch
+
     from tradingbot.numerai_signals_submit import submit_signals
 
     # Universe with US, German (GY), and British (LN) tickers

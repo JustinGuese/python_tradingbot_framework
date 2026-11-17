@@ -7,8 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tradingbot.calculate_portfolio_worth import calculate_portfolio_worth as script_calc_worth
-from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.data_service import DataService
 from tradingbot.utils.db import Bot as BotModel
 from tradingbot.utils.db import CashAdjustment, DividendEvent, Trade

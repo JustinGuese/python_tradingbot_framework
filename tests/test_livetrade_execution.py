@@ -1,12 +1,12 @@
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
+
 import pytest
 
 from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.copier import LiveTradeCopier
-from tradingbot.livetrade.execution import ExecutionPolicy, in_window, marketable_limit
+from tradingbot.livetrade.execution import ExecutionPolicy, marketable_limit
 from tradingbot.utils.db import Bot
-
 
 # ----------------------------------------------------------------------
 # 1. Window math tests (winter, summer, early close, weekend/holiday)
@@ -17,11 +17,11 @@ def test_window_math_winter_session():
     """Winter (EST, UTC-5): Open 14:30 UTC, Close 21:00 UTC. Window [15:00, 20:45]."""
     policy = ExecutionPolicy(min_after_open_minutes=30, min_before_close_minutes=15)
 
-    before_open = datetime(2026, 1, 14, 14, 59, tzinfo=timezone.utc)
-    window_start = datetime(2026, 1, 14, 15, 0, tzinfo=timezone.utc)
-    mid_session = datetime(2026, 1, 14, 15, 5, tzinfo=timezone.utc)
-    window_end = datetime(2026, 1, 14, 20, 45, tzinfo=timezone.utc)
-    after_close = datetime(2026, 1, 14, 20, 46, tzinfo=timezone.utc)
+    before_open = datetime(2026, 1, 14, 14, 59, tzinfo=UTC)
+    window_start = datetime(2026, 1, 14, 15, 0, tzinfo=UTC)
+    mid_session = datetime(2026, 1, 14, 15, 5, tzinfo=UTC)
+    window_end = datetime(2026, 1, 14, 20, 45, tzinfo=UTC)
+    after_close = datetime(2026, 1, 14, 20, 46, tzinfo=UTC)
 
     assert not policy.in_window(before_open)
     assert policy.in_window(window_start)
@@ -34,11 +34,11 @@ def test_window_math_summer_session():
     """Summer (EDT, UTC-4): Open 13:30 UTC, Close 20:00 UTC. Window [14:00, 19:45]."""
     policy = ExecutionPolicy(min_after_open_minutes=30, min_before_close_minutes=15)
 
-    before_open = datetime(2026, 6, 17, 13, 59, tzinfo=timezone.utc)
-    window_start = datetime(2026, 6, 17, 14, 0, tzinfo=timezone.utc)
-    mid_session = datetime(2026, 6, 17, 15, 5, tzinfo=timezone.utc)
-    window_end = datetime(2026, 6, 17, 19, 45, tzinfo=timezone.utc)
-    after_close = datetime(2026, 6, 17, 19, 46, tzinfo=timezone.utc)
+    before_open = datetime(2026, 6, 17, 13, 59, tzinfo=UTC)
+    window_start = datetime(2026, 6, 17, 14, 0, tzinfo=UTC)
+    mid_session = datetime(2026, 6, 17, 15, 5, tzinfo=UTC)
+    window_end = datetime(2026, 6, 17, 19, 45, tzinfo=UTC)
+    after_close = datetime(2026, 6, 17, 19, 46, tzinfo=UTC)
 
     assert not policy.in_window(before_open)
     assert policy.in_window(window_start)
@@ -51,9 +51,9 @@ def test_window_math_early_close():
     """Day after Thanksgiving (13:00 EST close = 18:00 UTC). Window [15:00, 17:45]."""
     policy = ExecutionPolicy(min_after_open_minutes=30, min_before_close_minutes=15)
 
-    mid_session = datetime(2026, 11, 27, 15, 5, tzinfo=timezone.utc)
-    window_end = datetime(2026, 11, 27, 17, 45, tzinfo=timezone.utc)
-    after_window = datetime(2026, 11, 27, 17, 46, tzinfo=timezone.utc)
+    mid_session = datetime(2026, 11, 27, 15, 5, tzinfo=UTC)
+    window_end = datetime(2026, 11, 27, 17, 45, tzinfo=UTC)
+    after_window = datetime(2026, 11, 27, 17, 46, tzinfo=UTC)
 
     assert policy.in_window(mid_session)
     assert policy.in_window(window_end)
@@ -64,8 +64,8 @@ def test_window_math_weekend_and_holiday():
     """Weekends and market holidays must refuse submission."""
     policy = ExecutionPolicy()
 
-    sunday = datetime(2026, 11, 15, 15, 5, tzinfo=timezone.utc)
-    thanksgiving = datetime(2026, 11, 26, 15, 5, tzinfo=timezone.utc)
+    sunday = datetime(2026, 11, 15, 15, 5, tzinfo=UTC)
+    thanksgiving = datetime(2026, 11, 26, 15, 5, tzinfo=UTC)
 
     assert not policy.in_window(sunday)
     assert not policy.in_window(thanksgiving)

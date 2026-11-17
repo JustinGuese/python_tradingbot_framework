@@ -18,16 +18,14 @@ maintained as unproven / research reference.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from typing import Any, ClassVar
 
 import pandas as pd
-from sqlalchemy import func
 
 from tradingbot.buybackdriftbot import read_buyback_events
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.buyback_rules import active_symbols, dedupe_recent
-from tradingbot.utils.db import BuybackEvent, get_db_session
 from tradingbot.utils.runner import run_bot
 
 logger = logging.getLogger(__name__)
@@ -127,7 +125,7 @@ class BuybackBroadBot(Bot):
         # Ensure non-negative
         weight_per_symbol = max(0.0, weight_per_symbol)
 
-        weights = {sym: weight_per_symbol for sym in active}
+        weights = dict.fromkeys(active, weight_per_symbol)
 
         # Strict invariant verification: NO SHORTS, caps respected
         for sym, w in weights.items():

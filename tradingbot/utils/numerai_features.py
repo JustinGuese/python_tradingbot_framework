@@ -494,20 +494,14 @@ def build_rank_blended_signal(
 
     # 3. Buyback event flags
     if buyback_events is not None:
-        if isinstance(buyback_events, dict):
-            buyback_s = pd.Series(buyback_events)
-        else:
-            buyback_s = buyback_events
+        buyback_s = pd.Series(buyback_events) if isinstance(buyback_events, dict) else buyback_events
         f_buyback = buyback_s.reindex(universe_list).fillna(0.0)
     else:
         f_buyback = load_buyback_flags(universe_list, since_days=90, asof=asof, session=db_session)
 
     # 4. Insider trade flags
     if insider_trades is not None:
-        if isinstance(insider_trades, dict):
-            insider_s = pd.Series(insider_trades)
-        else:
-            insider_s = insider_trades
+        insider_s = pd.Series(insider_trades) if isinstance(insider_trades, dict) else insider_trades
         f_insider = insider_s.reindex(universe_list).fillna(0.0)
     else:
         f_insider = load_insider_flags(universe_list, since_days=90, asof=asof, session=db_session)

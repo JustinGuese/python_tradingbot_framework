@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from ib_async import LimitOrder
+
 from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
 STK_META = {"symbol": "AAPL", "type": "stock", "sec_type": "STK", "exchange": "SMART", "currency": "USD"}
@@ -91,7 +91,7 @@ def _place(broker, qty, side="BUY", contract=None, limit_price=None):
         patch.object(broker, "map_symbol", return_value=STK_META),
         patch.object(broker, "_resolve_stk_contract", return_value=contract),
     ):
-        res = broker.place_order("AAPL", qty, side, limit_price=limit_price)
+        broker.place_order("AAPL", qty, side, limit_price=limit_price)
     return trade
 
 

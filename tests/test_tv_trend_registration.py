@@ -6,7 +6,6 @@ import importlib
 import inspect
 from pathlib import Path
 
-import pytest
 import yaml
 
 from tradingbot.utils.botclass import Bot
@@ -33,7 +32,7 @@ EXPECTED_BOTS = [*HOURLY_BOTS, *DAILY_BOTS]
 def _load_helm_bots() -> dict[str, dict]:
     """Parse helm/tradingbots/values.yaml and return a dictionary of bot entries by name."""
     assert HELM_VALUES_FILE.exists(), f"Helm values file not found at {HELM_VALUES_FILE}"
-    with open(HELM_VALUES_FILE, "r", encoding="utf-8") as f:
+    with open(HELM_VALUES_FILE, encoding="utf-8") as f:
         values = yaml.safe_load(f)
     assert "bots" in values, "values.yaml does not contain a 'bots' key"
     bots_list = values["bots"]

@@ -1,8 +1,9 @@
 from unittest.mock import MagicMock
+
 import pytest
 
 from tradingbot.utils.bot_repository import BotRepository
-from tradingbot.utils.config import EXECUTION_CONFIG, ExecutionConfig
+from tradingbot.utils.config import ExecutionConfig
 from tradingbot.utils.db import Trade
 from tradingbot.utils.margin import MissingPriceError
 from tradingbot.utils.portfolio_manager import PortfolioManager

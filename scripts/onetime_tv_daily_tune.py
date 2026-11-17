@@ -27,23 +27,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import numpy as np
-import pandas as pd
+import pandas as pd  # noqa: E402  # sys.path set above
 
-from scripts.onetime_tv_daily_study import (
+from scripts.onetime_tv_daily_study import (  # noqa: E402
     annualized_cagr,
     compute_flags_matrix,
     compute_strategy_returns,
-    evaluate_metrics,
     load_daily_data,
     max_drawdown,
     weights_from_flags,
 )
-from tradingbot.utils.alpha_report import alpha_stats
-from tradingbot.utils.tv_signals import (
+from tradingbot.utils.alpha_report import alpha_stats  # noqa: E402
+from tradingbot.utils.tv_signals import (  # noqa: E402
     DEFAULT_PARAMS,
     SUPPORTED_KINDS,
-    UNIVERSE_WIDE,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,9 +53,9 @@ GRIDS: dict[str, list[dict[str, Any]]] = {
         {"period": p, "mult": m} for p in [7, 10, 14, 20] for m in [1.5, 2.0, 2.5, 3.0]
     ],  # 16 param combos * 3 min_hold = 48 combos
     "ultimate_ma": [
-        {"kind": k, "length": l, "slope_bars": sb}
+        {"kind": k, "length": length, "slope_bars": sb}
         for k in ["sma", "ema", "hma"]
-        for l in [15, 20, 30, 50]
+        for length in [15, 20, 30, 50]
         for sb in [1, 2]
     ],  # 24 param combos * 2 min_hold = 48 combos
     "alphatrend": [

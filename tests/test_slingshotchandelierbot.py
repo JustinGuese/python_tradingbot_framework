@@ -6,7 +6,6 @@ import os
 
 os.environ.setdefault("POSTGRES_URI", "postgresql://ci:ci@localhost:5432/ci")
 
-import numpy as np
 import pandas as pd
 import pytest
 

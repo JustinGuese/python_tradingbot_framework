@@ -658,9 +658,8 @@ class PortfolioManager:
                 if not is_option and (new < -1e-9 or (old < -1e-9 and qty < 0)):
                     if abs(qty - round(qty)) > 1e-6 or abs(new - round(new)) > 1e-6:
                         raise ValueError(f"Whole shares only on the short side for {key}: got qty={qty}, new={new}")
-                    if new < -1e-9 and new < old:
-                        if key not in allowed_shortable:
-                            raise ValueError(f"Symbol {key!r} is not shortable")
+                    if new < -1e-9 and new < old and key not in allowed_shortable:
+                        raise ValueError(f"Symbol {key!r} is not shortable")
 
                 if abs(new) > abs(old) + 1e-9:
                     grows = True
@@ -900,10 +899,7 @@ class PortfolioManager:
             raise MissingPriceError(f"Missing or non-positive price for {symbol!r}: {price}")
 
         abs_holding = abs(holding)
-        if quantity_usd == -1:
-            shares = abs_holding
-        else:
-            shares = min(abs_holding, float(math.floor(quantity_usd / price)))
+        shares = abs_holding if quantity_usd == -1 else min(abs_holding, float(math.floor(quantity_usd / price)))
 
         if shares <= 0:
             return 0.0

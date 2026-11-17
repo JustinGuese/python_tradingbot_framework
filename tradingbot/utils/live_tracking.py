@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import numpy as np
@@ -184,7 +184,7 @@ def build_paper_blend_series(
         return pd.Series(dtype=float), pd.Series(dtype=bool)
 
     total_w = sum(weights[b] for b in active_bots)
-    norm_w = {b: weights[b] / total_w for b in active_bots} if total_w > 0 else {b: 0.0 for b in active_bots}
+    norm_w = {b: weights[b] / total_w for b in active_bots} if total_w > 0 else dict.fromkeys(active_bots, 0.0)
 
     # Clean levels per bot
     levels = {b: weekday_levels(worth_by_bot[b]) for b in active_bots}
@@ -610,7 +610,7 @@ def format_tracking_table(metrics: list[TrackingMetrics]) -> str:
         flat_str = (
             f"{m.flat_days_while_invested}/{m.invested_days} ({m.flat_share * 100:.1f}%)"
             if m.invested_days > 0
-            else f"0/0 (0.0%)"
+            else "0/0 (0.0%)"
         )
         row = [
             m.broker,

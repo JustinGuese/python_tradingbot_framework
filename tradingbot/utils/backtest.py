@@ -17,14 +17,13 @@ from .config import (
     SHORTABLE,
 )
 from .margin import (
-    book_values,
     cover_order,
     initial_ok,
     maintenance_breach,
     spendable_cash,
 )
 from .portfolio_manager import should_trade
-from .trial_registry import compute_params_hash, record_trial, trial_count
+from .trial_registry import record_trial
 
 logger = logging.getLogger(__name__)
 

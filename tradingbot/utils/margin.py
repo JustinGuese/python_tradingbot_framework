@@ -104,10 +104,7 @@ def initial_ok(portfolio: dict[str, Any], prices: dict[str, float], max_gross: f
         return False
 
     gross_exposure = long_val + short_val
-    if (gross_exposure / equity) > (max_gross + 1e-9):
-        return False
-
-    return True
+    return not ((gross_exposure / equity) > (max_gross + 1e-9))
 
 
 def maintenance_breach(portfolio: dict[str, Any], prices: dict[str, float]) -> bool:
@@ -141,7 +138,7 @@ def spendable_cash(portfolio: dict[str, Any], prices: dict[str, float]) -> float
     Returns:
         Spendable cash in USD.
     """
-    long_val, short_val, _ = book_values(portfolio, prices)
+    _long_val, short_val, _ = book_values(portfolio, prices)
     cash = float(portfolio.get("USD", 0.0) or 0.0)
     if short_val <= 1e-9:
         return float(cash)

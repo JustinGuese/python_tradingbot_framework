@@ -8,7 +8,6 @@ import pytest
 
 from tradingbot.utils.backtest import backtest_bot
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.config import SHORTABLE
 
 BARS = 40
 

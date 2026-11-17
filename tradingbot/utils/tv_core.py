@@ -7,7 +7,6 @@ All warmup values are NaN / False, never filled with 0.
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -32,10 +31,7 @@ def to_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
 
     cols_map = {str(c).lower(): c for c in frame.columns}
 
-    if "timestamp" in cols_map:
-        axis = frame[cols_map["timestamp"]]
-    else:
-        axis = frame.index
+    axis = frame[cols_map["timestamp"]] if "timestamp" in cols_map else frame.index
 
     try:
         idx = pd.DatetimeIndex(pd.to_datetime(axis))
@@ -139,7 +135,7 @@ def hma(s: pd.Series, n: int) -> pd.Series:
     if s.empty:
         return pd.Series(dtype=float, index=s.index)
     half_length = max(1, n // 2)
-    sqrt_length = max(1, int(math.isqrt(n)))
+    sqrt_length = max(1, math.isqrt(n))
     raw_hma = 2.0 * wma(s, half_length) - wma(s, n)
     return wma(raw_hma, sqrt_length)
 
@@ -323,10 +319,7 @@ def align_htf(
     Uses only HTF bars that were complete at each base bar by shifting
     one HTF bar, then forward-filling onto base_index.
     """
-    if isinstance(base_index, (pd.Series, pd.DataFrame)):
-        target_index = base_index.index
-    else:
-        target_index = base_index
+    target_index = base_index.index if isinstance(base_index, (pd.Series, pd.DataFrame)) else base_index
 
     target_index = pd.DatetimeIndex(target_index)
     if target_index.tz is not None:

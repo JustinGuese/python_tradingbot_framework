@@ -241,7 +241,6 @@ def test_missing_feature_fallback_and_event_lifting(synthetic_market):
 
     # 2. When buyback and insider events ARE present, they lift the ticker's rank
     target_ticker = tickers[50]
-    twin_ticker = tickers[51]
 
     # Both stocks have similar return profiles; give target_ticker a buyback and insider buy
     buyback_events = {target_ticker: 1.0}

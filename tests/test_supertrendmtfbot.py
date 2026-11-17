@@ -129,9 +129,9 @@ def test_bot_class_structure_and_metadata(monkeypatch):
     # Verify targetWeights delegates to compute_weights via self.datas
     prices = [100.0 + i * 0.5 for i in range(100)]
     df = _make_ohlcv(prices)
-    bot.datas = {t: df for t in UNIVERSE}
+    bot.datas = dict.fromkeys(UNIVERSE, df)
 
-    dummy_rows = {t: df.iloc[-1] for t in UNIVERSE}
+    dummy_rows = dict.fromkeys(UNIVERSE, df.iloc[-1])
     weights = bot.targetWeights(dummy_rows)
     assert len(weights) == 5
     for t in UNIVERSE:

@@ -272,7 +272,7 @@ class MT5Broker(LiveBroker):
                 if price <= 0:
                     price = limit_price
                 if point > 0 and price > 0:
-                    points_diff = int(round(abs(limit_price - price) / point))
+                    points_diff = round(abs(limit_price - price) / point)
                     deviation = max(deviation, points_diff)
 
             # Record initial positions before order for confirmation on potential timeout
@@ -397,7 +397,7 @@ class MT5Broker(LiveBroker):
                 if price <= 0:
                     price = limit_price
                 if point > 0 and price > 0:
-                    points_diff = int(round(abs(limit_price - price) / point))
+                    points_diff = round(abs(limit_price - price) / point)
                     deviation = max(deviation, points_diff)
 
             for pos in sorted(long_positions, key=lambda p: getattr(p, "ticket", 0)):
@@ -470,11 +470,11 @@ class MT5Broker(LiveBroker):
                         if getattr(p, "type", ORDER_TYPE_BUY) == ORDER_TYPE_BUY
                     )
                     confirmed = False
-                    if not matching_pos:
-                        confirmed = True
-                    elif float(getattr(matching_pos[0], "volume", 0.0)) <= pos_vol - lot_vol + 1e-6:
-                        confirmed = True
-                    elif total_after <= total_open_vol - lot_vol + 1e-6:
+                    if (
+                        not matching_pos
+                        or float(getattr(matching_pos[0], "volume", 0.0)) <= pos_vol - lot_vol + 1e-6
+                        or total_after <= total_open_vol - lot_vol + 1e-6
+                    ):
                         confirmed = True
 
                     if confirmed:
