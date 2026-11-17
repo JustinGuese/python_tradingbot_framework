@@ -45,6 +45,10 @@ UNIVERSE_WIDE: list[str] = [
     "UUP",
 ]
 
+# Non-equity subset: trend alpha is strongest on bonds/commodities/gold/FX and these do not crash
+# with QQQ. Walk-forward study: docs/backtests/tv-trend-boost-2026-11.md (Idea 6).
+UNIVERSE_EX_EQUITY: list[str] = ["GLD", "SLV", "DBC", "USO", "TLT", "IEF", "HYG", "UUP"]
+
 SUPPORTED_KINDS: tuple[str, ...] = (
     "supertrend",
     "ultimate_ma",

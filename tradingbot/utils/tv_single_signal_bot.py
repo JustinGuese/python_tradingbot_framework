@@ -23,6 +23,7 @@ class TvSingleSignalDailyBot(Bot):
     """
 
     KIND: ClassVar[str] = ""
+    UNIVERSE: ClassVar[list[str] | None] = None  # None = UNIVERSE_WIDE
     BACKTEST_PERIOD: ClassVar[str | None] = "max"
     param_grid: ClassVar[dict] = {"gross_cap": [0.8, 1.0]}
 
@@ -36,7 +37,7 @@ class TvSingleSignalDailyBot(Bot):
     ):
         super().__init__(
             type(self).__name__,
-            tickers=list(UNIVERSE_WIDE),
+            tickers=list(type(self).UNIVERSE or UNIVERSE_WIDE),
             interval="1d",
             period="5y",
             gross_cap=gross_cap,

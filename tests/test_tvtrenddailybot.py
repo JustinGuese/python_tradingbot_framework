@@ -243,3 +243,15 @@ def test_compute_weights_defensive_rotation_disabled(sample_frames: dict[str, pd
     assert sum(w_off.values()) <= 1.000001
     for k in w_off:
         assert w_off[k] <= 0.200001
+
+
+def test_ex_equity_bots_use_non_equity_universe():
+    from tradingbot.alphatrendexequitybot import AlphaTrendExEquityBot
+    from tradingbot.supertrendexequitybot import SupertrendExEquityBot
+    from tradingbot.utils.tv_signals import UNIVERSE_EX_EQUITY
+
+    assert SupertrendExEquityBot.UNIVERSE == UNIVERSE_EX_EQUITY
+    assert AlphaTrendExEquityBot.UNIVERSE == UNIVERSE_EX_EQUITY
+    assert not {"SPY", "QQQ", "IWM", "EFA", "EEM"} & set(UNIVERSE_EX_EQUITY)
+    assert SupertrendExEquityBot.KIND == "supertrend"
+    assert AlphaTrendExEquityBot.KIND == "alphatrend"

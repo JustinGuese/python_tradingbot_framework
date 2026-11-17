@@ -692,6 +692,14 @@ bots:
   # Paper only, daily supertrend signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
   schedule: "5 21 * * 1-5"
 
+- name: supertrendexequitybot
+  # Paper only, daily supertrend across 8 non-equity ETFs (beta ~0). Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: alphatrendexequitybot
+  # Paper only, daily alphatrend across 8 non-equity ETFs (beta ~0). Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
 - name: ultimatemadailybot
   # Paper only, daily ultimate_ma signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
   schedule: "5 21 * * 1-5"

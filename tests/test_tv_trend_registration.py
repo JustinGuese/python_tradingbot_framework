@@ -24,6 +24,8 @@ DAILY_BOTS = [
     "ultimatemadailybot",
     "alphatrenddailybot",
     "slingshotchandelierdailybot",
+    "supertrendexequitybot",
+    "alphatrendexequitybot",
 ]
 EXPECTED_BOTS = [*HOURLY_BOTS, *DAILY_BOTS]
 
