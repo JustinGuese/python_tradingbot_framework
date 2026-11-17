@@ -12,12 +12,16 @@ import yaml
 from tradingbot.utils.botclass import Bot
 
 HELM_VALUES_FILE = Path(__file__).resolve().parent.parent / "helm" / "tradingbots" / "values.yaml"
-EXPECTED_BOTS = [
+HOURLY_BOTS = [
     "supertrendmtfbot",
     "ultimatemabot",
     "alphatrendbot",
     "slingshotchandelierbot",
 ]
+DAILY_BOTS = [
+    "tvtrenddailybot",
+]
+EXPECTED_BOTS = [*HOURLY_BOTS, *DAILY_BOTS]
 
 
 def _load_helm_bots() -> dict[str, dict]:
@@ -60,8 +64,8 @@ def test_every_bot_module_imports_and_class_name_equals_helm_entry_lowercased():
         ), f"Class name '{bot_cls.__name__}'.lower() does not match helm entry name '{entry['name']}'"
 
 
-def test_none_of_four_helm_entries_has_suspend_true():
-    """Test 2: None of the four helm entries has suspend: true."""
+def test_none_of_helm_entries_has_suspend_true():
+    """Test 2: None of the TV trend helm entries has suspend: true."""
     helm_bots = _load_helm_bots()
 
     for bot_name in EXPECTED_BOTS:
@@ -72,12 +76,19 @@ def test_none_of_four_helm_entries_has_suspend_true():
 
 
 def test_helm_entries_have_correct_schedule():
-    """Test 3: Helm entries have the expected schedule ('5 13-20 * * 1-5')."""
+    """Test 3: Helm entries have the expected schedule ('5 13-20 * * 1-5' for hourly, '5 21 * * 1-5' for daily)."""
     helm_bots = _load_helm_bots()
 
-    for bot_name in EXPECTED_BOTS:
+    for bot_name in HOURLY_BOTS:
         entry = helm_bots[bot_name]
         schedule = entry.get("schedule")
         assert (
             schedule == "5 13-20 * * 1-5"
-        ), f"Bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 13-20 * * 1-5'"
+        ), f"Hourly bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 13-20 * * 1-5'"
+
+    for bot_name in DAILY_BOTS:
+        entry = helm_bots[bot_name]
+        schedule = entry.get("schedule")
+        assert (
+            schedule == "5 21 * * 1-5"
+        ), f"Daily bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 21 * * 1-5'"
