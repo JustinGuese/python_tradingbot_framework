@@ -49,6 +49,14 @@ UNIVERSE_WIDE: list[str] = [
 # with QQQ. Walk-forward study: docs/backtests/tv-trend-boost-2026-11.md (Idea 6).
 UNIVERSE_EX_EQUITY: list[str] = ["GLD", "SLV", "DBC", "USO", "TLT", "IEF", "HYG", "UUP"]
 
+# Expanded non-equity universe: 21 liquid non-equity ETFs across bonds, commodities, and FX.
+# Study: docs/backtests/tv-widen-2026-11.md (PLAN-widen.md).
+UNIVERSE_EX_EQUITY_WIDE: list[str] = UNIVERSE_EX_EQUITY + [
+    "SHY", "TIP", "LQD", "EMB", "BWX",          # bonds
+    "CPER", "DBA", "UNG", "PPLT",               # commodities
+    "FXE", "FXY", "FXF", "FXA",                 # currencies
+]
+
 SUPPORTED_KINDS: tuple[str, ...] = (
     "supertrend",
     "ultimate_ma",
