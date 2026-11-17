@@ -810,7 +810,9 @@ def backtest_bot(
 
                         targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
                         band_ref = {t: max(abs(targets[t]), abs(portfolio.get(t, 0.0) * prices[t])) for t in tradeable}
-                        full_exit = {t for t in tradeable if abs(targets[t]) < 1e-9 and abs(portfolio.get(t, 0.0)) > 1e-9}
+                        full_exit = {
+                            t for t in tradeable if abs(targets[t]) < 1e-9 and abs(portfolio.get(t, 0.0)) > 1e-9
+                        }
                     else:
                         weights = bot._coerce_target_weights(raw_weights, allowed=set(tradeable))
                         targets = {t: weights.get(t, 0.0) * total_value for t in tradeable}
@@ -917,7 +919,9 @@ def backtest_bot(
                     holding_value = holding * price
                     wanted = targets[ticker]
                     excess = holding_value - wanted
-                    if excess <= (0.0 if ticker in full_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])):
+                    if excess <= (
+                        0.0 if ticker in full_exit else EXECUTION_CONFIG.no_trade_threshold(band_ref[ticker])
+                    ):
                         continue
                     qty = min(holding, excess / price)
                     execution_price = price * (1 - slippage_pct)

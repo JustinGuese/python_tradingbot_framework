@@ -680,8 +680,7 @@ class PortfolioManager:
             option_unders = options.option_underlyings(portfolio)
             if option_unders:
                 opt_req = sum(
-                    om.max_loss(options.payoff_legs(options.structure_positions(portfolio, u)))
-                    for u in option_unders
+                    om.max_loss(options.payoff_legs(options.structure_positions(portfolio, u))) for u in option_unders
                 )
                 if grows and cash + 1e-6 < opt_req:
                     raise ValueError(
@@ -992,7 +991,13 @@ class PortfolioManager:
             row.portfolio = portfolio
             self.bot_repository.update_bot(row, session=sess)
             self.bot_repository.log_trade(
-                bot_name=self.bot_name, symbol=symbol, quantity=-qty, price=price, is_buy=True, action="COVER", session=sess
+                bot_name=self.bot_name,
+                symbol=symbol,
+                quantity=-qty,
+                price=price,
+                is_buy=True,
+                action="COVER",
+                session=sess,
             )
             return -cost
 
@@ -1087,7 +1092,9 @@ class PortfolioManager:
         if short_option_legs:
             raise ValueError(f"rebalancePortfolio cannot run on a book with short option legs {short_option_legs}")
         if held_shorts and not allow_short:
-            raise ValueError(f"rebalancePortfolio cannot run on a book with short positions {held_shorts} unless allow_short")
+            raise ValueError(
+                f"rebalancePortfolio cannot run on a book with short positions {held_shorts} unless allow_short"
+            )
 
         if not allow_short:
             for s, w in target_portfolio.items():
@@ -1287,8 +1294,7 @@ class PortfolioManager:
                         legs.append((symbol, delta))
 
                 logger.info(
-                    "Rebalancing %s (shorts allowed): Total Value $%.2f, %d legs, "
-                    "%d skipped inside no-trade band",
+                    "Rebalancing %s (shorts allowed): Total Value $%.2f, %d legs, %d skipped inside no-trade band",
                     self.bot_name,
                     total_portfolio_value,
                     len(legs),

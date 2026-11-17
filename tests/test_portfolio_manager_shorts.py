@@ -71,12 +71,7 @@ def test_short_then_cover_roundtrips_cash(sqlite_db, db_session, test_bot):
     assert updated_bot.portfolio["USD"] == 10000.0
 
     # Verify trade logging
-    trades = (
-        db_session.query(Trade)
-        .filter_by(bot_name=test_bot.name, symbol="QQQ")
-        .order_by(Trade.id.asc())
-        .all()
-    )
+    trades = db_session.query(Trade).filter_by(bot_name=test_bot.name, symbol="QQQ").order_by(Trade.id.asc()).all()
     assert len(trades) == 2
     assert trades[0].action == "SHORT"
     assert not trades[0].isBuy
