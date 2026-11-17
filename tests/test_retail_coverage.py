@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from scripts.onetime_retail_venue_coverage import check_retail_coverage_offline, get_sp100_full_universe
-from tradingbot.livetrade.broker import LiveBroker
 from tradingbot.livetrade.copier import LiveTradeCopier
 from tradingbot.utils.universes import SP100, SP100_EXCLUDED
 
@@ -73,7 +72,7 @@ def test_drop_to_cash_path_trades_remaining_and_leaves_weight_in_cash(mock_broke
     with (
         patch.object(copier, "_calculate_target_weights", return_value=target_weights),
         patch.object(copier, "_calculate_orders", return_value=[]) as mock_calc,
-        patch.object(copier, "_execute_orders") as mock_exec,
+        patch.object(copier, "_execute_orders"),
     ):
         copier.sync()
 

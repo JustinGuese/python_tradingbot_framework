@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests  # type: ignore[import-untyped]
@@ -35,7 +35,7 @@ PostFn = Callable[[list[dict[str, str]]], list[dict[str, Any]]]
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _batch_size() -> int:
@@ -108,7 +108,7 @@ def resolve_cusips(
         responses = post([{"idType": "ID_CUSIP", "idValue": c} for c in batch])
         if len(responses) != len(batch):
             raise RuntimeError(f"OpenFIGI returned {len(responses)} results for {len(batch)} CUSIPs")
-        for c, res in zip(batch, responses):
+        for c, res in zip(batch, responses, strict=True):
             ticker = _pick_ticker(res)
             row = existing.get(c)
             if row is None:
@@ -134,9 +134,7 @@ def coverage(session: Session, holdings: Iterable[tuple[str, float]]) -> dict[st
         c = c.strip().upper()
         weights[c] = weights.get(c, 0.0) + float(v)
     total = sum(weights.values())
-    rows = {
-        r.cusip: r.ticker for r in session.query(CusipMap).filter(CusipMap.cusip.in_(list(weights))).all()
-    }
+    rows = {r.cusip: r.ticker for r in session.query(CusipMap).filter(CusipMap.cusip.in_(list(weights))).all()}
     resolved = sum(v for c, v in weights.items() if rows.get(c))
     unresolved = sorted(((c, v) for c, v in weights.items() if not rows.get(c)), key=lambda x: -x[1])
     return {

@@ -26,6 +26,7 @@ Point-in-Time Discipline:
 from __future__ import annotations
 
 from datetime import date, datetime
+from itertools import pairwise
 from typing import Any
 
 import pandas as pd
@@ -92,9 +93,7 @@ def _consecutive_tail(periods: pd.Series) -> list[int]:
     return list(range(start, n))
 
 
-def _eligible(
-    filings: pd.DataFrame, holdings: pd.DataFrame, as_of: Any, p: dict[str, Any]
-) -> dict[int, list[str]]:
+def _eligible(filings: pd.DataFrame, holdings: pd.DataFrame, as_of: Any, p: dict[str, Any]) -> dict[int, list[str]]:
     """cik -> accessions (oldest to newest) of the trailing consecutive run, if eligible."""
     vis = _visible_filings(filings, as_of)
     w = _weights(holdings[holdings["accession"].isin(vis["accession"])])
@@ -112,9 +111,9 @@ def _eligible(
             continue
         if latest["weight"].head(p["top_n"]).sum() < p["min_top10_weight"]:
             continue
-        tail = accs[-(p["turnover_quarters"] + 1):]
+        tail = accs[-(p["turnover_quarters"] + 1) :]
         turns = []
-        for a, b in zip(tail[:-1], tail[1:]):
+        for a, b in pairwise(tail):
             if a not in w or b not in w:
                 turns = []
                 break

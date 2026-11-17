@@ -4,12 +4,10 @@ Tests for Form 13F database models and signal interface stubs (Batch 0).
 
 from datetime import date, datetime
 
-import pandas as pd
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from tradingbot.utils.db import CusipMap, Inst13fFiling, Inst13fHolding
-from tradingbot.utils.inst13f_signal import conviction_scores, eligible_filers
 
 
 def test_models_create_on_empty_sqlite(db_session):
@@ -103,15 +101,3 @@ def test_cusip_map_pk_rejects_duplicate(db_session):
     with pytest.raises(IntegrityError):
         db_session.commit()
     db_session.rollback()
-
-
-def test_inst13f_signal_stubs_raise_not_implemented():
-    """Verify that the B0 stub interfaces raise NotImplementedError."""
-    dummy_filings = pd.DataFrame()
-    dummy_holdings = pd.DataFrame()
-
-    with pytest.raises(NotImplementedError):
-        eligible_filers(dummy_filings, dummy_holdings, as_of="2024-03-31")
-
-    with pytest.raises(NotImplementedError):
-        conviction_scores(dummy_filings, dummy_holdings, as_of="2024-03-31")

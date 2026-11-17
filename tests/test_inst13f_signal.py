@@ -18,13 +18,25 @@ def _panel(specs, late_last=False):
             if late_last and i == len(QENDS) - 1:
                 filed = pd.Timestamp("2030-01-01")
             filings.append(
-                dict(accession=acc, cik=cik, filer_name=f"F{cik}", period_end=qe,
-                     filed_at=filed, is_amendment=False)
+                {
+                    "accession": acc,
+                    "cik": cik,
+                    "filer_name": f"F{cik}",
+                    "period_end": qe,
+                    "filed_at": filed,
+                    "is_amendment": False,
+                }
             )
             for t, v in fn(i).items():
                 holdings.append(
-                    dict(accession=acc, cusip=f"C_{t}", ticker=t, value_usd=v,
-                         shares=1, put_call=None)
+                    {
+                        "accession": acc,
+                        "cusip": f"C_{t}",
+                        "ticker": t,
+                        "value_usd": v,
+                        "shares": 1,
+                        "put_call": None,
+                    }
                 )
     return pd.DataFrame(filings), pd.DataFrame(holdings)
 
@@ -48,9 +60,15 @@ def test_filing_after_as_of_is_invisible():
 
 
 def test_concentration_and_turnover_filters():
-    flat = lambda i: {f"U{k}": 100.0 for k in range(40)}  # top-10 = 25% -> out
-    churn = lambda i: {f"{'A' if i % 2 else 'B'}{k}": 100.0 for k in range(20)}  # 100% turnover
-    few = lambda i: {f"F{k}": 100.0 for k in range(5)}  # < 10 positions
+    def flat(i):  # top-10 = 25% -> out
+        return {f"U{k}": 100.0 for k in range(40)}
+
+    def churn(i):  # 100% turnover
+        return {f"{'A' if i % 2 else 'B'}{k}": 100.0 for k in range(20)}
+
+    def few(i):  # < 10 positions
+        return {f"F{k}": 100.0 for k in range(5)}
+
     f, h = _panel({1: _conc, 2: flat, 3: churn, 4: few})
     assert eligible_filers(f, h, AS_OF) == {1}
 

@@ -87,7 +87,7 @@ def detect_thousands(rows: list[dict[str, Any]]) -> dict[str, bool | None]:
     # If every judged filing sits in one group the unit is unidentifiable from
     # relative prices alone; leave to the date-rule fallback.
     if not any(out[a] for a in off) or all(out[a] for a in off):
-        return {a: None for a in out}
+        return dict.fromkeys(out)
     return out
 
 

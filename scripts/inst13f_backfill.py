@@ -28,7 +28,9 @@ from tradingbot.utils.inst13f_ingest import ingest_quarter
 PAGE_URL = "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets"
 PROGRESS = Path(os.environ.get("RESEARCH_CACHE", "/tmp")) / "inst13f_backfill_progress.json"
 _LINK = re.compile(r'href="(/files/[^"]*?/form-13f-data-sets/([^"/]+_form13f\.zip))"')
-_MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+_MONTHS = {
+    m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)
+}
 
 
 def _sort_key(name: str) -> tuple[int, int, int]:
@@ -68,7 +70,7 @@ def main() -> None:
         if args.limit is not None and loaded >= args.limit:
             break
         zf = zipfile.ZipFile(io.BytesIO(_get(url, bucket)))
-        read = lambda n: zf.read(n).decode("utf-8", errors="replace")  # noqa: E731
+        read = lambda n: zf.read(n).decode("utf-8", errors="replace")  # noqa: E731, B023  # read() is only called within this iteration
         n_f, n_h = ingest_quarter(read("SUBMISSION.tsv"), read("COVERPAGE.tsv"), read("INFOTABLE.tsv"))
         print(f"{name}: {n_f} filings, {n_h} holdings")
         done.add(name)

@@ -10,7 +10,6 @@ Entries requiring live API / terminal queries are marked as 'to be filled'.
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -61,10 +60,7 @@ def check_retail_coverage_offline(
             etoro_source = "needs live eToro search API lookup"
 
         # 2. MT5 offline evaluation
-        mt5_override = (
-            mapper.overrides.get(ticker, {}).get("mt5_mql5")
-            or mapper.overrides.get(ticker, {}).get("mt5")
-        )
+        mt5_override = mapper.overrides.get(ticker, {}).get("mt5_mql5") or mapper.overrides.get(ticker, {}).get("mt5")
         if mt5_override and mt5_override.get("symbol"):
             mt5_mapped = str(mt5_override["symbol"])
             mt5_tradeable = "yes"
@@ -170,55 +166,57 @@ def generate_coverage_markdown(results: dict[str, Any]) -> str:
             f"{notes_str} |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## Unmapped-Name Behavior & Architectural Decision",
-        "",
-        "### Current Behavior: `LIVETRADE_STRICT_MAPPING=true` (copier.py:101)",
-        "",
-        "Under `tradingbot/livetrade/copier.py`:101:",
-        "```python",
-        "if unmapped_tickers and self.strict_mapping:",
-        "    logger.error(f\"STRICT MODE: Aborting sync due to unmapped tickers: {unmapped_tickers}\")",
-        "    return",
-        "```",
-        "",
-        "- **Mechanism:** If any single stock in `target_weights` cannot be mapped by the broker adapter, "
-        "and `broker.is_tradeable` does not return `False`, the ticker lands in `unmapped_tickers`.",
-        "- **Consequence:** One single unmapped ticker causes the **entire sync to abort**. No sells are executed, "
-        "no buys are submitted, and existing positions are not rebalanced.",
-        "- **Operational Impact for S&P 100:** In an ETF portfolio of 10 symbols, an unmapped symbol is rare and easily "
-        "fixed in `symbol_map.json`. In a 100-stock single-equity universe, retail brokers frequently lack or delay "
-        "coverage for certain stocks (e.g. spinoffs like GEV, newly added high-flyers like PLTR, or corporate actions). "
-        "Aborting the whole sync halts all trading across the retail book indefinitely.",
-        "",
-        "### Decision: Drop Unmapped / Untradeable Names to Cash",
-        "",
-        "Two alternatives were considered:",
-        "1. **Alternative 1: Up-front universe intersection filtering.** Filter `InstitutionalFlowBot` to only hold "
-        "names verified on all 3 retail venues (eToro, MT5, Collective2).",
-        "   - *Drawback:* Forces the core alpha strategy to trade a lowest-common-denominator universe, reduces "
-        "investment opportunity, requires continuous synchronization whenever any retail broker changes listings, "
-        "and diverges from the institutional paper backtest.",
-        "2. **Alternative 2 (RECOMMENDED & ADOPTED): Drop untradeable/unmapped names to cash/SHV.**",
-        "   - *Mechanism:* Modeled after Collective2's `is_tradeable()` and the existing copier untradeable leg drop "
-        "(`copier.py:76-78`). When a venue cannot trade or map a ticker, the ticker's weight is dropped to cash "
-        "(or parked into `cash_proxy` like `SHV`).",
-        "   - *Advantage:* If 1 of 20 names (5% weight) is unlisted on eToro or MT5, the remaining 19 names (95% weight) "
-        "continue trading cleanly. The portfolio suffers a minor 5% cash drag rather than a 100% outage.",
-        "   - *Safety:* Strict mapping should still abort if an unmapped ticker was expected to trade, UNLESS the adapter "
-        "explicitly marks the name as unlisted/untradeable (`is_tradeable=False`).",
-        "",
-        "### Test Verification Summary",
-        "",
-        "Unit tests in `tests/test_retail_coverage.py` pin both behaviors:",
-        "1. `test_strict_copier_aborts_on_unmapped_ticker`: Confirms that an unmapped ticker under strict mode aborts sync.",
-        "2. `test_drop_to_cash_path_trades_remaining_and_leaves_weight_in_cash`: Confirms that marking untradeable names "
-        "via `is_tradeable=False` drops the weight to cash while executing all remaining valid orders.",
-        "3. `test_drop_to_cash_path_parks_in_shv`: Confirms that idle dropped weight is parked into `SHV` when a cash proxy is configured.",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## Unmapped-Name Behavior & Architectural Decision",
+            "",
+            "### Current Behavior: `LIVETRADE_STRICT_MAPPING=true` (copier.py:101)",
+            "",
+            "Under `tradingbot/livetrade/copier.py`:101:",
+            "```python",
+            "if unmapped_tickers and self.strict_mapping:",
+            '    logger.error(f"STRICT MODE: Aborting sync due to unmapped tickers: {unmapped_tickers}")',
+            "    return",
+            "```",
+            "",
+            "- **Mechanism:** If any single stock in `target_weights` cannot be mapped by the broker adapter, "
+            "and `broker.is_tradeable` does not return `False`, the ticker lands in `unmapped_tickers`.",
+            "- **Consequence:** One single unmapped ticker causes the **entire sync to abort**. No sells are executed, "
+            "no buys are submitted, and existing positions are not rebalanced.",
+            "- **Operational Impact for S&P 100:** In an ETF portfolio of 10 symbols, an unmapped symbol is rare and easily "
+            "fixed in `symbol_map.json`. In a 100-stock single-equity universe, retail brokers frequently lack or delay "
+            "coverage for certain stocks (e.g. spinoffs like GEV, newly added high-flyers like PLTR, or corporate actions). "
+            "Aborting the whole sync halts all trading across the retail book indefinitely.",
+            "",
+            "### Decision: Drop Unmapped / Untradeable Names to Cash",
+            "",
+            "Two alternatives were considered:",
+            "1. **Alternative 1: Up-front universe intersection filtering.** Filter `InstitutionalFlowBot` to only hold "
+            "names verified on all 3 retail venues (eToro, MT5, Collective2).",
+            "   - *Drawback:* Forces the core alpha strategy to trade a lowest-common-denominator universe, reduces "
+            "investment opportunity, requires continuous synchronization whenever any retail broker changes listings, "
+            "and diverges from the institutional paper backtest.",
+            "2. **Alternative 2 (RECOMMENDED & ADOPTED): Drop untradeable/unmapped names to cash/SHV.**",
+            "   - *Mechanism:* Modeled after Collective2's `is_tradeable()` and the existing copier untradeable leg drop "
+            "(`copier.py:76-78`). When a venue cannot trade or map a ticker, the ticker's weight is dropped to cash "
+            "(or parked into `cash_proxy` like `SHV`).",
+            "   - *Advantage:* If 1 of 20 names (5% weight) is unlisted on eToro or MT5, the remaining 19 names (95% weight) "
+            "continue trading cleanly. The portfolio suffers a minor 5% cash drag rather than a 100% outage.",
+            "   - *Safety:* Strict mapping should still abort if an unmapped ticker was expected to trade, UNLESS the adapter "
+            "explicitly marks the name as unlisted/untradeable (`is_tradeable=False`).",
+            "",
+            "### Test Verification Summary",
+            "",
+            "Unit tests in `tests/test_retail_coverage.py` pin both behaviors:",
+            "1. `test_strict_copier_aborts_on_unmapped_ticker`: Confirms that an unmapped ticker under strict mode aborts sync.",
+            "2. `test_drop_to_cash_path_trades_remaining_and_leaves_weight_in_cash`: Confirms that marking untradeable names "
+            "via `is_tradeable=False` drops the weight to cash while executing all remaining valid orders.",
+            "3. `test_drop_to_cash_path_parks_in_shv`: Confirms that idle dropped weight is parked into `SHV` when a cash proxy is configured.",
+        ]
+    )
 
     return "\n".join(lines) + "\n"
 

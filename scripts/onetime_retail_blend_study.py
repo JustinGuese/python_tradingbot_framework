@@ -73,9 +73,7 @@ def blend_returns(returns: pd.DataFrame, weights: dict[str, float]) -> pd.Series
     return returns[cols].fillna(0.0).mul(w, axis=1).sum(axis=1)
 
 
-def gated_qqq(
-    close: pd.Series, window: int = SMA_WINDOW, rf_daily: pd.Series | None = None
-) -> pd.DataFrame:
+def gated_qqq(close: pd.Series, window: int = SMA_WINDOW, rf_daily: pd.Series | None = None) -> pd.DataFrame:
     """'QQQ above its SMA, else cash' with no look-ahead.
 
     The signal is formed at close t (close_t > SMA_t, SMA over closes up to and
@@ -93,9 +91,7 @@ def gated_qqq(
     r = close.pct_change().fillna(0.0)
     ret = exposure * r
     rf = (
-        rf_daily.reindex(close.index).ffill().fillna(0.0)
-        if rf_daily is not None
-        else pd.Series(0.0, index=close.index)
+        rf_daily.reindex(close.index).ffill().fillna(0.0) if rf_daily is not None else pd.Series(0.0, index=close.index)
     )
     out = pd.DataFrame({"signal": signal, "exposure": exposure, "ret": ret, "ret_tbill": ret + (1 - exposure) * rf})
     out["switch"] = exposure.diff().abs().fillna(exposure.iloc[0] if len(exposure) else 0.0)
@@ -182,7 +178,7 @@ def run_institutional_flow(scratch: str) -> dict:
     for t in probe.tickers:
         try:
             f = probe.getYFDataWithTA(symbol=t, interval="1d", period="max")
-        except Exception as exc:  # noqa: BLE001 — report and drop, like the inst-flow study
+        except Exception as exc:
             excluded.append(f"{t} (fetch: {exc})")
             continue
         if f.empty or f["timestamp"].min() > cutoff:
