@@ -61,7 +61,10 @@ WINNING_MIN_HOLD: dict[str, int] = {
 DEFAULT_MIN_VOTES: int = 2
 DEFAULT_GROSS_CAP: float = 1.0
 DEFAULT_MIN_ROWS: int = 60
-DEFAULT_USE_DEFENSIVE: bool = True
+DEFAULT_USE_DEFENSIVE: bool = (
+    False  # walk-forward: lowers full-period t (1.87 vs 2.19), see docs/backtests/tv-trend-boost-2026-11.md
+)
+DEFAULT_KINDS: tuple[str, ...] = ("supertrend", "alphatrend")  # study: ST AND AT consensus, t 2.19, OOS 2.18
 DEFAULT_DEFENSIVE_ASSETS: tuple[str, ...] = ("TLT", "IEF", "GLD", "SHV")
 DEFAULT_PER_TICKER_CAP: float = 0.20
 
@@ -187,7 +190,7 @@ class TvTrendDailyBot(Bot):
     BACKTEST_PERIOD: ClassVar[str | None] = "max"
 
     param_grid: ClassVar[dict] = {
-        "min_votes": [2, 3, 4],
+        "min_votes": [1, 2],
         "gross_cap": [0.8, 1.0],
     }
 
@@ -201,6 +204,7 @@ class TvTrendDailyBot(Bot):
         use_defensive: bool = DEFAULT_USE_DEFENSIVE,
         defensive_assets: tuple[str, ...] = DEFAULT_DEFENSIVE_ASSETS,
         per_ticker_cap: float = DEFAULT_PER_TICKER_CAP,
+        kinds: tuple[str, ...] = DEFAULT_KINDS,
         **kwargs,
     ):
         super().__init__(
@@ -221,6 +225,7 @@ class TvTrendDailyBot(Bot):
         self.use_defensive = use_defensive
         self.defensive_assets = defensive_assets
         self.per_ticker_cap = per_ticker_cap
+        self.kinds = kinds
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
         """Return target portfolio weights for the current daily bar."""
@@ -243,6 +248,7 @@ class TvTrendDailyBot(Bot):
             use_defensive=self.use_defensive,
             defensive_assets=self.defensive_assets,
             per_ticker_cap=self.per_ticker_cap,
+            kinds=self.kinds,
         )
 
 

@@ -11,7 +11,7 @@ from tradingbot.utils.tv_signals import UNIVERSE_WIDE
 
 DEFAULT_GROSS_CAP = 1.0
 DEFAULT_MIN_ROWS = 60
-DEFAULT_USE_DEFENSIVE = True
+DEFAULT_USE_DEFENSIVE = False
 DEFAULT_DEFENSIVE_ASSETS: tuple[str, ...] = ("TLT", "IEF", "GLD", "SHV")
 
 
