@@ -20,6 +20,10 @@ HOURLY_BOTS = [
 ]
 DAILY_BOTS = [
     "tvtrenddailybot",
+    "supertrenddailybot",
+    "ultimatemadailybot",
+    "alphatrenddailybot",
+    "slingshotchandelierdailybot",
 ]
 EXPECTED_BOTS = [*HOURLY_BOTS, *DAILY_BOTS]
 
@@ -59,9 +63,9 @@ def test_every_bot_module_imports_and_class_name_equals_helm_entry_lowercased():
         )
 
         bot_cls = bot_classes[0]
-        assert (
-            bot_cls.__name__.lower() == entry["name"].lower()
-        ), f"Class name '{bot_cls.__name__}'.lower() does not match helm entry name '{entry['name']}'"
+        assert bot_cls.__name__.lower() == entry["name"].lower(), (
+            f"Class name '{bot_cls.__name__}'.lower() does not match helm entry name '{entry['name']}'"
+        )
 
 
 def test_none_of_helm_entries_has_suspend_true():
@@ -82,13 +86,13 @@ def test_helm_entries_have_correct_schedule():
     for bot_name in HOURLY_BOTS:
         entry = helm_bots[bot_name]
         schedule = entry.get("schedule")
-        assert (
-            schedule == "5 13-20 * * 1-5"
-        ), f"Hourly bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 13-20 * * 1-5'"
+        assert schedule == "5 13-20 * * 1-5", (
+            f"Hourly bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 13-20 * * 1-5'"
+        )
 
     for bot_name in DAILY_BOTS:
         entry = helm_bots[bot_name]
         schedule = entry.get("schedule")
-        assert (
-            schedule == "5 21 * * 1-5"
-        ), f"Daily bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 21 * * 1-5'"
+        assert schedule == "5 21 * * 1-5", (
+            f"Daily bot '{bot_name}' has unexpected schedule '{schedule}', expected '5 21 * * 1-5'"
+        )

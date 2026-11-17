@@ -688,6 +688,22 @@ bots:
   # Judged on alpha vs QQQ. See docs/backtests/tv-daily-tune-2026-11.md.
   schedule: "5 21 * * 1-5"
 
+- name: supertrenddailybot
+  # Paper only, daily supertrend signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: ultimatemadailybot
+  # Paper only, daily ultimate_ma signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: alphatrenddailybot
+  # Paper only, daily alphatrend signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: slingshotchandelierdailybot
+  # Paper only, daily slingshot_chandelier signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
 - name: fundamentalssnapshot
   # Not a bot: records S&P 100 valuation/ownership fundamentals into
   # stock_fundamentals once a day. yfinance serves no fundamentals history, so

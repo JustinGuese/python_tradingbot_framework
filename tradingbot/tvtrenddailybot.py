@@ -70,6 +70,7 @@ def compute_weights(
     min_votes: int = DEFAULT_MIN_VOTES,
     gross_cap: float = DEFAULT_GROSS_CAP,
     min_rows: int = DEFAULT_MIN_ROWS,
+    kinds: tuple[str, ...] | None = None,
 ) -> dict[str, float]:
     """Pure portfolio target weight calculation for daily TV trend ensemble.
 
@@ -105,12 +106,16 @@ def compute_weights(
     for ticker, raw_df in frames.items():
         if raw_df is None or raw_df.empty:
             continue
-        clean_df = to_ohlcv(raw_df) if not (isinstance(raw_df.index, pd.DatetimeIndex) and "close" in raw_df.columns) else raw_df
+        clean_df = (
+            to_ohlcv(raw_df)
+            if not (isinstance(raw_df.index, pd.DatetimeIndex) and "close" in raw_df.columns)
+            else raw_df
+        )
         if len(clean_df) < min_rows:
             continue
 
         ticker_votes: dict[str, bool] = {}
-        for kind in SUPPORTED_KINDS:
+        for kind in kinds or SUPPORTED_KINDS:
             p = params.get(kind)
             mh = holds.get(kind, 0)
             fl_series = signal_flags(clean_df, kind=kind, params=p)

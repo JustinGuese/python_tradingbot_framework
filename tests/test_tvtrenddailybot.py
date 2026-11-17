@@ -135,6 +135,7 @@ def test_tvtrenddailybot_instantiation(monkeypatch: pytest.MonkeyPatch) -> None:
         self.datas = {}
 
     from tradingbot.utils.botclass import Bot
+
     monkeypatch.setattr(Bot, "__init__", fake_init)
 
     bot = TvTrendDailyBot()
@@ -149,3 +150,11 @@ def test_tvtrenddailybot_instantiation(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Verify targetWeights returns empty dict when datas is empty
     assert bot.targetWeights({}) == {}
+
+
+def test_single_signal_bots_use_only_their_kind(sample_frames):
+    from tradingbot.supertrenddailybot import SupertrendDailyBot
+
+    assert SupertrendDailyBot.KIND == "supertrend"
+    w = compute_weights(sample_frames, min_votes=1, kinds=("supertrend",))
+    assert "USD" not in w and all(0 < x <= 0.2 for x in w.values())
