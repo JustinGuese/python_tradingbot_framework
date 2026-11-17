@@ -345,8 +345,8 @@ bots:
 
 - name: tsmomtrendbot
   # Long-only time-series momentum across 18 sector-proxy ETFs, each leg sized to
-  # constant ex-ante vol. The trend sleeve. Runs after the US close and before the
-  # 21:20 IBKR copier. See docs/backtests/tsmomtrendbot.md.
+  # constant ex-ante vol. The trend sleeve. Runs after the US close (targets execute
+  # the next day at 15:00 UTC on IBKR). See docs/backtests/tsmomtrendbot.md.
   schedule: "5 21 * * 1-5" # Daily 9:05 PM UTC Mon-Fri
 
 - name: taregimemultiassetbot
@@ -357,7 +357,7 @@ bots:
   schedule: "10 21 * * 1-5" # Daily 9:10 PM UTC Mon-Fri
 
 # quants.md top-10 strategies (QuantJourney examples), paper. Daily CronJobs after the US
-# close and before the 21:20 IBKR copier; each bot gates its own rebalance (month/quarter
+# close; each bot gates its own rebalance (month/quarter
 # start, Friday) and holds otherwise. None is wired into any copier. Backtests: no
 # strategy has t >= 2 in both halves, so treat all as unproven.
 # See docs/backtests/quantsmd-2026-11.md.
@@ -660,6 +660,58 @@ bots:
   # docs/backtests/institutionalflowbot.md.
   schedule: "15 21 * * 5" # Fridays 9:15 PM UTC
 
+# TradingView trend bots (Batch 3, 2026-11). Paper only, 1h base bars,
+# judged on alpha vs QQQ. UNPROVEN: see docs/backtests/tv-trend-2026-11.md.
+# Runs on hourly bars during market hours (13:00-20:00 UTC, Mon-Fri).
+- name: supertrendmtfbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Multi-timeframe Supertrend (1h base + 1D HTF filter). Long when both are +1.
+  schedule: "5 13-20 * * 1-5"
+
+- name: ultimatemabot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Ultimate MA trend bot (1h base + 4h HTF filter). Long when both slopes are +1.
+  schedule: "5 13-20 * * 1-5"
+
+- name: alphatrendbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # AlphaTrend indicator bot (1h base). Enter on buy cross, hold until sell cross.
+  schedule: "5 13-20 * * 1-5"
+
+- name: slingshotchandelierbot
+  # Paper only, 1h base bars, judged on alpha vs QQQ.
+  # Slingshot EMA Channel + Chandelier Exit. Enter on pullback, exit on stop / bear.
+  schedule: "5 13-20 * * 1-5"
+
+- name: tvtrenddailybot
+  # Paper only, daily bars across UNIVERSE_WIDE (19 ETFs), ensemble voting.
+  # Judged on alpha vs QQQ. See docs/backtests/tv-daily-tune-2026-11.md.
+  schedule: "5 21 * * 1-5"
+
+- name: supertrenddailybot
+  # Paper only, daily supertrend signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: supertrendexequitybot
+  # Paper only, daily supertrend across 8 non-equity ETFs (beta ~0). Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: alphatrendexequitybot
+  # Paper only, daily alphatrend across 8 non-equity ETFs (beta ~0). Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: ultimatemadailybot
+  # Paper only, daily ultimate_ma signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: alphatrenddailybot
+  # Paper only, daily alphatrend signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
+- name: slingshotchandelierdailybot
+  # Paper only, daily slingshot_chandelier signal across UNIVERSE_WIDE. Judged on alpha vs QQQ.
+  schedule: "5 21 * * 1-5"
+
 - name: fundamentalssnapshot
   # Not a bot: records S&P 100 valuation/ownership fundamentals into
   # stock_fundamentals once a day. yfinance serves no fundamentals history, so
@@ -749,8 +801,8 @@ bots:
 # Shared settings apply to every enabled broker; broker-specific blocks below
 # only carry connection details and per-broker schedules.
 liveTrade:
-  # Shared across all brokers
-  botWeights: '{"SynthesizedHyperConvexityBot": 0.5,"AdaptiveMeanReversionBot": 0.5}' # JSON: bot name -> weight
+  # Shared across all brokers. Defaults to the validated low-beta multi-asset blend (t >= 2).
+  botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}' # JSON: bot name -> weight
   minOrderUsd: "50"
   dryRun: "false" # ALWAYS start with true; flip to false only after validation
   strictMapping: "true" # Abort if any target ticker is unmapped
@@ -788,8 +840,13 @@ liveTrade:
   # of it would have been near-invisible at this cadence. QQQ/TQQQ are plain ETFs and
   # need no symbol_map override (unlike ^XAU, which required ^XAU -> GDX).
   collective2XauZerifine:
+    # NOTE: Orders currently fail with error 1020 ("paid Trade Leader plan required").
+    # Collective2 requires an active paid Trade Leader subscription to accept submitted signals.
+    # Kept ENABLED per user decision; trades will execute once the subscription is active.
     enabled: true
-    schedule: "50 21 * * 1-5" # 9:50 PM UTC (C2 :10, IB :20, eToro :30, Darwinex :40)
+    # Moved from 21:50 to the 15:15 UTC execution slot: the copier now refuses to submit outside
+    # the US session window, and the 21:xx bot runs still produce the targets the night before.
+    schedule: "15 15 * * 1-5" # 3:15 PM UTC
     systemId: "155809898"
     # Switched 2026-09-22 to three low-beta sleeves, inverse-vol weighted, with the
     # weights fit on 2019-01..2023-06 only. Backtest 2019-01..2026-09 (see
@@ -821,7 +878,11 @@ liveTrade:
   # Local testing: kubectl -n interactivebrokersgateway port-forward svc/ib-gateway-service 4002:4002
   interactiveBrokers:
     enabled: true
-    schedule: "20 21 * * 1-5" # 9:20 PM UTC
+    # Mid-session execution slot at 15:00 UTC (trades targets computed the previous night at 21:xx).
+    # Reasoning: 15:00 UTC is >= 30 min after US open in winter (14:30 UTC) and >= 90 min in summer
+    # (13:30 UTC), avoiding open-auction volatility/wide spreads, and >= 30 min before London UCITS close
+    # in summer (15:30 UTC), ensuring UCITS ETF orders on LSE execute cleanly year-round without DST juggling.
+    schedule: "0 15 * * 1-5" # 3:00 PM UTC
     accountId: "DU6347896" # paper account (DU-prefixed => recorded as sandbox)
     # gatewayHost: ib-gateway-service.interactivebrokersgateway
     # gatewayPort: "4002"
@@ -839,7 +900,9 @@ liveTrade:
   # Keep as DEMO account (demo: true); real money is demo: false plus real-account keys.
   etoro:
     enabled: true
-    schedule: "30 21 * * 1-5" # 9:30 PM UTC
+    # Mid-session execution slot at 15:05 UTC (5 min after IB at 15:00 UTC).
+    # Runs within the mid-session window [open+30m, close-15m] for next-day execution of 21:xx targets.
+    schedule: "5 15 * * 1-5" # 3:05 PM UTC
     demo: true
     dryRun: "false"
     botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
@@ -898,11 +961,12 @@ liveTrade:
 
   # MetaTrader 5 / MQL5 signal publisher.
   # Connects via mt5linux RPyC bridge to the internal MT5 bridge service.
-  # MT5 rejects market orders while the market is closed so this runs next session
+  # MT5 rejects market orders while the market is closed (retcode 10018), so this runs next session
   # in US hours in both EST and EDT (it trades the targets the blend computed the night before).
+  # Mid-session execution slot at 15:10 UTC (5 min after eToro at 15:05 UTC, 10 min after IB at 15:00 UTC).
   mt5Mql5:
     enabled: true
-    schedule: "0 15 * * 1-5"
+    schedule: "10 15 * * 1-5" # 3:10 PM UTC
     demo: true
     dryRun: "false"
     botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'

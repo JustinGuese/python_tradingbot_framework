@@ -4,14 +4,103 @@ from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # MT5 return codes
 TRADE_RETCODE_REQUOTE = 10004
-TRADE_RETCODE_CONNECTION = 10006
+TRADE_RETCODE_REJECT = 10006
+TRADE_RETCODE_CANCEL = 10007
+TRADE_RETCODE_PLACED = 10008
 TRADE_RETCODE_DONE = 10009
+TRADE_RETCODE_DONE_PARTIAL = 10010
+TRADE_RETCODE_ERROR = 10011
+TRADE_RETCODE_TIMEOUT = 10012
 TRADE_RETCODE_INVALID = 10013
 TRADE_RETCODE_INVALID_VOLUME = 10014
 TRADE_RETCODE_INVALID_PRICE = 10015
-TRADE_RETCODE_TRADE_DISABLED = 10018
+TRADE_RETCODE_INVALID_STOPS = 10016
+TRADE_RETCODE_TRADE_DISABLED = 10017
 TRADE_RETCODE_MARKET_CLOSED = 10018
-TRADE_RETCODE_NO_MONEY = 10028
+TRADE_RETCODE_NO_MONEY = 10019
+TRADE_RETCODE_PRICE_CHANGED = 10020
+TRADE_RETCODE_PRICE_OFF = 10021
+TRADE_RETCODE_INVALID_EXPIRATION = 10022
+TRADE_RETCODE_ORDER_CHANGED = 10023
+TRADE_RETCODE_TOO_MANY_REQUESTS = 10024
+TRADE_RETCODE_NO_CHANGES = 10025
+TRADE_RETCODE_SERVER_DISABLES_AT = 10026
+TRADE_RETCODE_CLIENT_DISABLES_AT = 10027
+TRADE_RETCODE_LOCKED = 10028
+TRADE_RETCODE_FROZEN = 10029
+TRADE_RETCODE_UNSUPPORTED_FILLING_MODE = 10030
+TRADE_RETCODE_CONNECTION = 10031
+TRADE_RETCODE_ONLY_REAL = 10032
+TRADE_RETCODE_LIMIT_ORDERS = 10033
+TRADE_RETCODE_LIMIT_VOLUME = 10034
+TRADE_RETCODE_POSITION_CLOSED = 10035
+TRADE_RETCODE_INVALID_CLOSE_VOLUME = 10036
+TRADE_RETCODE_CLOSE_ORDER_EXIST = 10038
+TRADE_RETCODE_LIMIT_POSITIONS = 10039
+
+# Order filling modes
+ORDER_FILLING_FOK = 0
+ORDER_FILLING_IOC = 1
+ORDER_FILLING_RETURN = 2
+ORDER_FILLING_BOC = 3
+
+# Symbol filling flags (bitmask)
+SYMBOL_FILLING_FOK = 1
+SYMBOL_FILLING_IOC = 2
+SYMBOL_FILLING_BOC = 4
+
+RETCODE_DESCRIPTIONS: dict[int, str] = {
+    TRADE_RETCODE_REQUOTE: "Requote",
+    TRADE_RETCODE_REJECT: "Request rejected",
+    TRADE_RETCODE_CANCEL: "Request canceled by trader",
+    TRADE_RETCODE_PLACED: "Order placed",
+    TRADE_RETCODE_DONE: "Request completed",
+    TRADE_RETCODE_DONE_PARTIAL: "Only part of request completed",
+    TRADE_RETCODE_ERROR: "Request processing error",
+    TRADE_RETCODE_TIMEOUT: "Request canceled by timeout",
+    TRADE_RETCODE_INVALID: "Invalid request",
+    TRADE_RETCODE_INVALID_VOLUME: "Invalid volume",
+    TRADE_RETCODE_INVALID_PRICE: "Invalid price",
+    TRADE_RETCODE_INVALID_STOPS: "Invalid stops",
+    TRADE_RETCODE_TRADE_DISABLED: "Trade is disabled",
+    TRADE_RETCODE_MARKET_CLOSED: "Market is closed",
+    TRADE_RETCODE_NO_MONEY: "Not enough money",
+    TRADE_RETCODE_PRICE_CHANGED: "Prices changed",
+    TRADE_RETCODE_PRICE_OFF: "Off quotes",
+    TRADE_RETCODE_INVALID_EXPIRATION: "Invalid expiration",
+    TRADE_RETCODE_ORDER_CHANGED: "Order state changed",
+    TRADE_RETCODE_TOO_MANY_REQUESTS: "Too many requests",
+    TRADE_RETCODE_NO_CHANGES: "No changes",
+    TRADE_RETCODE_SERVER_DISABLES_AT: "Autotrading disabled by server",
+    TRADE_RETCODE_CLIENT_DISABLES_AT: "Autotrading disabled by client terminal",
+    TRADE_RETCODE_LOCKED: "Request locked for processing",
+    TRADE_RETCODE_FROZEN: "Order or position frozen",
+    TRADE_RETCODE_UNSUPPORTED_FILLING_MODE: "Invalid order filling type",
+    TRADE_RETCODE_CONNECTION: "No connection with trade server",
+    TRADE_RETCODE_ONLY_REAL: "Operation allowed only for live accounts",
+    TRADE_RETCODE_LIMIT_ORDERS: "Limit orders reached",
+    TRADE_RETCODE_LIMIT_VOLUME: "Limit volume reached",
+    TRADE_RETCODE_POSITION_CLOSED: "Position closed",
+    TRADE_RETCODE_INVALID_CLOSE_VOLUME: "Invalid close volume",
+    TRADE_RETCODE_CLOSE_ORDER_EXIST: "Close order already exists",
+    TRADE_RETCODE_LIMIT_POSITIONS: "Limit positions reached",
+}
+
+
+def describe_retcode(retcode: int | None) -> str:
+    """Return human-readable explanation for an MT5 retcode."""
+    if retcode is None:
+        return "Unknown"
+    return RETCODE_DESCRIPTIONS.get(retcode, f"Unknown MT5 retcode {retcode}")
+
+
+try:
+    from rpyc.core.async_ import AsyncResultTimeout
+except ImportError:
+
+    class AsyncResultTimeout(Exception):  # type: ignore[no-redef]
+        pass
+
 
 # Account margin modes
 ACCOUNT_MARGIN_MODE_RETAIL_NETTING = 0
@@ -199,7 +288,7 @@ class MT5Client(Protocol):
     def last_error(self) -> tuple[int, str]: ...
 
 
-def connect_rpyc(host: str = "localhost", port: int = 18812) -> MT5Client:
+def connect_rpyc(host: str = "localhost", port: int = 18812, timeout: int = 60) -> MT5Client:
     """Connect to an MT5 bridge over RPyC (classic) and return its MetaTrader5 module.
 
     The bridge runs mt5linux's classic RPyC server inside Wine Python, so the
@@ -213,6 +302,7 @@ def connect_rpyc(host: str = "localhost", port: int = 18812) -> MT5Client:
         raise ImportError("rpyc is required to connect to MT5 over RPyC. Please install rpyc.") from exc
 
     conn = rpyc.classic.connect(host, port)
+    conn._config["sync_request_timeout"] = timeout
     return _RemoteMT5(conn)
 
 

@@ -218,3 +218,156 @@ def test_symbol_index_uses_one_bulk_call_and_is_cached():
     assert broker._resolve_symbol("NOPE") is None
     client.symbol_names.assert_called_once()
     client.symbols_get.assert_not_called()
+
+
+def test_timeout_followed_by_position_present_succeeds_idempotent():
+    """Timeout during order_send followed by confirmed position must succeed without resend."""
+    fake = FakeMT5()
+    broker = MT5Broker(fake)
+
+    # 1. RPyC timeout exception with fill: order_send raises "result expired",
+    # but the position is filled on the terminal side.
+    fake.timeout_on_send = True
+    fake.timeout_raises = True
+    fake.fill_on_timeout = True
+
+    broker.place_order("SPY", 1.0, "BUY")
+    assert broker.get_positions() == {"SPY": 1.0}
+
+    # 2. Server-side retcode timeout (10012) with fill: position volume increments.
+    fake.timeout_raises = False
+    broker.place_order("SPY", 1.0, "BUY")
+    assert broker.get_positions() == {"SPY": 2.0}
+
+
+def test_timeout_with_no_position_raises():
+    """Timeout without position update must raise RuntimeError and leave positions empty."""
+    fake = FakeMT5()
+    broker = MT5Broker(fake)
+
+    fake.timeout_on_send = True
+    fake.fill_on_timeout = False
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        broker.place_order("SPY", 1.0, "BUY")
+
+    assert "SPY" not in broker.get_positions()
+
+
+def test_sell_timeout_confirmed_via_position():
+    """SELL order timeout confirmed by ticket closure must succeed."""
+    fake = FakeMT5()
+    fake.add_position("SPY", volume=2.0)
+    broker = MT5Broker(fake)
+    assert broker.get_positions() == {"SPY": 2.0}
+
+    fake.timeout_on_send = True
+    fake.timeout_raises = True
+    fake.fill_on_timeout = True
+
+    broker.place_order("SPY", 1.0, "SELL")
+    assert broker.get_positions() == {"SPY": 1.0}
+
+
+def test_retcode_mapping_and_order_results():
+    """retcodes map to human-readable strings; DONE_PARTIAL and PLACED succeed; rejections describe retcode."""
+    from tradingbot.livetrade.mt5.client import (
+        TRADE_RETCODE_DONE,
+        TRADE_RETCODE_DONE_PARTIAL,
+        TRADE_RETCODE_NO_MONEY,
+        TRADE_RETCODE_PLACED,
+        TRADE_RETCODE_TIMEOUT,
+        OrderSendResult,
+        describe_retcode,
+    )
+
+    assert describe_retcode(TRADE_RETCODE_DONE) == "Request completed"
+    assert describe_retcode(TRADE_RETCODE_DONE_PARTIAL) == "Only part of request completed"
+    assert describe_retcode(TRADE_RETCODE_TIMEOUT) == "Request canceled by timeout"
+    assert describe_retcode(TRADE_RETCODE_NO_MONEY) == "Not enough money"
+
+    fake = FakeMT5()
+    broker = MT5Broker(fake)
+
+    # Partial fill is considered success
+    fake.order_send = lambda req: OrderSendResult(
+        retcode=TRADE_RETCODE_DONE_PARTIAL, volume=1.0, comment="Partial fill"
+    )
+    broker.place_order("SPY", 1.0, "BUY")
+
+    # Order placed (e.g. pending limit) is considered success
+    fake.order_send = lambda req: OrderSendResult(retcode=TRADE_RETCODE_PLACED, volume=1.0, comment="Placed")
+    broker.place_order("SPY", 1.0, "BUY")
+
+    # Rejected order with retcode description in error message
+    fake.order_send = lambda req: OrderSendResult(retcode=TRADE_RETCODE_NO_MONEY, comment="Margin required")
+    with pytest.raises(RuntimeError, match=r"10019 \(Not enough money\)"):
+        broker.place_order("SPY", 1.0, "BUY")
+
+
+def test_supports_limit_orders_and_deviation():
+    """MT5Broker advertises supports_limit_orders and calculates deviation for marketable limits."""
+    fake = FakeMT5()
+    broker = MT5Broker(fake)
+
+    assert broker.supports_limit_orders is True
+
+    # SPY ask is 500.0, limit_price is 500.75 -> point is 0.01 -> 75 points diff
+    broker.place_order("SPY", 1.0, "BUY", limit_price=500.75)
+    last_req = fake.last_order_request
+    assert last_req is not None
+    assert last_req["deviation"] >= 75
+    assert last_req["price"] == pytest.approx(500.0)
+
+
+def test_filling_mode_prefers_ioc():
+    """Filling mode prefers IOC (1) when supported, FOK (0) when only FOK, else RETURN (2)."""
+    from tradingbot.livetrade.mt5.client import (
+        ORDER_FILLING_FOK,
+        ORDER_FILLING_IOC,
+        ORDER_FILLING_RETURN,
+        SymbolInfo,
+    )
+
+    broker = MT5Broker(FakeMT5())
+
+    # IOC and FOK supported (bitmask 3) -> IOC preferred
+    sym_both = SymbolInfo(filling_mode=3)
+    assert broker._determine_filling_mode(sym_both) == ORDER_FILLING_IOC
+
+    # Only IOC supported (bitmask 2) -> IOC
+    sym_ioc = SymbolInfo(filling_mode=2)
+    assert broker._determine_filling_mode(sym_ioc) == ORDER_FILLING_IOC
+
+    # Only FOK supported (bitmask 1) -> FOK
+    sym_fok = SymbolInfo(filling_mode=1)
+    assert broker._determine_filling_mode(sym_fok) == ORDER_FILLING_FOK
+
+    # Neither supported (bitmask 0) -> RETURN
+    sym_none = SymbolInfo(filling_mode=0)
+    assert broker._determine_filling_mode(sym_none) == ORDER_FILLING_RETURN
+
+
+@pytest.mark.parametrize(
+    ("trade_mode", "expected"),
+    [(0, False), (1, True), (2, False), (3, False), (4, True)],
+)
+def test_is_tradeable_honours_server_trade_mode(trade_mode, expected):
+    """A listed symbol the server has disabled (MetaQuotes-Demo: SPY, UUP) is not tradeable.
+
+    Otherwise the copier submits the buy every run and gets retcode 10017.
+    """
+    fake = FakeMT5(symbols={})
+    fake.add_symbol("SPY", trade_mode=trade_mode)
+    broker = MT5Broker(fake)
+
+    assert broker.is_tradeable("SPY") is expected
+
+
+def test_is_tradeable_false_when_symbol_info_unavailable():
+    fake = FakeMT5(symbols={})
+    fake.add_symbol("SPY")
+    broker = MT5Broker(fake)
+    fake.symbol_info = lambda name: None  # type: ignore[method-assign]
+
+    assert broker.is_tradeable("SPY") is False

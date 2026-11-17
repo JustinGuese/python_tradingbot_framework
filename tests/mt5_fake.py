@@ -13,10 +13,14 @@ from tradingbot.livetrade.mt5.client import (
     TRADE_ACTION_PENDING,
     TRADE_ACTION_REMOVE,
     TRADE_RETCODE_DONE,
+    TRADE_RETCODE_DONE_PARTIAL,
     TRADE_RETCODE_INVALID,
     TRADE_RETCODE_INVALID_VOLUME,
     TRADE_RETCODE_MARKET_CLOSED,
+    TRADE_RETCODE_PLACED,
+    TRADE_RETCODE_TIMEOUT,
     AccountInfo,
+    AsyncResultTimeout,
     OrderSendResult,
     SymbolInfo,
     Tick,
@@ -49,6 +53,12 @@ class FakeMT5:
         self.connected = True
         self.profit = 0.0
         self.margin = 0.0
+
+        self.timeout_on_send: bool = False
+        self.timeout_count: int = 0
+        self.timeout_raises: bool = True
+        self.fill_on_timeout: bool = True
+        self.last_order_request: dict[str, Any] | None = None
 
         self._ticket_counter = 1000
         self._last_error = (0, "Success")
@@ -300,6 +310,8 @@ class FakeMT5:
         else:
             req = vars(request)
 
+        self.last_order_request = req
+
         if self.market_closed:
             self._last_error = (TRADE_RETCODE_MARKET_CLOSED, "Market is closed")
             return OrderSendResult(
@@ -307,6 +319,32 @@ class FakeMT5:
                 comment="Market is closed",
                 request=request,
             )
+
+        should_timeout = self.timeout_on_send or self.timeout_count > 0
+        if should_timeout:
+            if self.timeout_count > 0:
+                self.timeout_count -= 1
+            if not self.fill_on_timeout:
+                if self.timeout_raises:
+                    raise AsyncResultTimeout("result expired")
+                self._last_error = (TRADE_RETCODE_TIMEOUT, "Request canceled by timeout")
+                return OrderSendResult(
+                    retcode=TRADE_RETCODE_TIMEOUT,
+                    comment="Request canceled by timeout",
+                    request=request,
+                )
+
+        def _done(result: OrderSendResult) -> OrderSendResult:
+            if should_timeout:
+                if self.timeout_raises:
+                    raise AsyncResultTimeout("result expired")
+                self._last_error = (TRADE_RETCODE_TIMEOUT, "Request canceled by timeout")
+                return OrderSendResult(
+                    retcode=TRADE_RETCODE_TIMEOUT,
+                    comment="Request canceled by timeout",
+                    request=request,
+                )
+            return result
 
         action = req.get("action", TRADE_ACTION_DEAL)
 
@@ -388,13 +426,15 @@ class FakeMT5:
                         del self._positions[pos_id]
                     else:
                         self._positions[pos_id] = existing._replace(volume=rem)
-                    return OrderSendResult(
-                        retcode=TRADE_RETCODE_DONE,
-                        deal=deal_ticket,
-                        order=order_ticket,
-                        volume=volume,
-                        comment="Position closed/reduced",
-                        request=request,
+                    return _done(
+                        OrderSendResult(
+                            retcode=TRADE_RETCODE_DONE,
+                            deal=deal_ticket,
+                            order=order_ticket,
+                            volume=volume,
+                            comment="Position closed/reduced",
+                            request=request,
+                        )
                     )
 
                 if self.margin_mode == ACCOUNT_MARGIN_MODE_RETAIL_NETTING:
@@ -409,13 +449,15 @@ class FakeMT5:
                             type=ORDER_TYPE_SELL,
                             price_open=float(req.get("price", sym_info.bid if sym_info else 0.0)),
                         )
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=ticket,
-                            volume=volume,
-                            comment="Net short position opened",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=ticket,
+                                volume=volume,
+                                comment="Net short position opened",
+                                request=request,
+                            )
                         )
                     if net_pos.type == ORDER_TYPE_BUY:
                         if round(volume, 8) > round(net_pos.volume, 8):
@@ -432,25 +474,29 @@ class FakeMT5:
                             del self._positions[net_pos.ticket]
                         else:
                             self._positions[net_pos.ticket] = net_pos._replace(volume=rem)
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=order_ticket,
-                            volume=volume,
-                            comment="Net long position reduced",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=order_ticket,
+                                volume=volume,
+                                comment="Net long position reduced",
+                                request=request,
+                            )
                         )
                     else:
                         deal_ticket = self._next_ticket()
                         order_ticket = self._next_ticket()
                         self._positions[net_pos.ticket] = net_pos._replace(volume=round(net_pos.volume + volume, 8))
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=order_ticket,
-                            volume=volume,
-                            comment="Net short position increased",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=order_ticket,
+                                volume=volume,
+                                comment="Net short position increased",
+                                request=request,
+                            )
                         )
                 else:
                     ticket = self._next_ticket()
@@ -462,13 +508,15 @@ class FakeMT5:
                         type=ORDER_TYPE_SELL,
                         price_open=float(req.get("price", sym_info.bid if sym_info else 0.0)),
                     )
-                    return OrderSendResult(
-                        retcode=TRADE_RETCODE_DONE,
-                        deal=deal_ticket,
-                        order=ticket,
-                        volume=volume,
-                        comment="Hedge short position opened",
-                        request=request,
+                    return _done(
+                        OrderSendResult(
+                            retcode=TRADE_RETCODE_DONE,
+                            deal=deal_ticket,
+                            order=ticket,
+                            volume=volume,
+                            comment="Hedge short position opened",
+                            request=request,
+                        )
                     )
 
             # Processing BUY
@@ -485,25 +533,29 @@ class FakeMT5:
                             type=ORDER_TYPE_BUY,
                             price_open=float(req.get("price", sym_info.ask if sym_info else 0.0)),
                         )
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=ticket,
-                            volume=volume,
-                            comment="Net long position opened",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=ticket,
+                                volume=volume,
+                                comment="Net long position opened",
+                                request=request,
+                            )
                         )
                     if net_pos.type == ORDER_TYPE_BUY:
                         deal_ticket = self._next_ticket()
                         order_ticket = self._next_ticket()
                         self._positions[net_pos.ticket] = net_pos._replace(volume=round(net_pos.volume + volume, 8))
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=order_ticket,
-                            volume=volume,
-                            comment="Net long position increased",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=order_ticket,
+                                volume=volume,
+                                comment="Net long position increased",
+                                request=request,
+                            )
                         )
                     else:
                         if round(volume, 8) > round(net_pos.volume, 8):
@@ -520,13 +572,15 @@ class FakeMT5:
                             del self._positions[net_pos.ticket]
                         else:
                             self._positions[net_pos.ticket] = net_pos._replace(volume=rem)
-                        return OrderSendResult(
-                            retcode=TRADE_RETCODE_DONE,
-                            deal=deal_ticket,
-                            order=order_ticket,
-                            volume=volume,
-                            comment="Net short position reduced",
-                            request=request,
+                        return _done(
+                            OrderSendResult(
+                                retcode=TRADE_RETCODE_DONE,
+                                deal=deal_ticket,
+                                order=order_ticket,
+                                volume=volume,
+                                comment="Net short position reduced",
+                                request=request,
+                            )
                         )
                 else:
                     ticket = self._next_ticket()
@@ -538,13 +592,15 @@ class FakeMT5:
                         type=ORDER_TYPE_BUY,
                         price_open=float(req.get("price", sym_info.ask if sym_info else 0.0)),
                     )
-                    return OrderSendResult(
-                        retcode=TRADE_RETCODE_DONE,
-                        deal=deal_ticket,
-                        order=ticket,
-                        volume=volume,
-                        comment="Hedge long position opened",
-                        request=request,
+                    return _done(
+                        OrderSendResult(
+                            retcode=TRADE_RETCODE_DONE,
+                            deal=deal_ticket,
+                            order=ticket,
+                            volume=volume,
+                            comment="Hedge long position opened",
+                            request=request,
+                        )
                     )
 
         return OrderSendResult(

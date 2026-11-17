@@ -1,9 +1,10 @@
 """Numerai Signals prediction submitter job.
 
-Generates 12-1 momentum signals for the Numerai Signals tournament universe,
+Generates cross-sectional rank-blended signals (reversal, residual momentum,
+buybacks, insider events) for the Numerai Signals tournament universe,
 formats predictions into the required CSV structure, and uploads them via numerapi.
 
-NOTE: The 12-1 momentum strategy is UNPROVEN and submitted unstaked for Numerai scoring.
+NOTE: This cross-sectional model is UNPROVEN and submitted unstaked for Numerai scoring.
 """
 
 from __future__ import annotations
@@ -285,10 +286,23 @@ def submit_signals(
             if len(yf_tickers) < min_tickers:
                 raise ValueError(f"Refusing to upload under {min_tickers} tickers (DB covers {len(yf_tickers)})")
 
-    # Build signal using N0 pure function
-    from tradingbot.utils.numerai_signal import build_signal
+    # Build cross-sectional rank-blended signal (S3b)
+    from tradingbot.utils.numerai_features import build_rank_blended_signal
 
-    signals = build_signal(prices, universe=yf_tickers, asof=asof, min_valid=min_tickers)
+    # Country mapping from Numerai universe tickers (e.g. 'AAPL US' -> 'US')
+    country_map = {}
+    for yf_t, num_t in mapping.items():
+        parts = num_t.split()
+        if len(parts) == 2:
+            country_map[yf_t] = parts[1].upper()
+
+    signals = build_rank_blended_signal(
+        prices,
+        universe=yf_tickers,
+        asof=asof,
+        min_valid=min_tickers,
+        country_map=country_map,
+    )
 
     # Map yfinance -> Numerai tickers and drop unmapped
     predictions_df = map_signals_to_numerai(signals, mapping)

@@ -11,10 +11,16 @@
       "WebSearch",
       "Bash(sed -i 's/^import argparse$/import argparse\\\\nfrom collections.abc import Sequence/' scripts/onetime_fomc_vol_study.py)",
       "Bash(sed -i 's/def _calc_chunk\\(chunk\\):/def _calc_chunk\\(chunk, bdays=bdays\\):/' scripts/onetime_putwrite_backtest.py)",
-      "Bash(python3 - *)"
+      "Bash(python3 - *)",
+      "Bash(sed -i 's/if r.status_code != 429:/if r.status_code not in \\(429, 500, 502, 503, 504\\):/' scripts/onetime_funding_carry_study.py)",
+      "Bash(export POSTGRES_URI=postgresql://u:p@localhost:5432/db)",
+      "Bash(PYTHONPATH=. timeout 560 .venv/bin/python scripts/onetime_funding_carry_study.py)",
+      "Bash(cd /home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt-inst/A1 && sed -n 1,239p tradingbot/utils/alpha_report.py | grep -n \"def \\\\|return\" | head; sed -n '/def alpha_stats/,/^def [a-z_]*\\(/p' tradingbot/utils/alpha_report.py | head -70)"
     ],
     "additionalDirectories": [
-      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt/sy/tests"
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt/sy/tests",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt-inst/integ/tradingbot/utils",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/info"
     ]
   }
 }

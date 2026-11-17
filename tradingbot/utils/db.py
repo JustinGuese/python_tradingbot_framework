@@ -864,6 +864,48 @@ class BacktestResult(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class BacktestTrial(Base):
+    """
+    Registry of backtest trials / parameter evaluations (Step S1d).
+
+    Appended on every backtest / tune trial when record_trial=True.
+    No threshold changes anywhere; bookkeeping only.
+
+    Attributes:
+        id: Auto-incrementing primary key
+        bot: Bot name
+        params_hash: Deterministic hash of parameters
+        date: Execution timestamp of the trial
+        alpha: Annualised alpha vs benchmark (nullable)
+        alpha_t: t-statistic of alpha (nullable)
+        beta: Benchmark beta (nullable)
+        n: Number of return observations / bars evaluated (nullable)
+        created_at: Creation timestamp
+    """
+
+    __tablename__ = "backtest_trials"
+    __table_args__ = (Index("ix_backtest_trials_bot_date", "bot", "date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bot: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    params_hash: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow_naive)
+    alpha: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alpha_t: Mapped[float | None] = mapped_column(Float, nullable=True)
+    beta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    n: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+    def __init__(self, **kwargs):
+        if "bot_name" in kwargs and "bot" not in kwargs:
+            kwargs["bot"] = kwargs.pop("bot_name")
+        super().__init__(**kwargs)
+
+    @property
+    def bot_name(self) -> str:
+        return self.bot
+
+
 class KronosPrediction(Base):
     """
     Kronos foundation-model OHLCV forecast for a future date.

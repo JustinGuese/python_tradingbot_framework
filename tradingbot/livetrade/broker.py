@@ -17,6 +17,13 @@ class LiveBroker(ABC):
     # T-bill ETF the copier parks idle cash in (see LiveTradeCopier). None on a
     # venue that cannot hold US ETFs; LIVETRADE_CASH_PROXY overrides either way.
     cash_proxy: str | None = "SHV"
+    supports_limit_orders: bool = False
+    always_open: bool = False
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if getattr(cls, "name", None) == "hyperliquid" or cls.__name__ == "HyperliquidBroker":
+            cls.always_open = True
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -216,9 +223,22 @@ class LiveBroker(ABC):
 
     @abstractmethod
     def place_order(
-        self, broker_symbol: str, quantity: float, side: Literal["BUY", "SELL"], symbol_type: str | None = None
+        self,
+        broker_symbol: str,
+        quantity: float,
+        side: Literal["BUY", "SELL"],
+        symbol_type: str | None = None,
+        limit_price: float | None = None,
     ) -> None:
-        """Place a market order."""
+        """Place an order.
+
+        Parameters:
+            broker_symbol: Symbol formatted for the venue.
+            quantity: Order size.
+            side: 'BUY' or 'SELL'.
+            symbol_type: Optional instrument type (e.g. 'stock', 'cfd').
+            limit_price: Optional marketable limit price. Only passed if supports_limit_orders is True.
+        """
 
     @abstractmethod
     def map_symbol(self, yf_symbol: str) -> dict | None:
