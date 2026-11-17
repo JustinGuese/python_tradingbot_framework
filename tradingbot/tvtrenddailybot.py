@@ -61,6 +61,12 @@ WINNING_MIN_HOLD: dict[str, int] = {
 DEFAULT_MIN_VOTES: int = 2
 DEFAULT_GROSS_CAP: float = 1.0
 DEFAULT_MIN_ROWS: int = 60
+DEFAULT_USE_DEFENSIVE: bool = (
+    False  # walk-forward: lowers full-period t (1.87 vs 2.19), see docs/backtests/tv-trend-boost-2026-11.md
+)
+DEFAULT_KINDS: tuple[str, ...] = ("supertrend", "alphatrend")  # study: ST AND AT consensus, t 2.19, OOS 2.18
+DEFAULT_DEFENSIVE_ASSETS: tuple[str, ...] = ("TLT", "IEF", "GLD", "SHV")
+DEFAULT_PER_TICKER_CAP: float = 0.20
 
 
 def compute_weights(
@@ -71,6 +77,9 @@ def compute_weights(
     gross_cap: float = DEFAULT_GROSS_CAP,
     min_rows: int = DEFAULT_MIN_ROWS,
     kinds: tuple[str, ...] | None = None,
+    use_defensive: bool = DEFAULT_USE_DEFENSIVE,
+    defensive_assets: tuple[str, ...] = DEFAULT_DEFENSIVE_ASSETS,
+    per_ticker_cap: float = DEFAULT_PER_TICKER_CAP,
 ) -> dict[str, float]:
     """Pure portfolio target weight calculation for daily TV trend ensemble.
 
@@ -88,6 +97,15 @@ def compute_weights(
         Maximum total gross portfolio exposure.
     min_rows : int, default 60
         Minimum historical rows required for each ticker frame.
+    kinds : tuple[str, ...], optional
+        Signals to evaluate. Defaults to SUPPORTED_KINDS.
+    use_defensive : bool, default True
+        If True, rotates unallocated risk budget into active defensive assets
+        (winning variant: ensemble_stat+defensive from S2 walk-forward study).
+    defensive_assets : tuple[str, ...], default ("TLT", "IEF", "GLD", "SHV")
+        Basket of defensive assets for rotation.
+    per_ticker_cap : float, default 0.20
+        Maximum target weight allowed for any individual ticker.
 
     Returns
     -------
@@ -95,7 +113,7 @@ def compute_weights(
         Target weights dictionary (ticker -> weight). Empty if no qualifying tickers.
         Never includes a "USD" key.
     """
-    if not frames:
+    if not frames or gross_cap <= 0.0 or min_votes < 1:
         return {}
 
     params = WINNING_SIGNAL_PARAMS if signal_params is None else signal_params
@@ -104,7 +122,7 @@ def compute_weights(
     flags_dict: dict[str, dict[str, bool]] = {}
 
     for ticker, raw_df in frames.items():
-        if raw_df is None or raw_df.empty:
+        if ticker == "USD" or raw_df is None or raw_df.empty:
             continue
         clean_df = (
             to_ohlcv(raw_df)
@@ -127,7 +145,39 @@ def compute_weights(
 
         flags_dict[ticker] = ticker_votes
 
-    return vote_weights(flags_dict, min_votes=min_votes, gross_cap=gross_cap)
+    if not flags_dict:
+        return {}
+
+    if not use_defensive:
+        return vote_weights(flags_dict, min_votes=min_votes, gross_cap=gross_cap)
+
+    # Defensive rotation: separate risk assets and defensive assets
+    def_set = set(defensive_assets)
+    risk_flags = {t: v for t, v in flags_dict.items() if t not in def_set}
+    def_flags = {t: v for t, v in flags_dict.items() if t in def_set}
+
+    # Allocate risk assets first
+    risk_weights = vote_weights(risk_flags, min_votes=min_votes, gross_cap=gross_cap)
+    risk_alloc = sum(risk_weights.values())
+    unallocated = max(0.0, gross_cap - risk_alloc)
+
+    if unallocated <= 1e-7 or not def_flags:
+        return risk_weights
+
+    # Identify qualifying defensive assets whose trend is active
+    req_votes = min_votes if kinds is None else min(min_votes, len(kinds))
+    active_defs = [t for t, v in def_flags.items() if sum(1 for is_active in v.values() if is_active) >= req_votes]
+
+    if not active_defs:
+        return risk_weights
+
+    # Allocate unallocated budget among active defensives
+    w_def = min(per_ticker_cap, unallocated / float(len(active_defs)))
+    out = dict(risk_weights)
+    for d in active_defs:
+        out[d] = w_def
+
+    return out
 
 
 class TvTrendDailyBot(Bot):
@@ -140,7 +190,7 @@ class TvTrendDailyBot(Bot):
     BACKTEST_PERIOD: ClassVar[str | None] = "max"
 
     param_grid: ClassVar[dict] = {
-        "min_votes": [2, 3, 4],
+        "min_votes": [1, 2],
         "gross_cap": [0.8, 1.0],
     }
 
@@ -151,6 +201,10 @@ class TvTrendDailyBot(Bot):
         signal_params: dict[str, dict[str, Any]] | None = None,
         min_holds: dict[str, int] | None = None,
         min_rows: int = DEFAULT_MIN_ROWS,
+        use_defensive: bool = DEFAULT_USE_DEFENSIVE,
+        defensive_assets: tuple[str, ...] = DEFAULT_DEFENSIVE_ASSETS,
+        per_ticker_cap: float = DEFAULT_PER_TICKER_CAP,
+        kinds: tuple[str, ...] = DEFAULT_KINDS,
         **kwargs,
     ):
         super().__init__(
@@ -168,6 +222,10 @@ class TvTrendDailyBot(Bot):
         self.signal_params = signal_params or WINNING_SIGNAL_PARAMS
         self.min_holds = min_holds or WINNING_MIN_HOLD
         self.min_rows = min_rows
+        self.use_defensive = use_defensive
+        self.defensive_assets = defensive_assets
+        self.per_ticker_cap = per_ticker_cap
+        self.kinds = kinds
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
         """Return target portfolio weights for the current daily bar."""
@@ -187,6 +245,10 @@ class TvTrendDailyBot(Bot):
             min_votes=self.min_votes,
             gross_cap=self.gross_cap,
             min_rows=self.min_rows,
+            use_defensive=self.use_defensive,
+            defensive_assets=self.defensive_assets,
+            per_ticker_cap=self.per_ticker_cap,
+            kinds=self.kinds,
         )
 
 
