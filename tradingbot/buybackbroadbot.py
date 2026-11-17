@@ -116,10 +116,7 @@ class BuybackBroadBot(Bot):
             deduped = dedupe_recent(events, DEDUPE_DAYS)
         except (ValueError, TypeError, KeyError):
             deduped = events
-        active = [
-            s for s in active_symbols(deduped, day, hold_sessions=self.hold_sessions)
-            if s != PLACEHOLDER
-        ]
+        active = [s for s in active_symbols(deduped, day, hold_sessions=self.hold_sessions) if s != PLACEHOLDER]
 
         if not active:
             logger.info("%s: %s no active buyback events -> 100%% cash", self.bot_name, day)

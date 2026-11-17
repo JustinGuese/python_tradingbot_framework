@@ -50,6 +50,7 @@ def test_monotonicity_invariant_under_momentum():
 
     # Recompute MFI independently to check the property invariant
     from tradingbot.utils.tv_core import mfi
+
     mom = mfi(df, 14)
 
     at = res["alphatrend"]

@@ -88,9 +88,7 @@ def compute_weights(
     """
     kind_clean = str(kind).lower().strip()
     if kind_clean not in SUPPORTED_KINDS:
-        raise ValueError(
-            f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}"
-        )
+        raise ValueError(f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}")
     if length <= 0:
         raise ValueError(f"length must be positive, got {length}")
     if kind_clean == "hma" and length < 2:
@@ -182,9 +180,7 @@ class UltimateMABot(Bot):
     ):
         kind_clean = str(kind).lower().strip()
         if kind_clean not in SUPPORTED_KINDS:
-            raise ValueError(
-                f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}"
-            )
+            raise ValueError(f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}")
         if length <= 0:
             raise ValueError(f"length must be positive, got {length}")
         if kind_clean == "hma" and length < 2:

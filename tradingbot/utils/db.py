@@ -855,9 +855,7 @@ class BacktestTrial(Base):
     """
 
     __tablename__ = "backtest_trials"
-    __table_args__ = (
-        Index("ix_backtest_trials_bot_date", "bot", "date"),
-    )
+    __table_args__ = (Index("ix_backtest_trials_bot_date", "bot", "date"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     bot: Mapped[str] = mapped_column(String, nullable=False, index=True)

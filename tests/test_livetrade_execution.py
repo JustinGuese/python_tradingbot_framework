@@ -166,9 +166,7 @@ def test_copier_does_not_skip_for_always_open_broker():
 def test_copier_passes_limit_price_only_to_capable_brokers():
     """Copier passes limit_price when supports_limit_orders=True, but omits it when False."""
     # 1. Capable broker: receives limit_price
-    copier_capable, broker_capable, policy_capable = _setup_mock_copier(
-        always_open=False, supports_limit_orders=True
-    )
+    copier_capable, broker_capable, policy_capable = _setup_mock_copier(always_open=False, supports_limit_orders=True)
     policy_capable.explain_window.return_value = (True, "in window")
     policy_capable.marketable_limit.return_value = 100.15
 

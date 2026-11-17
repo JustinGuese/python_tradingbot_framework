@@ -198,6 +198,7 @@ def test_backtest_bot_records_trial_once_per_call(memory_db):
 
 def test_db_failure_swallowed_in_record_trial_and_trial_count(monkeypatch):
     """When DB operations fail, record_trial returns None and trial_count returns 0 without raising."""
+
     @contextmanager
     def _failing_session():
         raise RuntimeError("DB connection lost")
@@ -219,6 +220,7 @@ def test_db_failure_swallowed_in_record_trial_and_trial_count(monkeypatch):
 
 def test_backtest_bot_survives_db_failure(monkeypatch):
     """backtest_bot completes normally even if recording trial throws an exception."""
+
     @contextmanager
     def _failing_session():
         raise RuntimeError("DB connection failed during backtest")

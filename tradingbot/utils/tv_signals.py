@@ -91,9 +91,7 @@ def signal_flags(
     """
     kind_clean = str(kind).lower().strip().replace("-", "_")
     if kind_clean not in SUPPORTED_KINDS:
-        raise ValueError(
-            f"Unknown signal kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}"
-        )
+        raise ValueError(f"Unknown signal kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}")
 
     if ohlcv is None or ohlcv.empty:
         return pd.Series(dtype=bool, index=ohlcv.index if ohlcv is not None else None, name=kind_clean)
@@ -110,7 +108,7 @@ def signal_flags(
         period = int(p.get("period", 10))
         mult = float(p.get("mult", 3.0))
         st = supertrend(clean_ohlcv, period=period, mult=mult)
-        flag = (st["direction"] == 1.0)
+        flag = st["direction"] == 1.0
         htf = p.get("htf")
         if htf:
             htf_dir = htf_supertrend_direction(clean_ohlcv, rule=htf, period=period, mult=mult)
@@ -124,7 +122,7 @@ def signal_flags(
         length = int(p.get("length", 20))
         slope_bars = int(p.get("slope_bars", 1))
         uma = ultimate_ma(clean_ohlcv, kind=ma_kind, length=length, slope_bars=slope_bars)
-        flag = (uma["direction"] == 1.0)
+        flag = uma["direction"] == 1.0
         htf = p.get("htf") or p.get("htf_rule")
         if htf:
             uma_htf = ultimate_ma(clean_ohlcv, kind=ma_kind, length=length, slope_bars=slope_bars, htf_rule=htf)

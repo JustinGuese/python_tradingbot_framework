@@ -266,7 +266,9 @@ def main() -> int:
             )
         except Exception as exc:
             print(f"{name}: FAILED: {exc!r}", file=sys.stderr)
-            results.append({"bot": name, "htf": cfg["htf"], "notes": cfg["notes"], "error": str(exc), "passed_bar": False})
+            results.append(
+                {"bot": name, "htf": cfg["htf"], "notes": cfg["notes"], "error": str(exc), "passed_bar": False}
+            )
 
     table = format_table([r for r in results if "error" not in r])
     print("\n" + table + "\n")

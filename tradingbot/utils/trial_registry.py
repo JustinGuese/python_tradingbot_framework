@@ -100,7 +100,9 @@ def record_trial(
             trial_dt = date.replace(tzinfo=None) if date.tzinfo else date
         elif isinstance(date, (datetime,)):
             trial_dt = date
-        elif hasattr(date, "year") and hasattr(date, "month") and hasattr(date, "day") and not isinstance(date, datetime):
+        elif (
+            hasattr(date, "year") and hasattr(date, "month") and hasattr(date, "day") and not isinstance(date, datetime)
+        ):
             trial_dt = datetime.combine(date, datetime.min.time())
         elif isinstance(date, str):
             try:

@@ -62,8 +62,12 @@ def run() -> None:
     print(f"gross funding yield {daily.mean(axis=1).mean() * 365:.2%}/yr, net {book.mean() * 365:.2%}/yr")
     for label, sl in (("H1", r.index < mid), ("H2", r.index >= mid), ("Full", slice(None))):
         s = alpha_stats(r[sl], q.reindex(r.index)[sl])
-        print(label, "not measurable" if s is None else
-              f"alpha {s.alpha:+.2%}/yr t {s.t:.2f} beta {s.beta:.2f} corr {s.corr:.2f} n {s.n}")
+        print(
+            label,
+            "not measurable"
+            if s is None
+            else f"alpha {s.alpha:+.2%}/yr t {s.t:.2f} beta {s.beta:.2f} corr {s.corr:.2f} n {s.n}",
+        )
     eq = (1 + book).cumprod()
     print(f"max DD (funding only, ignores exchange/basis risk) {(eq / eq.cummax() - 1).min():.2%}")
 

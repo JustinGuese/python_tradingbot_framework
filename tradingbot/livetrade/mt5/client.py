@@ -97,8 +97,10 @@ def describe_retcode(retcode: int | None) -> str:
 try:
     from rpyc.core.async_ import AsyncResultTimeout
 except ImportError:
+
     class AsyncResultTimeout(Exception):  # type: ignore[no-redef]
         pass
+
 
 # Account margin modes
 ACCOUNT_MARGIN_MODE_RETAIL_NETTING = 0

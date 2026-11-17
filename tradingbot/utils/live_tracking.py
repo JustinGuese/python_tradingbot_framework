@@ -195,7 +195,7 @@ def build_paper_blend_series(
     # Compute daily returns respecting max gap days
     df_rets = df_levels.pct_change()
     gaps = df_levels.index.to_series().diff().dt.days
-    valid_mask = (gaps <= max_gap_days)
+    valid_mask = gaps <= max_gap_days
     valid_rets = df_rets[valid_mask].replace([np.inf, -np.inf], np.nan)
 
     # Weighted blend return
@@ -223,9 +223,7 @@ def build_paper_blend_series(
         for b in active_bots:
             if b in holdings_by_bot:
                 h_series = holdings_by_bot[b].reindex(df_levels.index)
-                bot_invested = h_series.apply(
-                    lambda h: is_paper_invested(h if isinstance(h, dict) else None)
-                )
+                bot_invested = h_series.apply(lambda h: is_paper_invested(h if isinstance(h, dict) else None))
                 invested_series = invested_series | bot_invested
     else:
         # Fallback to non-zero returns
@@ -370,11 +368,7 @@ def compute_tracking_metrics(
             if broker_flat:
                 flat_days_while_invested += 1
 
-    flat_share = (
-        float(flat_days_while_invested / invested_days)
-        if invested_days > 0
-        else 0.0
-    )
+    flat_share = float(flat_days_while_invested / invested_days) if invested_days > 0 else 0.0
 
     verdict = tracking_verdict(
         n_days=n,
@@ -432,9 +426,7 @@ def load_live_equity_df(
     stmt = stmt.order_by(LiveEquity.date.asc())
     rows = session.execute(stmt).fetchall()
     if not rows:
-        return pd.DataFrame(
-            columns=["date", "account_id", "equity", "cash", "positions", "bot_weights", "is_testnet"]
-        )
+        return pd.DataFrame(columns=["date", "account_id", "equity", "cash", "positions", "bot_weights", "is_testnet"])
 
     data = [
         {
@@ -511,9 +503,7 @@ def track_broker(
     """
     Run live-vs-paper tracking for a broker against PostgreSQL.
     """
-    df_live = load_live_equity_df(
-        session, broker=broker, account_id=account_id, include_testnet=include_testnet
-    )
+    df_live = load_live_equity_df(session, broker=broker, account_id=account_id, include_testnet=include_testnet)
     if df_live.empty:
         logger.warning(f"No live_equity rows found for broker '{broker}'")
         return None

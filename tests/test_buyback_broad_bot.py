@@ -119,7 +119,7 @@ def test_broad_universe_sp400_sp600_symbols(make_bot):
     """Verifies that mid/small-cap symbols from S&P 400 and S&P 600 are correctly handled."""
     events = [
         {"symbol": "MSFT", "entry_session": date(2024, 1, 16)},  # SP100
-        {"symbol": "EXP", "entry_session": date(2024, 1, 16)},   # SP400
+        {"symbol": "EXP", "entry_session": date(2024, 1, 16)},  # SP400
         {"symbol": "CALM", "entry_session": date(2024, 1, 16)},  # SP600
     ]
     bot = make_bot(events=events, max_weight=0.5)

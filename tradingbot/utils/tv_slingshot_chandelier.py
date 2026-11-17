@@ -98,14 +98,16 @@ def slingshot(
             columns=cols,
             index=df_norm.index,
             dtype=float,
-        ).astype({
-            "bull_trend": bool,
-            "bear_trend": bool,
-            "in_zone": bool,
-            "pullback_long": bool,
-            "pullback_short": bool,
-            "overextended": bool,
-        })
+        ).astype(
+            {
+                "bull_trend": bool,
+                "bear_trend": bool,
+                "in_zone": bool,
+                "pullback_long": bool,
+                "pullback_short": bool,
+                "overextended": bool,
+            }
+        )
 
     ema_fast = ema(df_norm["close"], fast)
     ema_slow = ema(df_norm["close"], slow)
@@ -183,10 +185,12 @@ def chandelier_exit(
             columns=cols,
             index=df_norm.index,
             dtype=float,
-        ).astype({
-            "buy": bool,
-            "sell": bool,
-        })
+        ).astype(
+            {
+                "buy": bool,
+                "sell": bool,
+            }
+        )
 
     n = len(df_norm)
     if n < period:

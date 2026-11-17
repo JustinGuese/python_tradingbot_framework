@@ -296,15 +296,11 @@ def test_retcode_mapping_and_order_results():
     broker.place_order("SPY", 1.0, "BUY")
 
     # Order placed (e.g. pending limit) is considered success
-    fake.order_send = lambda req: OrderSendResult(
-        retcode=TRADE_RETCODE_PLACED, volume=1.0, comment="Placed"
-    )
+    fake.order_send = lambda req: OrderSendResult(retcode=TRADE_RETCODE_PLACED, volume=1.0, comment="Placed")
     broker.place_order("SPY", 1.0, "BUY")
 
     # Rejected order with retcode description in error message
-    fake.order_send = lambda req: OrderSendResult(
-        retcode=TRADE_RETCODE_NO_MONEY, comment="Margin required"
-    )
+    fake.order_send = lambda req: OrderSendResult(retcode=TRADE_RETCODE_NO_MONEY, comment="Margin required")
     with pytest.raises(RuntimeError, match=r"10019 \(Not enough money\)"):
         broker.place_order("SPY", 1.0, "BUY")
 
@@ -350,4 +346,3 @@ def test_filling_mode_prefers_ioc():
     # Neither supported (bitmask 0) -> RETURN
     sym_none = SymbolInfo(filling_mode=0)
     assert broker._determine_filling_mode(sym_none) == ORDER_FILLING_RETURN
-

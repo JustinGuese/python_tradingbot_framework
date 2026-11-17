@@ -39,9 +39,7 @@ def _calc_ma(s: pd.Series, kind: str, length: int) -> pd.Series:
     elif kind == "t3":
         return t3(s, length)
     else:
-        raise ValueError(
-            f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}"
-        )
+        raise ValueError(f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}")
 
 
 def ultimate_ma(
@@ -80,9 +78,7 @@ def ultimate_ma(
     """
     kind_clean = str(kind).lower().strip()
     if kind_clean not in SUPPORTED_KINDS:
-        raise ValueError(
-            f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}"
-        )
+        raise ValueError(f"Unknown moving average kind '{kind}'. Expected one of: {', '.join(SUPPORTED_KINDS)}")
 
     if length <= 0:
         raise ValueError(f"length must be positive, got {length}")
@@ -130,9 +126,7 @@ def ultimate_ma(
 
     if htf_rule is not None:
         if not isinstance(close_s.index, pd.DatetimeIndex):
-            raise ValueError(
-                f"htf_rule requires a DatetimeIndex, got {type(close_s.index).__name__}"
-            )
+            raise ValueError(f"htf_rule requires a DatetimeIndex, got {type(close_s.index).__name__}")
 
         htf_close = close_s.resample(htf_rule).last().dropna()
         if htf_close.empty:

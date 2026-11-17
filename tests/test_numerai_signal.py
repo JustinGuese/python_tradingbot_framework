@@ -139,6 +139,7 @@ def test_security_and_edge_cases(synthetic_market):
 
 # --- S3b Cross-Sectional Model Tests (tradingbot.utils.numerai_features) ---
 
+
 def test_neutralisation_zero_mean_per_group():
     """Test S3b: neutralize removes group means so every group has identically zero mean."""
     from tradingbot.utils.numerai_features import neutralize
@@ -275,4 +276,3 @@ def test_no_shorts_non_negative_weights(synthetic_market):
             weights={"residual_momentum": 0.5, "short_term_reversal": -0.2},
             min_valid=100,
         )
-

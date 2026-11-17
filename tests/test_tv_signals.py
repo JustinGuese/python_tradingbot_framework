@@ -47,8 +47,25 @@ def synthetic_ohlcv() -> pd.DataFrame:
 
 def test_universe_wide_members() -> None:
     expected = [
-        "SPY", "QQQ", "IWM", "EFA", "EEM", "XLE", "XLF", "XLK", "XLV", "XLP",
-        "XLU", "GLD", "SLV", "DBC", "USO", "TLT", "IEF", "HYG", "UUP",
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "XLE",
+        "XLF",
+        "XLK",
+        "XLV",
+        "XLP",
+        "XLU",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "TLT",
+        "IEF",
+        "HYG",
+        "UUP",
     ]
     assert UNIVERSE_WIDE == expected
     assert len(UNIVERSE_WIDE) == 19
@@ -124,9 +141,7 @@ def test_vote_weights_per_ticker_cap() -> None:
 
 
 def test_vote_weights_multiple_qualifying() -> None:
-    flags = {
-        f"ETF_{i}": {"s1": True, "s2": True} for i in range(10)
-    }
+    flags = {f"ETF_{i}": {"s1": True, "s2": True} for i in range(10)}
     # 10 qualifying tickers with gross_cap=1.0 -> 0.1 each
     w = vote_weights(flags, min_votes=2, gross_cap=1.0)
     assert len(w) == 10

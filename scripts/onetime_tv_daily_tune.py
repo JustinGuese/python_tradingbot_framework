@@ -53,9 +53,7 @@ DOC_PATH = Path("docs/backtests/tv-daily-tune-2026-11.md")
 # Grids: small, <= ~60 combos each
 GRIDS: dict[str, list[dict[str, Any]]] = {
     "supertrend": [
-        {"period": p, "mult": m}
-        for p in [7, 10, 14, 20]
-        for m in [1.5, 2.0, 2.5, 3.0]
+        {"period": p, "mult": m} for p in [7, 10, 14, 20] for m in [1.5, 2.0, 2.5, 3.0]
     ],  # 16 param combos * 3 min_hold = 48 combos
     "ultimate_ma": [
         {"kind": k, "length": l, "slope_bars": sb}
@@ -64,9 +62,7 @@ GRIDS: dict[str, list[dict[str, Any]]] = {
         for sb in [1, 2]
     ],  # 24 param combos * 2 min_hold = 48 combos
     "alphatrend": [
-        {"period": p, "mult": m}
-        for p in [10, 14, 20, 30]
-        for m in [0.8, 1.0, 1.5, 2.0]
+        {"period": p, "mult": m} for p in [10, 14, 20, 30] for m in [0.8, 1.0, 1.5, 2.0]
     ],  # 16 param combos * 3 min_hold = 48 combos
     "slingshot_chandelier": [
         {"fast": f, "slow": sl, "ch_period": cp, "ch_mult": cm}
@@ -212,14 +208,8 @@ def tune_ensemble(
     judge_bench = qqq_ret.loc[idx_judge.intersection(qqq_ret.index)]
 
     # Signal flag sets: default signals vs tuned signals
-    default_flags = {
-        k: compute_flags_matrix(dfs, master_idx, k, DEFAULT_PARAMS[k])
-        for k in SUPPORTED_KINDS
-    }
-    tuned_flags = {
-        k: signal_results[k]["winner_flags"]
-        for k in SUPPORTED_KINDS
-    }
+    default_flags = {k: compute_flags_matrix(dfs, master_idx, k, DEFAULT_PARAMS[k]) for k in SUPPORTED_KINDS}
+    tuned_flags = {k: signal_results[k]["winner_flags"] for k in SUPPORTED_KINDS}
 
     flag_sets = {
         "tuned_signals": tuned_flags,
@@ -233,7 +223,7 @@ def tune_ensemble(
     for set_label, fl_set in flag_sets.items():
         votes = sum(fl_set[k].astype(int) for k in SUPPORTED_KINDS)
         for mv in [1, 2, 3, 4]:
-            q = (votes >= mv)
+            q = votes >= mv
             for mh in [0, 5, 10]:
                 w = weights_from_flags(q, min_hold=mh)
                 rets = compute_strategy_returns(w, closes)
@@ -386,58 +376,62 @@ def generate_tune_markdown(
     for k in SUPPORTED_KINDS:
         res = signal_results[k]
         p_str = ", ".join(f"{pk}={pv}" for pk, pv in res["winner_params"].items())
-        fit_str = f"{res['fit']['alpha']*100:+.2f}% ({res['fit']['t']:+.2f})"
-        oos_str = f"{res['oos']['alpha']*100:+.2f}% ({res['oos']['t']:+.2f})"
-        def_oos_str = f"{res['default_oos']['alpha']*100:+.2f}% ({res['default_oos']['t']:+.2f})"
+        fit_str = f"{res['fit']['alpha'] * 100:+.2f}% ({res['fit']['t']:+.2f})"
+        oos_str = f"{res['oos']['alpha'] * 100:+.2f}% ({res['oos']['t']:+.2f})"
+        def_oos_str = f"{res['default_oos']['alpha'] * 100:+.2f}% ({res['default_oos']['t']:+.2f})"
         ship_str = "**YES (Ship)**" if res["ship_rule"]["ship_pass"] else "NO (Fail)"
         lines.append(
             f"| `{k}` | `{p_str}` | {res['winner_min_hold']} | {fit_str} | {oos_str} | {def_oos_str} | {res['oos']['beta']:.2f} | {ship_str} |"
         )
 
     # Ensemble table
-    ens_fit_str = f"{ens_result['fit']['alpha']*100:+.2f}% ({ens_result['fit']['t']:+.2f})"
-    ens_oos_str = f"{ens_result['oos']['alpha']*100:+.2f}% ({ens_result['oos']['t']:+.2f})"
-    ens_def_oos_str = f"{ens_result['default_oos']['alpha']*100:+.2f}% ({ens_result['default_oos']['t']:+.2f})"
+    ens_fit_str = f"{ens_result['fit']['alpha'] * 100:+.2f}% ({ens_result['fit']['t']:+.2f})"
+    ens_oos_str = f"{ens_result['oos']['alpha'] * 100:+.2f}% ({ens_result['oos']['t']:+.2f})"
+    ens_def_oos_str = f"{ens_result['default_oos']['alpha'] * 100:+.2f}% ({ens_result['default_oos']['t']:+.2f})"
     ens_ship_str = "**YES (Ship)**" if ens_result["ship_rule"]["ship_pass"] else "NO (Fail)"
 
-    lines.extend([
-        "",
-        "## Ensemble Walk-Forward Results",
-        "",
-        "| Strategy | Signals Source | Min Votes | Min Hold | Fit Alpha (t) | OOS Alpha (t) | Default OOS (t) | OOS Beta | Ship Rule Passed |",
-        "|---|---|---|---|---|---|---|---|---|",
-        f"| `ensemble` | `{ens_result['winner_signal_set']}` | {ens_result['winner_min_votes']} | {ens_result['winner_min_hold']} | {ens_fit_str} | {ens_oos_str} | {ens_def_oos_str} | {ens_result['oos']['beta']:.2f} | {ens_ship_str} |",
-        "",
-        "## Analysis of Ship Rule and Decisions for Step S2",
-        "",
-        "1. **Ultimate Moving Average (`ultimate_ma`): PASSES SHIP RULE**",
-        "   - Default (`hma 20, slope 1`) generated negative alpha on fit (-3.66%/yr, t=-1.39) and modest +1.94% (t=+0.55) OOS.",
-        "   - Tuned parameters (`kind=sma, length=50, slope_bars=1, min_hold=5`) substantially smoothed noise: Fit alpha turned positive (+2.10%/yr, t=+0.85), and OOS alpha rose to **+3.37%/yr (t=+0.98, beta=0.24)**.",
-        "   - OOS t (+0.98) > default OOS (+0.55), t > 0, and beta 0.24 < 0.50.",
-        "",
-        "2. **Slingshot Chandelier (`slingshot_chandelier`): PASSES SHIP RULE**",
-        "   - Default parameters suffered severe drawdown OOS (-2.21%/yr alpha, t=-0.79).",
-        "   - Wider EMA channel (`fast=40, slow=80, ch_period=14, ch_mult=3.0, min_hold=10`) captured long-term macro trends: Fit alpha reached +5.91%/yr (t=+2.54), and OOS turned positive to **+0.71%/yr (t=+0.24, beta=0.22)**.",
-        "   - OOS t (+0.24) > default OOS (-0.79), t > 0, and beta 0.22 < 0.50.",
-        "",
-        "3. **Supertrend & AlphaTrend: DEFAULT PARAMETERS REMAIN OPTIMAL OOS**",
-        "   - For `supertrend`, default parameters (`period=10, mult=3.0`) achieved **+4.75%/yr alpha (t=+1.39)** OOS, outperforming the fit winner (+3.98%/yr, t=+1.12).",
-        "   - For `alphatrend`, default parameters (`period=14, mult=1.0`) achieved **+6.59%/yr alpha (t=+1.82)** OOS, outperforming the fit winner (+6.09%/yr, t=+1.74).",
-        "   - In accordance with the no-overfitting rule, defaults are retained where tuning did not beat default OOS alpha.",
-        "",
-        "4. **Ensemble Verdict and S2 Implementation:**",
-        "   - The ensemble selection on fit period (`mv=4, mh=5` with tuned signals) achieved **Fit t=+2.01 (Alpha +4.11%)** and **OOS t=+1.08 (Alpha +2.80%, beta=0.11)**.",
-        "   - While both `ultimate_ma` and `slingshot_chandelier` individually satisfied the ship rule, the fit-selected 4-vote consensus was slightly too conservative OOS compared to the default 2-vote ensemble (+4.32% alpha, t=+1.30).",
-        "   - For S2, if an ensemble daily bot is deployed, the winning robust parameter set uses the proven tuned filters with majority voting (or per Step S2 instructions, document the exact parameter selection and status).",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Ensemble Walk-Forward Results",
+            "",
+            "| Strategy | Signals Source | Min Votes | Min Hold | Fit Alpha (t) | OOS Alpha (t) | Default OOS (t) | OOS Beta | Ship Rule Passed |",
+            "|---|---|---|---|---|---|---|---|---|",
+            f"| `ensemble` | `{ens_result['winner_signal_set']}` | {ens_result['winner_min_votes']} | {ens_result['winner_min_hold']} | {ens_fit_str} | {ens_oos_str} | {ens_def_oos_str} | {ens_result['oos']['beta']:.2f} | {ens_ship_str} |",
+            "",
+            "## Analysis of Ship Rule and Decisions for Step S2",
+            "",
+            "1. **Ultimate Moving Average (`ultimate_ma`): PASSES SHIP RULE**",
+            "   - Default (`hma 20, slope 1`) generated negative alpha on fit (-3.66%/yr, t=-1.39) and modest +1.94% (t=+0.55) OOS.",
+            "   - Tuned parameters (`kind=sma, length=50, slope_bars=1, min_hold=5`) substantially smoothed noise: Fit alpha turned positive (+2.10%/yr, t=+0.85), and OOS alpha rose to **+3.37%/yr (t=+0.98, beta=0.24)**.",
+            "   - OOS t (+0.98) > default OOS (+0.55), t > 0, and beta 0.24 < 0.50.",
+            "",
+            "2. **Slingshot Chandelier (`slingshot_chandelier`): PASSES SHIP RULE**",
+            "   - Default parameters suffered severe drawdown OOS (-2.21%/yr alpha, t=-0.79).",
+            "   - Wider EMA channel (`fast=40, slow=80, ch_period=14, ch_mult=3.0, min_hold=10`) captured long-term macro trends: Fit alpha reached +5.91%/yr (t=+2.54), and OOS turned positive to **+0.71%/yr (t=+0.24, beta=0.22)**.",
+            "   - OOS t (+0.24) > default OOS (-0.79), t > 0, and beta 0.22 < 0.50.",
+            "",
+            "3. **Supertrend & AlphaTrend: DEFAULT PARAMETERS REMAIN OPTIMAL OOS**",
+            "   - For `supertrend`, default parameters (`period=10, mult=3.0`) achieved **+4.75%/yr alpha (t=+1.39)** OOS, outperforming the fit winner (+3.98%/yr, t=+1.12).",
+            "   - For `alphatrend`, default parameters (`period=14, mult=1.0`) achieved **+6.59%/yr alpha (t=+1.82)** OOS, outperforming the fit winner (+6.09%/yr, t=+1.74).",
+            "   - In accordance with the no-overfitting rule, defaults are retained where tuning did not beat default OOS alpha.",
+            "",
+            "4. **Ensemble Verdict and S2 Implementation:**",
+            "   - The ensemble selection on fit period (`mv=4, mh=5` with tuned signals) achieved **Fit t=+2.01 (Alpha +4.11%)** and **OOS t=+1.08 (Alpha +2.80%, beta=0.11)**.",
+            "   - While both `ultimate_ma` and `slingshot_chandelier` individually satisfied the ship rule, the fit-selected 4-vote consensus was slightly too conservative OOS compared to the default 2-vote ensemble (+4.32% alpha, t=+1.30).",
+            "   - For S2, if an ensemble daily bot is deployed, the winning robust parameter set uses the proven tuned filters with majority voting (or per Step S2 instructions, document the exact parameter selection and status).",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Walk-forward tuning for daily TradingView trend signals.")
-    parser.add_argument("--save-doc", action="store_true", help="Write results to docs/backtests/tv-daily-tune-2026-11.md")
+    parser.add_argument(
+        "--save-doc", action="store_true", help="Write results to docs/backtests/tv-daily-tune-2026-11.md"
+    )
     args = parser.parse_args()
 
     t0 = time.time()
@@ -454,13 +448,9 @@ def main() -> None:
 
     signal_results: dict[str, dict[str, Any]] = {}
     for kind in SUPPORTED_KINDS:
-        signal_results[kind] = tune_signal(
-            kind, dfs, master_idx, closes, qqq_ret, idx_fit, idx_judge
-        )
+        signal_results[kind] = tune_signal(kind, dfs, master_idx, closes, qqq_ret, idx_fit, idx_judge)
 
-    ens_result = tune_ensemble(
-        signal_results, dfs, master_idx, closes, qqq_ret, idx_fit, idx_judge
-    )
+    ens_result = tune_ensemble(signal_results, dfs, master_idx, closes, qqq_ret, idx_fit, idx_judge)
 
     print(f"\nTuning completed in {time.time() - t0:.1f}s")
     print("=" * 90)
@@ -469,9 +459,13 @@ def main() -> None:
     for k in SUPPORTED_KINDS:
         r = signal_results[k]
         p_str = ", ".join(f"{pk}={pv}" for pk, pv in r["winner_params"].items())
-        print(f"{k:22s} | Winner: {p_str} (mh={r['winner_min_hold']}) | Fit t: {r['fit']['t']:+.2f} | OOS t: {r['oos']['t']:+.2f} (def: {r['default_oos']['t']:+.2f}) | Ship: {r['ship_rule']['ship_pass']}")
+        print(
+            f"{k:22s} | Winner: {p_str} (mh={r['winner_min_hold']}) | Fit t: {r['fit']['t']:+.2f} | OOS t: {r['oos']['t']:+.2f} (def: {r['default_oos']['t']:+.2f}) | Ship: {r['ship_rule']['ship_pass']}"
+        )
 
-    print(f"{'ensemble':22s} | Set: {ens_result['winner_signal_set']} (mv={ens_result['winner_min_votes']}, mh={ens_result['winner_min_hold']}) | Fit t: {ens_result['fit']['t']:+.2f} | OOS t: {ens_result['oos']['t']:+.2f} (def: {ens_result['default_oos']['t']:+.2f}) | Ship: {ens_result['ship_rule']['ship_pass']}")
+    print(
+        f"{'ensemble':22s} | Set: {ens_result['winner_signal_set']} (mv={ens_result['winner_min_votes']}, mh={ens_result['winner_min_hold']}) | Fit t: {ens_result['fit']['t']:+.2f} | OOS t: {ens_result['oos']['t']:+.2f} (def: {ens_result['default_oos']['t']:+.2f}) | Ship: {ens_result['ship_rule']['ship_pass']}"
+    )
 
     if args.save_doc or not DOC_PATH.exists():
         md = generate_tune_markdown(signal_results, ens_result, master_idx)

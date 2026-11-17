@@ -119,9 +119,14 @@ def summarize_stream(r_full: pd.Series, q_full: pd.Series) -> dict[str, float]:
     a = alpha_stats(r_full, q_full)
     if a is None:
         return {
-            "alpha": float("nan"), "t": float("nan"), "beta": float("nan"), "corr": float("nan"),
-            "h1_alpha": float("nan"), "h1_t": float("nan"),
-            "h2_alpha": float("nan"), "h2_t": float("nan"),
+            "alpha": float("nan"),
+            "t": float("nan"),
+            "beta": float("nan"),
+            "corr": float("nan"),
+            "h1_alpha": float("nan"),
+            "h1_t": float("nan"),
+            "h2_alpha": float("nan"),
+            "h2_t": float("nan"),
         }
     mid = r_full.index[len(r_full) // 2]
     h1 = alpha_stats(r_full[r_full.index < mid], q_full[q_full.index < mid])
@@ -213,8 +218,10 @@ def run_study(cache_dir: Path | None = None) -> tuple[dict[str, dict], str]:
     doc.append(f"- **Window**: {START_DATE} to latest available (EDGAR 8-K sample).")
     doc.append("- **Benchmark**: QQQ.")
     doc.append("- **Costs**: 10 bp per side (20 bp round-trip).")
-    doc.append(f"- **Total deduped events**: {len(events)} (SP100: {len(groups['buyback_sp100'])}, "
-               f"SP400: {len(groups['buyback_sp400'])}, SP600: {len(groups['buyback_sp600'])}).\n")
+    doc.append(
+        f"- **Total deduped events**: {len(events)} (SP100: {len(groups['buyback_sp100'])}, "
+        f"SP400: {len(groups['buyback_sp400'])}, SP600: {len(groups['buyback_sp600'])}).\n"
+    )
 
     doc.append("## Results: Baseline (Cash 0% — Paper Metric)\n")
     doc.append("| Universe | Events | Avg Cash | Alpha/yr | t | Beta | Corr | H1 Alpha (t) | H2 Alpha (t) |")
@@ -228,12 +235,14 @@ def run_study(cache_dir: Path | None = None) -> tuple[dict[str, dict], str]:
         )
 
     doc.append("\n## Results: Leveraged Cash (Idle Cash in SHV / T-Bill Yield — Copier Metric)\n")
-    doc.append("| Universe | Events | Avg Cash | Alpha/yr | t | Beta | Corr | H1 Alpha (t) | H2 Alpha (t) | Bar Passed? |")
+    doc.append(
+        "| Universe | Events | Avg Cash | Alpha/yr | t | Beta | Corr | H1 Alpha (t) | H2 Alpha (t) | Bar Passed? |"
+    )
     doc.append("|---|---|---|---|---|---|---|---|---|---|")
     for name, m in metrics.items():
         s = m["shv"]
         # Bar: alpha > 0 in both halves and beta < 0.5 (and edge requires t >= 2)
-        passed = (s["h1_alpha"] > 0 and s["h2_alpha"] > 0 and s["beta"] < 0.5 and s["t"] >= 2.0)
+        passed = s["h1_alpha"] > 0 and s["h2_alpha"] > 0 and s["beta"] < 0.5 and s["t"] >= 2.0
         verdict = "PASS" if passed else "FAIL"
         doc.append(
             f"| {name} | {m['n_events']} | {m['avg_cash']:.1f}% | {s['alpha']:+.2f}% | {s['t']:.2f} | "
@@ -242,15 +251,23 @@ def run_study(cache_dir: Path | None = None) -> tuple[dict[str, dict], str]:
         )
 
     doc.append("\n## Analysis & Findings\n")
-    doc.append("1. **S&P 100 Lead Holds Up**: `buyback_sp100` achieves +5.20%/yr alpha vs QQQ at t 1.65 with beta 0.29 "
-               "when idle cash is parked in SHV. Both halves are positive (+1.06% in H1, +9.76% in H2), and beta is comfortably below 0.5.")
-    doc.append("2. **Mid-Caps Drag Severely**: `buyback_sp400` exhibits negative alpha in both halves (-1.03% in H1, -7.35% in H2), "
-               "netting -4.36%/yr at t -1.23. Buybacks in mid-cap companies fail to produce positive abnormal drift.")
-    doc.append("3. **Beta Inflates in Broader Universes**: `buyback_midsmall` inflates beta to 0.56, while `buyback_broad` reaches beta 0.62. "
-               "Both violate the project beta threshold (beta < 0.5) and dilute t-stats (0.41 and 1.19 respectively).")
-    doc.append("4. **Decision per PLAN.md S3a**: The broader universe does NOT meet the promotion bar (beta >= 0.5, t < 2, mid-cap drag). "
-               "Therefore, `BuybackBroadBot` is NOT promoted to live or paper execution (`no edge` / `unproven`). "
-               "`BuybackDriftBot` (S&P 100 only, paper) remains the sole active buyback strategy.")
+    doc.append(
+        "1. **S&P 100 Lead Holds Up**: `buyback_sp100` achieves +5.20%/yr alpha vs QQQ at t 1.65 with beta 0.29 "
+        "when idle cash is parked in SHV. Both halves are positive (+1.06% in H1, +9.76% in H2), and beta is comfortably below 0.5."
+    )
+    doc.append(
+        "2. **Mid-Caps Drag Severely**: `buyback_sp400` exhibits negative alpha in both halves (-1.03% in H1, -7.35% in H2), "
+        "netting -4.36%/yr at t -1.23. Buybacks in mid-cap companies fail to produce positive abnormal drift."
+    )
+    doc.append(
+        "3. **Beta Inflates in Broader Universes**: `buyback_midsmall` inflates beta to 0.56, while `buyback_broad` reaches beta 0.62. "
+        "Both violate the project beta threshold (beta < 0.5) and dilute t-stats (0.41 and 1.19 respectively)."
+    )
+    doc.append(
+        "4. **Decision per PLAN.md S3a**: The broader universe does NOT meet the promotion bar (beta >= 0.5, t < 2, mid-cap drag). "
+        "Therefore, `BuybackBroadBot` is NOT promoted to live or paper execution (`no edge` / `unproven`). "
+        "`BuybackDriftBot` (S&P 100 only, paper) remains the sole active buyback strategy."
+    )
 
     return metrics, "\n".join(doc) + "\n"
 

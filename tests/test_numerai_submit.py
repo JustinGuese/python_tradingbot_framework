@@ -195,16 +195,25 @@ def test_submit_signals_with_multi_country_universe(mock_napi, monkeypatch):
     from tradingbot.numerai_signals_submit import submit_signals
 
     # Universe with US, German (GY), and British (LN) tickers
-    universe = [f"US_{i:03d} US" for i in range(50)] + [f"DE_{i:03d} GY" for i in range(30)] + [f"UK_{i:03d} LN" for i in range(30)]
+    universe = (
+        [f"US_{i:03d} US" for i in range(50)]
+        + [f"DE_{i:03d} GY" for i in range(30)]
+        + [f"UK_{i:03d} LN" for i in range(30)]
+    )
     set_universe(mock_napi, universe)
 
     dates = pd.date_range("2023-01-01", periods=270, freq="B", tz="UTC")
-    all_yf = [f"US_{i:03d}" for i in range(50)] + [f"DE_{i:03d}.DE" for i in range(30)] + [f"UK_{i:03d}.L" for i in range(30)]
+    all_yf = (
+        [f"US_{i:03d}" for i in range(50)]
+        + [f"DE_{i:03d}.DE" for i in range(30)]
+        + [f"UK_{i:03d}.L" for i in range(30)]
+    )
     prices = pd.DataFrame(100.0, index=dates, columns=all_yf)
 
     captured_country_map = None
 
     from tradingbot.utils import numerai_features
+
     orig_build = numerai_features.build_rank_blended_signal
 
     def spy_build(*args, **kwargs):
@@ -226,4 +235,3 @@ def test_submit_signals_with_multi_country_universe(mock_napi, monkeypatch):
     assert captured_country_map["US_001"] == "US"
     assert captured_country_map["DE_001.DE"] == "GY"
     assert captured_country_map["UK_001.L"] == "LN"
-

@@ -126,9 +126,7 @@ def wma(s: pd.Series, n: int) -> pd.Series:
         return pd.Series(dtype=float, index=s.index)
     weights = np.arange(1, n + 1, dtype=float)
     w_sum = weights.sum()
-    return s.astype(float).rolling(window=n, min_periods=n).apply(
-        lambda x: np.dot(x, weights) / w_sum, raw=True
-    )
+    return s.astype(float).rolling(window=n, min_periods=n).apply(lambda x: np.dot(x, weights) / w_sum, raw=True)
 
 
 def hma(s: pd.Series, n: int) -> pd.Series:
@@ -302,13 +300,15 @@ def resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     if not isinstance(df.index, pd.DatetimeIndex) or "close" not in df.columns:
         df = to_ohlcv(df)
 
-    resampled = df.resample(rule).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-    })
+    resampled = df.resample(rule).agg(
+        {
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        }
+    )
     resampled = resampled.dropna(subset=["close"])
     return resampled[["open", "high", "low", "close", "volume"]].astype(float)
 

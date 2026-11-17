@@ -268,10 +268,7 @@ def run_tv_daily_study() -> tuple[dict[str, dict[str, Any]], pd.DatetimeIndex]:
     dfs, master_idx, closes, qqq_ret = load_daily_data()
 
     print("Computing signal flag matrices for all 4 indicators...")
-    flags_by_kind = {
-        kind: compute_flags_matrix(dfs, master_idx, kind=kind)
-        for kind in SUPPORTED_KINDS
-    }
+    flags_by_kind = {kind: compute_flags_matrix(dfs, master_idx, kind=kind) for kind in SUPPORTED_KINDS}
 
     print("Computing TSMOM proxy...")
     tsmom_ret, _ = compute_tsmom_proxy(closes)
@@ -286,7 +283,7 @@ def run_tv_daily_study() -> tuple[dict[str, dict[str, Any]], pd.DatetimeIndex]:
     # 2. Ensemble voting strategies (min_votes 1 to 4)
     votes_matrix = sum(flags_by_kind[k].astype(int) for k in SUPPORTED_KINDS)
     for mv in [1, 2, 3, 4]:
-        qualifying_flags = (votes_matrix >= mv)
+        qualifying_flags = votes_matrix >= mv
         w = weights_from_flags(qualifying_flags)
         strategies_returns[f"ensemble_mv{mv}"] = compute_strategy_returns(w, closes)
 
@@ -345,39 +342,41 @@ def generate_markdown_report(
     ]
 
     for name, m in results.items():
-        h1_str = f"{m['h1_alpha']*100:+.1f}% ({m['h1_t']:+.2f})" if m['h1_alpha'] is not None else "-"
-        h2_str = f"{m['h2_alpha']*100:+.1f}% ({m['h2_t']:+.2f})" if m['h2_alpha'] is not None else "-"
-        fit_str = f"{m['fit_alpha']*100:+.1f}% ({m['fit_t']:+.2f})" if m['fit_alpha'] is not None else "-"
-        judge_str = f"{m['judge_alpha']*100:+.1f}% ({m['judge_t']:+.2f})" if m['judge_alpha'] is not None else "-"
-        ts_corr_str = f"{m['tsmom_corr']:.2f}" if m['tsmom_corr'] is not None else "-"
-        ts_alpha_str = f"{m['tsmom_alpha']*100:+.1f}% ({m['tsmom_t']:+.2f})" if m['tsmom_alpha'] is not None else "-"
+        h1_str = f"{m['h1_alpha'] * 100:+.1f}% ({m['h1_t']:+.2f})" if m["h1_alpha"] is not None else "-"
+        h2_str = f"{m['h2_alpha'] * 100:+.1f}% ({m['h2_t']:+.2f})" if m["h2_alpha"] is not None else "-"
+        fit_str = f"{m['fit_alpha'] * 100:+.1f}% ({m['fit_t']:+.2f})" if m["fit_alpha"] is not None else "-"
+        judge_str = f"{m['judge_alpha'] * 100:+.1f}% ({m['judge_t']:+.2f})" if m["judge_alpha"] is not None else "-"
+        ts_corr_str = f"{m['tsmom_corr']:.2f}" if m["tsmom_corr"] is not None else "-"
+        ts_alpha_str = f"{m['tsmom_alpha'] * 100:+.1f}% ({m['tsmom_t']:+.2f})" if m["tsmom_alpha"] is not None else "-"
 
         lines.append(
-            f"| `{name}` | {m['alpha']*100:+.2f}% | {m['t']:+.2f} | {m['beta']:.2f} | {m['corr_qqq']:.2f} | {m['cagr']*100:+.1f}% | {m['max_dd']*100:.1f}% | {h1_str} | {h2_str} | {fit_str} | {judge_str} | {ts_corr_str} | {ts_alpha_str} | `{m['verdict']}` |"
+            f"| `{name}` | {m['alpha'] * 100:+.2f}% | {m['t']:+.2f} | {m['beta']:.2f} | {m['corr_qqq']:.2f} | {m['cagr'] * 100:+.1f}% | {m['max_dd'] * 100:.1f}% | {h1_str} | {h2_str} | {fit_str} | {judge_str} | {ts_corr_str} | {ts_alpha_str} | `{m['verdict']}` |"
         )
 
-    lines.extend([
-        "",
-        "## Key Findings",
-        "",
-        "1. **Major improvement over hourly bars:**",
-        "   - On 1h bars (tested over 2.9 years), all four bots failed heavily due to turnover costs (alpha between -3.3% and +0.4%, t-stats negative or flat).",
-        "   - On daily bars across 21 years, **Supertrend** (+2.70%/yr alpha, t=+1.33) and **AlphaTrend** (+3.02%/yr alpha, t=+1.45) produce positive alpha with low beta (~0.25) and modest correlation (~0.50).",
-        "   - Both Supertrend and AlphaTrend are positive in both halves (H1 and H2) and in both Fit (2005-2018) and Judge (2019-2026) periods.",
-        "2. **Ultimate MA and Slingshot Chandelier underperform on defaults:**",
-        "   - `ultimate_ma` default (`hma, 20`) is too fast, generating negative alpha (-1.70%/yr, t=-0.81) from whip-saws.",
-        "   - `slingshot_chandelier` default is essentially flat alpha (+0.11%/yr, t=+0.06).",
-        "3. **Ensemble Voting (`ensemble_mv2`):**",
-        "   - Requiring $\\ge 2$ votes (`ensemble_mv2`) filters false positives: +2.02%/yr alpha, t=+1.01, Beta 0.25, Max DD -28.9% (vs QQQ -80% during dot-com/GFC).",
-        "   - In the recent 2019-2026 out-of-sample period, `ensemble_mv2` generates +4.32%/yr alpha (t=+1.30).",
-        "4. **Diversification vs TSMOM Momentum:**",
-        "   - Correlation with standard 12-month TSMOM is moderate (0.57 - 0.64), not redundant.",
-        "   - Supertrend adds +2.47%/yr incremental alpha over TSMOM (t=+1.34), and AlphaTrend adds +2.74%/yr (t=+1.45).",
-        "5. **Honest Project Verdict:**",
-        "   - **`unproven` across all default configurations.** While alpha is positive and resilient across cycles for Supertrend, AlphaTrend, and Ensemble mv2, none of the untuned default parameter combinations reaches the required project bar of $t \\ge 2.0$.",
-        "   - This motivates Step S1b: systematic walk-forward parameter tuning on the 2005-2018 fit period to evaluate whether robust, ship-worthy parameters emerge out-of-sample on 2019-2026.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Key Findings",
+            "",
+            "1. **Major improvement over hourly bars:**",
+            "   - On 1h bars (tested over 2.9 years), all four bots failed heavily due to turnover costs (alpha between -3.3% and +0.4%, t-stats negative or flat).",
+            "   - On daily bars across 21 years, **Supertrend** (+2.70%/yr alpha, t=+1.33) and **AlphaTrend** (+3.02%/yr alpha, t=+1.45) produce positive alpha with low beta (~0.25) and modest correlation (~0.50).",
+            "   - Both Supertrend and AlphaTrend are positive in both halves (H1 and H2) and in both Fit (2005-2018) and Judge (2019-2026) periods.",
+            "2. **Ultimate MA and Slingshot Chandelier underperform on defaults:**",
+            "   - `ultimate_ma` default (`hma, 20`) is too fast, generating negative alpha (-1.70%/yr, t=-0.81) from whip-saws.",
+            "   - `slingshot_chandelier` default is essentially flat alpha (+0.11%/yr, t=+0.06).",
+            "3. **Ensemble Voting (`ensemble_mv2`):**",
+            "   - Requiring $\\ge 2$ votes (`ensemble_mv2`) filters false positives: +2.02%/yr alpha, t=+1.01, Beta 0.25, Max DD -28.9% (vs QQQ -80% during dot-com/GFC).",
+            "   - In the recent 2019-2026 out-of-sample period, `ensemble_mv2` generates +4.32%/yr alpha (t=+1.30).",
+            "4. **Diversification vs TSMOM Momentum:**",
+            "   - Correlation with standard 12-month TSMOM is moderate (0.57 - 0.64), not redundant.",
+            "   - Supertrend adds +2.47%/yr incremental alpha over TSMOM (t=+1.34), and AlphaTrend adds +2.74%/yr (t=+1.45).",
+            "5. **Honest Project Verdict:**",
+            "   - **`unproven` across all default configurations.** While alpha is positive and resilient across cycles for Supertrend, AlphaTrend, and Ensemble mv2, none of the untuned default parameter combinations reaches the required project bar of $t \\ge 2.0$.",
+            "   - This motivates Step S1b: systematic walk-forward parameter tuning on the 2005-2018 fit period to evaluate whether robust, ship-worthy parameters emerge out-of-sample on 2019-2026.",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -393,7 +392,9 @@ def main() -> None:
     print(f"TRADINGVIEW DAILY SIGNALS STUDY: {master_idx[0].date()} to {master_idx[-1].date()}")
     print("=" * 90)
     for name, m in results.items():
-        print(f"{name:22s} | Alpha: {m['alpha']*100:+.2f}% | t: {m['t']:+.2f} | Beta: {m['beta']:.2f} | Corr_QQQ: {m['corr_qqq']:.2f} | MaxDD: {m['max_dd']*100:.1f}% | Verdict: {m['verdict']}")
+        print(
+            f"{name:22s} | Alpha: {m['alpha'] * 100:+.2f}% | t: {m['t']:+.2f} | Beta: {m['beta']:.2f} | Corr_QQQ: {m['corr_qqq']:.2f} | MaxDD: {m['max_dd'] * 100:.1f}% | Verdict: {m['verdict']}"
+        )
 
     if args.save_doc or not DOC_PATH.exists():
         md = generate_markdown_report(results, master_idx)

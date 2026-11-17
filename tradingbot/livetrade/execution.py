@@ -38,9 +38,7 @@ class ExecutionPolicy:
             else float(min_before_close_minutes)
         )
         self.limit_band_pct = (
-            float(os.getenv("LIVETRADE_LIMIT_BAND_PCT", "0.0015"))
-            if limit_band_pct is None
-            else float(limit_band_pct)
+            float(os.getenv("LIVETRADE_LIMIT_BAND_PCT", "0.0015")) if limit_band_pct is None else float(limit_band_pct)
         )
 
     def explain_window(self, now: datetime | None = None) -> tuple[bool, str]:

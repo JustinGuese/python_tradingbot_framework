@@ -444,14 +444,18 @@ class MT5Broker(LiveBroker):
                             timed_out = True
                             timeout_reason = f"({err_code}) {err_msg}"
                         else:
-                            raise RuntimeError(f"MT5 SELL order failed: order_send returned None ({err_code}: {err_msg})")
+                            raise RuntimeError(
+                                f"MT5 SELL order failed: order_send returned None ({err_code}: {err_msg})"
+                            )
                     elif (
                         getattr(res, "retcode", None) == TRADE_RETCODE_TIMEOUT
                         or "expired" in str(getattr(res, "comment", "")).lower()
                         or "timeout" in str(getattr(res, "comment", "")).lower()
                     ):
                         timed_out = True
-                        timeout_reason = f"retcode={getattr(res, 'retcode', None)}, comment='{getattr(res, 'comment', '')}'"
+                        timeout_reason = (
+                            f"retcode={getattr(res, 'retcode', None)}, comment='{getattr(res, 'comment', '')}'"
+                        )
 
                 if timed_out:
                     logger.warning(

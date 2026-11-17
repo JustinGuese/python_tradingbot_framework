@@ -29,11 +29,13 @@ def _make_ohlcv(prices: np.ndarray, start: str = "2026-01-01 09:30:00") -> pd.Da
 
 def test_replay_buy_held_for_later_bars_sell_flat():
     """Test 1: Replay state machine: buy -> held for later bars -> sell -> flat."""
-    prices = np.concatenate([
-        np.linspace(100.0, 80.0, 25),  # downtrend: no buy
-        np.linspace(80.0, 120.0, 20),  # rally: buy triggers around bar 32
-        np.linspace(120.0, 70.0, 15),  # sharp drop: sell triggers around bar 52
-    ])
+    prices = np.concatenate(
+        [
+            np.linspace(100.0, 80.0, 25),  # downtrend: no buy
+            np.linspace(80.0, 120.0, 20),  # rally: buy triggers around bar 32
+            np.linspace(120.0, 70.0, 15),  # sharp drop: sell triggers around bar 52
+        ]
+    )
     df = _make_ohlcv(prices)
 
     # 1. Before buy signal: flat
@@ -59,10 +61,12 @@ def test_replay_buy_held_for_later_bars_sell_flat():
 
 def test_two_runs_on_identical_data_give_identical_weights():
     """Test 2: Two runs on identical data give identical weights (stateless idempotence)."""
-    prices = np.concatenate([
-        np.linspace(100.0, 80.0, 25),
-        np.linspace(80.0, 120.0, 20),
-    ])
+    prices = np.concatenate(
+        [
+            np.linspace(100.0, 80.0, 25),
+            np.linspace(80.0, 120.0, 20),
+        ]
+    )
     frames = {
         "QQQ": _make_ohlcv(prices),
         "SPY": _make_ohlcv(prices * 1.05),
