@@ -11,10 +11,25 @@ import numpy as np
 import pandas as pd
 
 import scripts.onetime_c2_blend_backtest as c2
+from scripts.onetime_tv_daily_study import (
+    compute_flags_matrix,
+    compute_strategy_returns,
+    load_daily_data,
+    weights_from_flags,
+)
 from tradingbot.goldenbutterflymombot import GoldenButterflyMomBot
 from tradingbot.taregimemultiassetbot import TARegimeMultiAssetBot
 from tradingbot.tsmomtrendbot import TSMOMTrendBot
-from tradingbot.tvtrenddailybot import TvTrendDailyBot
+
+
+def vectorised_ensemble() -> pd.Series:
+    """ST AND AT consensus, same math as the study (fast, no bar-by-bar backtest)."""
+    dfs, idx, closes, _ = load_daily_data()
+    st = compute_flags_matrix(dfs, idx, kind="supertrend")
+    at = compute_flags_matrix(dfs, idx, kind="alphatrend")
+    r = compute_strategy_returns(weights_from_flags(st & at), closes)
+    r.index = pd.to_datetime(r.index).tz_localize(None).normalize()
+    return r
 
 
 def main() -> None:
@@ -25,7 +40,7 @@ def main() -> None:
         "TARegime": c2.sleeve_returns(TARegimeMultiAssetBot),
         "GoldenButterfly": c2.sleeve_returns(GoldenButterflyMomBot),
         "TSMOM": c2.sleeve_returns(TSMOMTrendBot),
-        "TvTrend": c2.sleeve_returns(TvTrendDailyBot),
+        "TvTrend": vectorised_ensemble(),
     }
     df = pd.DataFrame(s).dropna()
     print("window", df.index[0].date(), df.index[-1].date(), len(df))

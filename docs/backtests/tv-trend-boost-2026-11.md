@@ -97,3 +97,17 @@ Fit period: **2005-2018** (14 years). Out-of-Sample Judge period: **2019-2026** 
   - `supertrend+multispeed`: Judge t = +1.43, Beta = 0.29
   - `supertrend+SHV_cash`: Judge t = +1.42, Beta = 0.25
 - **NO-SHIP:** 7
+
+## Correlation with the C2 sleeves (2017-06 → 2026-11)
+
+`scripts/onetime_tv_blend_corr.py`. The three C2 sleeves are real `backtest_bot` runs; the ST AND AT
+ensemble is the vectorised study series (5 bps cost). Weights are inverse-vol, fit on H1.
+
+| | TARegime | GoldenButterfly | TSMOM |
+|---|---|---|---|
+| ST AND AT ensemble corr | 0.62 | 0.46 | 0.56 |
+
+Correlation with the 3-sleeve blend: 0.64. Alpha vs QQQ (full / H1 / H2):
+ensemble +6.1% (t 2.03; 1.71 / 1.20, beta 0.19); blend3 +2.0% (t 1.33); blend3 + ensemble (weight 0.17)
++2.7% (t 1.70). Blend3's t here is below the 2.02 in c2-blend-2026-09.md because this run uses a different
+window and cost model, so only the comparison between rows is meaningful.
