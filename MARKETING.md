@@ -17,6 +17,12 @@ Ranking by potential
 
 3. EarningsInsiderTiltBot — the best candidate for iteration. 1,179 trades, 0% flat days (real continuous exposure), Sortino 1.66, max DD −4.84%, Calmar 3.90, highest daily win rate in the fleet (45.9%). Alpha is −1.0% vs SPY with t = −0.07, i.e. indistinguishable from beta — not losing, just not winning. Its value is breadth: with that many trades, alpha estimates converge fastest and small per-trade improvements compound. If you want something to actively work on, this one gives you the most signal per week of effort.
 
+Retail / Copier candidate: InstitutionalFlowBot — honest retail framing:
+- **Strategy classification:** Describe it as "large-cap momentum with a trend filter" (top 20 of S&P 100, weekly rebalance).
+- **Data inputs:** Plainly state that it uses price and volume only — no 13F, dark-pool, ETF-flow, or options-flow data. The bot name, DB name, and schedule stay as `InstitutionalFlowBot` so historical tracking and database records are not orphaned.
+- **Live copier note:** Gate-off periods are 100% cash (SHV) and look idle on copy platforms (eToro, MT5, Collective2). When QQQ is below its 200-day MA, the bot sits completely in cash, which can make it appear frozen to retail subscribers unless communicated in advance.
+- **Statistical bar:** Low beta (~0.4) and positive alpha vs QQQ in both halves (+9.3% in H2), but out-of-sample t = 1.52, so it remains strictly unproven (does not clear t ≥ 2).
+
 Watch but don't scale: TARegimeAdaptiveBot. It has the highest positive t-stat in the fleet (1.70, +15.2% vs QQQ) — closest thing to significance you have. But that's 4 trades. Four bets. It's either real regime timing or luck, and nothing in the data can separate those yet.
 
 Kill list. EURUSDTreeBot is now clearly dead — it has negative alpha against EURUSD itself (t = −1.26), so it's not an FX edge, it's just losing. Same for SynthesizedHyperConvexityBot (−26%), GptBasedStrategyBTCTabased (−28%, frozen since April), DeepSeekToolBot (−14%), SqueezeMomentumBot. Also note XAUSyntheticMetalTreeBot is not a second XAUZenbot — its gold alpha is only +5.8% (t 0.24) and it's negative vs SPY.

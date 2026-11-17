@@ -866,7 +866,12 @@ liveTrade:
     # TARegimeMultiAssetBot starts in cash and funds a sleeve only on a buy signal,
     # so its share sits in SHV until signals fire. Legs C2 cannot trade are dropped
     # to cash by Collective2Broker.is_tradeable, not redistributed.
-    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+    # RETAIL BOOK (2026-11-14): InstitutionalFlowBot alone, weekly top-20 S&P 100 momentum with a QQQ>SMA200 gate.
+    # docs/backtests/retail-blend-2026-11.md: H2 (2023-2026) CAGR +21.8%, max DD -11.9%, beta 0.44, alpha vs QQQ +9.0% (t 1.48),
+    # so UNPROVEN, and it lags QQQ (+28.2%) in a rally. IBKR keeps the low-beta blend. First sync after this change
+    # liquidates the old blend legs (target-state sync). Unmapped/untradeable names drop to cash, see
+    # docs/backtests/retail-venue-coverage-2026-11.md.
+    botWeights: '{"InstitutionalFlowBot": 1.0}'
     # LIVE, and now genuinely reconciling. sync() is a full target-state sync, so the
     # first run with a non-empty target WILL liquidate whatever strategy 155809898 still
     # holds from the old handover and rebuild to QQQ/TQQQ. That did not happen while the
@@ -912,7 +917,12 @@ liveTrade:
     schedule: "5 15 * * 1-5" # 3:05 PM UTC
     demo: false
     dryRun: "false"
-    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+    # RETAIL BOOK (2026-11-14): InstitutionalFlowBot alone, weekly top-20 S&P 100 momentum with a QQQ>SMA200 gate.
+    # docs/backtests/retail-blend-2026-11.md: H2 (2023-2026) CAGR +21.8%, max DD -11.9%, beta 0.44, alpha vs QQQ +9.0% (t 1.48),
+    # so UNPROVEN, and it lags QQQ (+28.2%) in a rally. IBKR keeps the low-beta blend. First sync after this change
+    # liquidates the old blend legs (target-state sync). Unmapped/untradeable names drop to cash, see
+    # docs/backtests/retail-venue-coverage-2026-11.md.
+    botWeights: '{"InstitutionalFlowBot": 1.0}'
     # portfolioFraction: "0.5"  # optional: override the shared liveTrade.portfolioFraction for this broker
 
   # Darwinex — requires DARWINEX_USERNAME and DARWINEX_PASSWORD in tradingbot-secrets.
@@ -976,7 +986,12 @@ liveTrade:
     schedule: "10 15 * * 1-5" # 3:10 PM UTC
     demo: true
     dryRun: "false"
-    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+    # RETAIL BOOK (2026-11-14): InstitutionalFlowBot alone, weekly top-20 S&P 100 momentum with a QQQ>SMA200 gate.
+    # docs/backtests/retail-blend-2026-11.md: H2 (2023-2026) CAGR +21.8%, max DD -11.9%, beta 0.44, alpha vs QQQ +9.0% (t 1.48),
+    # so UNPROVEN, and it lags QQQ (+28.2%) in a rally. IBKR keeps the low-beta blend. First sync after this change
+    # liquidates the old blend legs (target-state sync). Unmapped/untradeable names drop to cash, see
+    # docs/backtests/retail-venue-coverage-2026-11.md.
+    botWeights: '{"InstitutionalFlowBot": 1.0}'
 
 # telegram monitor
 telegramMonitor:

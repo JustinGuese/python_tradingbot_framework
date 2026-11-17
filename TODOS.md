@@ -93,3 +93,13 @@ Establish a live, real-money Interactive Brokers account as the primary master t
 - **User Decision:** Collective2 stays **ENABLED** (`collective2XauZerifine`).
 - **Resolution for Error 1020:** Log into Collective2 account settings and upgrade strategy `155809898` to an active paid **Trade Leader** plan.
 - The copier is active and running at 21:50 UTC; once the Trade Leader plan is active, target orders will be accepted without API rejection.
+
+---
+
+## 8. Retail book: real-money accounts and live checks
+
+Retail venues (eToro, MT5/MQL5, Collective2) copy `InstitutionalFlowBot` alone since 2026-11-14 (docs/backtests/retail-blend-2026-11.md; unproven, lags QQQ in rallies).
+
+1. Open real-money eToro and MT5 broker accounts, otherwise no real track record is built (both are demo today).
+2. Fill the live rows of docs/backtests/retail-venue-coverage-2026-11.md (eToro search, MT5 symbol scan). Check that eToro `is_tradeable` returns False for unlisted names instead of raising.
+3. After 60 and 120 live days, check `alphareport` for InstitutionalFlowBot and the live-vs-paper tracking script.
