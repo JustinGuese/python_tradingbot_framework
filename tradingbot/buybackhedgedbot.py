@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 import pandas as pd
 
-from tradingbot.buybackdriftbot import BuybackDriftBot, read_buyback_events
+from tradingbot.buybackdriftbot import BuybackDriftBot
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.runner import run_bot
 from tradingbot.utils.universes import SP100

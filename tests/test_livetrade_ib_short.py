@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from ib_async import LimitOrder
+
 from tradingbot.livetrade.interactive_brokers import InteractiveBrokersBroker
 
 STK_META = {"symbol": "AAPL", "type": "stock", "sec_type": "STK", "exchange": "SMART", "currency": "USD"}

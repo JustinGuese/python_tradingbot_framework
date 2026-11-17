@@ -473,12 +473,9 @@ class InteractiveBrokersBroker(LiveBroker):
             final_qty = float(int(final_qty))
 
         # Check shortable tick rule via reqMktData for SHORT orders.
-        if side == "SHORT":
-            if not self._is_shortable(contract):
-                logger.warning(
-                    f"Skipping SHORT for {broker_symbol}: contract is not shortable (tick 46 missing or <= 2.5)"
-                )
-                return None
+        if side == "SHORT" and not self._is_shortable(contract):
+            logger.warning(f"Skipping SHORT for {broker_symbol}: contract is not shortable (tick 46 missing or <= 2.5)")
+            return None
 
         # Map to IB order action: SHORT -> SELL, COVER -> BUY.
         ib_side: Literal["BUY", "SELL"] = "SELL" if side in ("SELL", "SHORT") else "BUY"
