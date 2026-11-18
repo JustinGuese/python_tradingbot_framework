@@ -190,3 +190,39 @@ def test_compute_target_weights_mock_signals(make_bot):
     # Total gross
     total_gross = sum(abs(v) for v in weights.values())
     assert total_gross <= 1.8 + 1e-6
+
+
+# =========================================================================== #
+# Review fixes: missing signals must never liquidate the book into SHV
+# =========================================================================== #
+
+
+def test_unreadable_signal_db_raises_instead_of_parking_everything_in_shv(monkeypatch):
+    import pytest
+
+    from tradingbot import optionimpliedlongshortbot as mod
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(mod, "load_signals_from_db", _boom)
+    bot = mod.OptionImpliedLongShortBot.__new__(mod.OptionImpliedLongShortBot)
+    bot.rules = mod.OptionImpliedLongShortBot.RULES
+    bot.park_cash = True
+    bot.tradeable_universe = ["AAPL", "MSFT"]
+    with pytest.raises(RuntimeError):
+        bot.compute_target_weights()
+
+
+def test_empty_signals_hold_book_and_do_not_park_cash(monkeypatch):
+    import pandas as pd
+
+    from tradingbot import optionimpliedlongshortbot as mod
+
+    monkeypatch.setattr(mod, "load_signals_from_db", lambda *a, **k: pd.DataFrame())
+    bot = mod.OptionImpliedLongShortBot.__new__(mod.OptionImpliedLongShortBot)
+    bot.rules = mod.OptionImpliedLongShortBot.RULES
+    bot.park_cash = True
+    bot.tradeable_universe = ["AAPL", "MSFT"]
+    # No signals: no target at all (so makeOneIteration trades nothing), and in particular no 100% SHV book.
+    assert bot.compute_target_weights() == {}

@@ -138,7 +138,7 @@ def _compute_hedge_weights(
     n = len(valid_active)
     w = min(1.0 / n, CAP)
     total_long_w = n * w
-    weights: dict[str, float] = {s: w for s in valid_active}
+    weights: dict[str, float] = dict.fromkeys(valid_active, w)
 
     if variant == "qqq_hedge":
         weights["QQQ"] = -total_long_w
@@ -197,15 +197,9 @@ def run_simulation(
         else:
             # Return earned on bar d comes from weights decided at bar d-1 (prev_weights)
             long_ret = sum(
-                w * stock_rets.at[d, s]
-                for s, w in prev_weights.items()
-                if w > 0 and s in stock_rets.columns
+                w * stock_rets.at[d, s] for s, w in prev_weights.items() if w > 0 and s in stock_rets.columns
             )
-            short_ret = sum(
-                w * etf_rets.at[d, s]
-                for s, w in prev_weights.items()
-                if w < 0 and s in etf_rets.columns
-            )
+            short_ret = sum(w * etf_rets.at[d, s] for s, w in prev_weights.items() if w < 0 and s in etf_rets.columns)
 
             prev_long_w = sum(w for w in prev_weights.values() if w > 0)
             prev_gross_short = sum(abs(w) for w in prev_weights.values() if w < 0)

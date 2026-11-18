@@ -1,12 +1,12 @@
 """Tests for cash-adjusted alpha statistics (tradingbot/utils/alpha_report.py)."""
 
-from datetime import date, timedelta
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from tradingbot.utils.alpha_report import (
-    ReportRow,
     alpha_stats,
     build_report,
     cash_adjusted_stats,

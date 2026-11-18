@@ -8,7 +8,7 @@ Step B1 of PLAN-alphaideas.md:
   4. A price sleeve's book is identical on two different days inside the same quarter.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import numpy as np
 import pandas as pd
@@ -78,7 +78,7 @@ def test_composed_weights_sum_leq_one():
     closes = _build_test_frame("2024-02-14")
     # Provide sample active events
     buyback_events = [
-        {"symbol": "AAPL", "acceptance_datetime": "2024-02-10T12:00:00Z"},
+        {"symbol": "AAPL", "filed_at": datetime(2024, 2, 9, 21, 0, tzinfo=UTC)},
     ]
     sc13d_events = [
         {"symbol": "MSFT", "filed_at": "2024-02-05T12:00:00Z", "group_type": "fund"},
@@ -95,6 +95,8 @@ def test_composed_weights_sum_leq_one():
     assert len(weights) > 0
     assert all(w >= 0 for w in weights.values())
     assert sum(weights.values()) <= 1.0 + 1e-9
+    # The event sleeve must actually have produced a position (a swallowed error once hid this).
+    assert "AAPL" in weights
 
 
 # =========================================================================== #

@@ -28,7 +28,7 @@ import pandas as pd
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.cash_park import park_idle_cash
 from tradingbot.utils.cs_neutral_book import build_cs_neutral_book
-from tradingbot.utils.live_state import current_weights
+from tradingbot.utils.live_state import live_holdings
 from tradingbot.utils.quantsmd_common import closes_frame, period_rolled
 from tradingbot.utils.runner import run_bot
 from tradingbot.utils.universes import SP500, SP500_SECTOR
@@ -90,12 +90,8 @@ class NeutralStockBot(Bot):
         if closes.empty:
             return {}
 
-        try:
-            holdings = current_weights(self)
-        except Exception:
-            holdings = None
-
-        is_flat = not bool(holdings)
+        holdings = live_holdings(self, rows)
+        is_flat = holdings is not None and not holdings
         month_rolled = period_rolled(closes.index, "M")
 
         # Monthly rebalance gate: only rebalance on month roll or when flat
@@ -119,7 +115,9 @@ class NeutralStockBot(Bot):
             return {}
 
         if self.park_cash:
-            weights = park_idle_cash(weights, proxy=self.CASH_PROXY, max_gross=self.MAX_GROSS)
+            weights = park_idle_cash(
+                weights, proxy=self.CASH_PROXY, max_gross=self.MAX_GROSS - 0.1
+            )  # keep Reg T headroom
 
         logger.info(
             "%s: rebalanced %d positions (gross %.2f) -> %s",

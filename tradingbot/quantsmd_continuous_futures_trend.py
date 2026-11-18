@@ -24,7 +24,7 @@ from typing import ClassVar
 import pandas as pd
 
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.live_state import current_weights
+from tradingbot.utils.live_state import live_holdings
 from tradingbot.utils.quantsmd_common import closes_frame, period_rolled
 from tradingbot.utils.runner import run_bot
 
@@ -131,11 +131,8 @@ class QuantsmdContinuousFuturesTrendBot(Bot):
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         """Monthly long-only trend weights; builds on any bar when flat with uptrends."""
         closes = closes_frame(self.datas, self.tradeable_tickers)
-        try:
-            holdings = current_weights(self)
-        except Exception:
-            holdings = None
-        is_flat = not bool(holdings)
+        holdings = live_holdings(self, rows)
+        is_flat = holdings is not None and not holdings
         return compute_weights(closes, self.fast, self.slow, self.vol_window, is_flat=is_flat)
 
 

@@ -28,7 +28,7 @@ from typing import Any, ClassVar
 import pandas as pd
 
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.live_state import current_weights
+from tradingbot.utils.live_state import live_holdings
 from tradingbot.utils.quantsmd_common import ETF8, closes_frame, equal_weight, period_rolled
 from tradingbot.utils.runner import run_bot
 
@@ -172,10 +172,7 @@ class QuantsmdQuarterlyTeCostGateBot(Bot):
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         """Return the book on a rebalance bar, or ``None`` to leave it untouched."""
         closes = closes_frame(self.datas, self.tradeable_tickers)
-        try:
-            holdings = current_weights(self)
-        except Exception:
-            holdings = None
+        holdings = live_holdings(self, rows)
         return compute_weights(
             closes,
             self.lookback,

@@ -72,7 +72,6 @@ def test_sleeveblend_parity_no_lookahead_jump():
 def test_blend_volscale_alignment():
     """simulate_scaled_blend must apply weights to t+1, with first bar earning 0."""
     dates = list(pd.date_range("2010-02-01", periods=5, freq="B"))
-    tickers = ["AAPL", "MSFT", "SHV"]
 
     # Price matrix where AAPL jumps 100% on day 0, then flat
     # Day 0: 200 (jump from 100), Day 1: 200 (0%), Day 2: 200 (0%), etc.

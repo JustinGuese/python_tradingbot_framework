@@ -324,24 +324,26 @@ def generate_markdown(
     doc = []
     if dry_run:
         doc.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
-    doc.extend([
-        "# InstitutionalFlow on the S&P 500 — Walk-Forward Backtest (2026-11)\n",
-        "Evaluates whether the large-cap momentum + trend filter edge discovered on the S&P 100 ",
-        "generalizes to the broader S&P 500 when using point-in-time constituent membership (`sp500_members(as_of)`).\n",
-        "## Method and Global Rules\n",
-        "- **Universe**: S&P 500 point-in-time constituents reconstructed from `data/sp500_changes.csv` via `sp500_members(as_of)`. ",
-        "Baseline comparison uses `SP100` (99 traded names).",
-        "- **Windows**: Walk-forward split H1 = 2019–2022 (grid), H2 = 2023 → 2026-11 (unseen judgment). Features warm from 2017.",
-        "- **Baselines**: QQQ and an equal-weight buy-and-hold of the active universe.",
-        "- **Cash**: Idle weight parked at 0% (paper metric) and T-bill yield (^IRX / 252, SHV copier metric).",
-        "- **Costs**: 5 bp per side (standard institutional) and 20 bp per side (conservative retail).\n",
-        "## S&P 500 Point-in-Time Universe Coverage\n",
-        "Historical members lacking yfinance price data are dropped and counted per year. ",
-        "Because delisted/acquired components often lack free API history, the backtest retains a residual survivorship tilt ",
-        "for the missing fraction:\n",
-        "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
-        "|---|---|---|---|---|",
-    ])
+    doc.extend(
+        [
+            "# InstitutionalFlow on the S&P 500 — Walk-Forward Backtest (2026-11)\n",
+            "Evaluates whether the large-cap momentum + trend filter edge discovered on the S&P 100 ",
+            "generalizes to the broader S&P 500 when using point-in-time constituent membership (`sp500_members(as_of)`).\n",
+            "## Method and Global Rules\n",
+            "- **Universe**: S&P 500 point-in-time constituents reconstructed from `data/sp500_changes.csv` via `sp500_members(as_of)`. ",
+            "Baseline comparison uses `SP100` (99 traded names).",
+            "- **Windows**: Walk-forward split H1 = 2019–2022 (grid), H2 = 2023 → 2026-11 (unseen judgment). Features warm from 2017.",
+            "- **Baselines**: QQQ and an equal-weight buy-and-hold of the active universe.",
+            "- **Cash**: Idle weight parked at 0% (paper metric) and T-bill yield (^IRX / 252, SHV copier metric).",
+            "- **Costs**: 5 bp per side (standard institutional) and 20 bp per side (conservative retail).\n",
+            "## S&P 500 Point-in-Time Universe Coverage\n",
+            "Historical members lacking yfinance price data are dropped and counted per year. ",
+            "Because delisted/acquired components often lack free API history, the backtest retains a residual survivorship tilt ",
+            "for the missing fraction:\n",
+            "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
+            "|---|---|---|---|---|",
+        ]
+    )
 
     for yr in sorted(coverage_stats.keys()):
         s = coverage_stats[yr]

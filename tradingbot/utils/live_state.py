@@ -60,3 +60,25 @@ def current_weights(bot: Any) -> dict[str, float]:
         raise ValueError(f"Portfolio value is non-positive ({total_val}); cannot compute weights")
 
     return {sym: (qty * float(prices[sym])) / total_val for sym, qty in held.items()}
+
+
+def is_live_run(rows: dict[str, Any]) -> bool:
+    """True when ``targetWeights`` was handed live rows.
+
+    Live frames carry a ``timestamp`` column; backtest rows are indexed by label
+    (the convention used by ``InstitutionalFlowBot._bar_timestamp``).
+    """
+    return any(hasattr(r, "index") and "timestamp" in r.index for r in rows.values())
+
+
+def live_holdings(bot: Any, rows: dict[str, Any]) -> dict[str, float] | None:
+    """Held weights for a live run, ``None`` in a backtest.
+
+    ``None`` tells the caller to keep using its instance state (the backtest path).
+    ``{}`` means a live book that is flat. A failed read raises on purpose: treating
+    "could not read holdings" as "flat" would rebuild the book on every run, which
+    is the daily-rebalance bug this exists to prevent.
+    """
+    if not is_live_run(rows):
+        return None
+    return current_weights(bot)

@@ -325,35 +325,37 @@ def generate_markdown(
     doc = []
     if dry_run:
         doc.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
-    doc.extend([
-        "# InstitutionalFlowBot Turnover Hysteresis Study (2026-11)",
-        "",
-        "Evaluates whether adding rank hysteresis (`hold_rank`) to InstitutionalFlowBot reduces churn and trading costs "
-        "without destroying momentum alpha.",
-        "",
-        "## Problem and Mechanism",
-        "",
-        "- **The churn problem:** In weekly cross-sectional ranking with `top_n=20`, names oscillating between ranks 18 and 22 "
-        "are repeatedly bought and sold through slippage and commissions, despite their accumulation scores being statistically indistinguishable.",
-        "- **Turnover hysteresis:** A holding stays as long as it still passes the mandate filter and ranks within `hold_rank`; "
-        "open slots are filled from the top.",
-        "- **Stateless implementation:** Computed statelessly by replaying weekly ranking over trailing 26 Fridays from `self.datas`, "
-        "ensuring live CronJob execution and backtests produce identical target weights without instance state.",
-        "",
-        "## Study Setup",
-        "",
-        f"- **Universe:** S&P 100 ({universe_size} traded names) + QQQ benchmark.",
-        "- **Windows:** H1 = 2019-01-01 to 2022-12-31 (parameter selection), H2 = 2023-01-01 to 2026-11-01 (unseen judgment).",
-        "- **Baselines:** Dual baselines: QQQ and an equal-weight buy-and-hold of the active universe.",
-        "- **Cash:** Idle cash parked at 0% and at T-bill yield (^IRX / 252, matching live copier in SHV).",
-        "- **Costs:** 5 bp per side (institutional baseline) and 20 bp per side (conservative retail).",
-        "- **Promotion Bar:** Must beat default (`hold_rank=None`) on H2 alpha t vs QQQ AND on 20 bp CAGR.",
-        "",
-        "## Pre-Registered Variants",
-        "",
-        "| Variant | top_n | hold_rank | Description |",
-        "|---|---|---|---|",
-    ])
+    doc.extend(
+        [
+            "# InstitutionalFlowBot Turnover Hysteresis Study (2026-11)",
+            "",
+            "Evaluates whether adding rank hysteresis (`hold_rank`) to InstitutionalFlowBot reduces churn and trading costs "
+            "without destroying momentum alpha.",
+            "",
+            "## Problem and Mechanism",
+            "",
+            "- **The churn problem:** In weekly cross-sectional ranking with `top_n=20`, names oscillating between ranks 18 and 22 "
+            "are repeatedly bought and sold through slippage and commissions, despite their accumulation scores being statistically indistinguishable.",
+            "- **Turnover hysteresis:** A holding stays as long as it still passes the mandate filter and ranks within `hold_rank`; "
+            "open slots are filled from the top.",
+            "- **Stateless implementation:** Computed statelessly by replaying weekly ranking over trailing 26 Fridays from `self.datas`, "
+            "ensuring live CronJob execution and backtests produce identical target weights without instance state.",
+            "",
+            "## Study Setup",
+            "",
+            f"- **Universe:** S&P 100 ({universe_size} traded names) + QQQ benchmark.",
+            "- **Windows:** H1 = 2019-01-01 to 2022-12-31 (parameter selection), H2 = 2023-01-01 to 2026-11-01 (unseen judgment).",
+            "- **Baselines:** Dual baselines: QQQ and an equal-weight buy-and-hold of the active universe.",
+            "- **Cash:** Idle cash parked at 0% and at T-bill yield (^IRX / 252, matching live copier in SHV).",
+            "- **Costs:** 5 bp per side (institutional baseline) and 20 bp per side (conservative retail).",
+            "- **Promotion Bar:** Must beat default (`hold_rank=None`) on H2 alpha t vs QQQ AND on 20 bp CAGR.",
+            "",
+            "## Pre-Registered Variants",
+            "",
+            "| Variant | top_n | hold_rank | Description |",
+            "|---|---|---|---|",
+        ]
+    )
 
     for vname, cfg in PRE_REGISTERED_VARIANTS.items():
         doc.append(f"| {vname} | {cfg['top_n']} | {cfg['hold_rank']} | {cfg['description']} |")

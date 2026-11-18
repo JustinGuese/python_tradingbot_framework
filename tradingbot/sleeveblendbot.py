@@ -195,8 +195,9 @@ def compose_weights(
             book_cft = cft_compute_weights(cft_closes, CFT_FAST, CFT_SLOW, CFT_VOL_WINDOW) or {}
             for sym, w in book_cft.items():
                 composed[sym] = composed.get(sym, 0.0) + w * w_cft
-        except Exception as exc:
-            logger.warning("Error computing ContinuousFuturesTrend sleeve: %s", exc)
+        except Exception:
+            logger.exception("Error computing ContinuousFuturesTrend sleeve")
+            raise
 
     # 2. QuarterlyTeCostGate (0.180) - TE breach early rebalance is not used in the blend
     w_qte = weights.get("quarterly_te_cost_gate", 0.0)
@@ -221,8 +222,9 @@ def compose_weights(
             )
             for sym, w in book_qte.items():
                 composed[sym] = composed.get(sym, 0.0) + w * w_qte
-        except Exception as exc:
-            logger.warning("Error computing QuarterlyTeCostGate sleeve: %s", exc)
+        except Exception:
+            logger.exception("Error computing QuarterlyTeCostGate sleeve")
+            raise
 
     # 3. SmaDailyGated (0.185)
     w_sma = weights.get("sma_daily_gated", 0.0)
@@ -242,8 +244,9 @@ def compose_weights(
             )
             for sym, w in book_sma.items():
                 composed[sym] = composed.get(sym, 0.0) + w * w_sma
-        except Exception as exc:
-            logger.warning("Error computing SmaDailyGated sleeve: %s", exc)
+        except Exception:
+            logger.exception("Error computing SmaDailyGated sleeve")
+            raise
 
     # Determine reference date for event sleeves
     ref_date = day
@@ -260,8 +263,9 @@ def compose_weights(
                 bb_w = min(1.0 / n, 0.5)
                 for sym in active_bb:
                     composed[sym] = composed.get(sym, 0.0) + bb_w * w_buyback
-        except Exception as exc:
-            logger.warning("Error computing buyback_sp100 sleeve: %s", exc)
+        except Exception:
+            logger.exception("Error computing buyback_sp100 sleeve")
+            raise
 
     # 5. activist_13d (0.036)
     w_13d = weights.get("activist_13d", 0.0)
@@ -274,8 +278,9 @@ def compose_weights(
                 sc_w = min(1.0 / n, ACTIVIST_MAX_WEIGHT)
                 for sym in active_13d:
                     composed[sym] = composed.get(sym, 0.0) + sc_w * w_13d
-        except Exception as exc:
-            logger.warning("Error computing activist_13d sleeve: %s", exc)
+        except Exception:
+            logger.exception("Error computing activist_13d sleeve")
+            raise
 
     # Park uninvested weight into SHV
     return park_idle_cash(composed, proxy="SHV", max_gross=1.0)
@@ -318,20 +323,14 @@ class SleeveBlendBot(Bot):
     def _load_buyback_events(self) -> list[Any]:
         if self._buyback_events is not None:
             return self._buyback_events
-        try:
-            return read_buyback_events()
-        except Exception as exc:
-            logger.warning("Could not load buyback events (%s) -> sleeve stays cash", exc)
-            return []
+        # Do not swallow: a stale scanner must fail the run loudly, not silently empty the sleeve.
+        return read_buyback_events()
 
     def _load_sc13d_events(self) -> list[Any]:
         if self._sc13d_events is not None:
             return self._sc13d_events
-        try:
-            return read_sc13d_events()
-        except Exception as exc:
-            logger.warning("Could not load 13D events (%s) -> sleeve stays cash", exc)
-            return []
+        # Do not swallow: a stale scanner must fail the run loudly, not silently empty the sleeve.
+        return read_sc13d_events()
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float]:
         """Compute the composed five-sleeve blend weights with idle cash parked in SHV."""

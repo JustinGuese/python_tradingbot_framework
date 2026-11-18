@@ -124,14 +124,16 @@ class OptionImpliedLongShortBot(Bot):
                     start=start_date,
                     end=pd.to_datetime(now) + pd.Timedelta(days=1),
                 )
-            except Exception as e:
-                logger.error("Failed to load option signals from DB: %s", e)
-                signals_df = pd.DataFrame()
+            except Exception:
+                # Fail loudly: an unreadable DB must never read as "no signal" and sell the book into SHV.
+                logger.exception("Failed to load option signals from DB")
+                raise
 
         if signals_df is None or signals_df.empty:
-            logger.warning("No option signals available for %s", self.tradeable_universe)
-            raw_weights: dict[str, float] = {}
+            logger.warning("No option signals available for %s; holding the current book", self.tradeable_universe)
+            return {}
         else:
+            raw_weights: dict[str, float]
             ranked = compute_cross_sectional_signals(
                 signals_df,
                 signal_name=self.rules.signal,
@@ -158,8 +160,8 @@ class OptionImpliedLongShortBot(Bot):
                     )
                     raw_weights = {str(k): float(v) for k, v in weights_series.items() if abs(v) > 1e-6}
 
-        # Idle weight parked in SHV using park_idle_cash
-        if self.park_cash:
+        # Idle weight parked in SHV (only when there is a book to complement)
+        if self.park_cash and raw_weights:
             raw_weights = park_idle_cash(
                 raw_weights,
                 proxy=self.CASH_PROXY,

@@ -33,7 +33,6 @@ import sys
 if not os.environ.get("POSTGRES_URI") and not os.environ.get("POSTGRES_HOST"):
     os.environ["POSTGRES_URI"] = "ci:ci@localhost:5432/ci"
 
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -41,15 +40,16 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from tradingbot.utils.alpha_report import AlphaStats, alpha_stats
+from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.trial_registry import record_trial
 
 
 def _init_offline_db() -> None:
     """Ensure database connection or fallback to local SQLite for offline runs."""
-    import tradingbot.utils.db as db
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import tradingbot.utils.db as db
 
     if not db._schema_initialized:
         # Check if Postgres is reachable, else fall back to local SQLite
@@ -67,6 +67,7 @@ def _init_offline_db() -> None:
             db.Base.metadata.create_all(eng)
             db.SessionLocal = sessionmaker(bind=eng, autocommit=False, autoflush=False)
             db._schema_initialized = True
+
 
 # Setup fallback database URL if none set so db imports don't crash offline
 if not os.environ.get("POSTGRES_URI") and not os.environ.get("POSTGRES_HOST"):
@@ -231,9 +232,7 @@ def run_study() -> str:
     r_shv_full = shv.pct_change()
     rf_daily_full = (irx / 100.0 / 252.0).reindex(r_qqq_full.index).ffill().fillna(0.0)
 
-    eval_idx = r_qqq_full[
-        (r_qqq_full.index >= START_DATE) & (r_qqq_full.index <= END_DATE)
-    ].index
+    eval_idx = r_qqq_full[(r_qqq_full.index >= START_DATE) & (r_qqq_full.index <= END_DATE)].index
 
     # 1. QQQ Buy & Hold baseline
     ones = pd.Series(1.0, index=eval_idx)
@@ -271,14 +270,16 @@ def run_study() -> str:
             n=strat_eval["full"]["n_bars"],
         )
 
-        variant_results.append({
-            "target_vol": t_vol,
-            "window": win,
-            "strat": strat_eval,
-            "static": static_eval,
-            "beats_static_cagr": strat_eval["full"]["cagr_shv"] > static_eval["full"]["cagr_shv"],
-            "beats_static_h2_cagr": strat_eval["h2"]["cagr_shv"] > static_eval["h2"]["cagr_shv"],
-        })
+        variant_results.append(
+            {
+                "target_vol": t_vol,
+                "window": win,
+                "strat": strat_eval,
+                "static": static_eval,
+                "beats_static_cagr": strat_eval["full"]["cagr_shv"] > static_eval["full"]["cagr_shv"],
+                "beats_static_h2_cagr": strat_eval["h2"]["cagr_shv"] > static_eval["h2"]["cagr_shv"],
+            }
+        )
 
     # Generate document text
     lines = [
@@ -324,7 +325,7 @@ def run_study() -> str:
     for r in variant_results:
         st = r["strat"]["full"]
         stat = r["static"]["full"]
-        lbl = f"VolManaged {int(r['target_vol']*100)}% ({r['window']}d)"
+        lbl = f"VolManaged {int(r['target_vol'] * 100)}% ({r['window']}d)"
         lines.append(
             f"| {lbl} | {st['avg_exposure']:.1%} | {st['cagr_shv']:+.1%} | {st['cagr_cash0']:+.1%} | {st['cagr_5bp']:+.1%} | {st['cagr_20bp']:+.1%} | {st['max_dd']:.1%} | {st['alpha']:+.1%} | {st['t']:.2f} | {st['beta']:.2f} | {st['corr']:.2f} |"
         )
@@ -332,13 +333,15 @@ def run_study() -> str:
             f"| └─ *Static Mix ({st['avg_exposure']:.1%} QQQ + SHV)* | {stat['avg_exposure']:.1%} | {stat['cagr_shv']:+.1%} | {stat['cagr_cash0']:+.1%} | {stat['cagr_5bp']:+.1%} | {stat['cagr_20bp']:+.1%} | {stat['max_dd']:.1%} | {stat['alpha']:+.1%} | {stat['t']:.2f} | {stat['beta']:.2f} | {stat['corr']:.2f} |"
         )
 
-    lines.extend([
-        "",
-        "## Walk-Forward Halves (H1: 2010-2018, H2: 2019-2026)",
-        "",
-        "| Strategy | H1 CAGR | H1 Max DD | H1 Alpha (t) | H2 CAGR | H2 Max DD | H2 Alpha (t) | H2 Beta |",
-        "|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Walk-Forward Halves (H1: 2010-2018, H2: 2019-2026)",
+            "",
+            "| Strategy | H1 CAGR | H1 Max DD | H1 Alpha (t) | H2 CAGR | H2 Max DD | H2 Alpha (t) | H2 Beta |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     lines.append(
         f"| QQQ Buy & Hold | {qqq_base['h1']['cagr_shv']:+.1%} | {qqq_base['h1']['max_dd']:.1%} | — | {qqq_base['h2']['cagr_shv']:+.1%} | {qqq_base['h2']['max_dd']:.1%} | — | 1.00 |"
@@ -350,7 +353,7 @@ def run_study() -> str:
     for r in variant_results:
         h1 = r["strat"]["h1"]
         h2 = r["strat"]["h2"]
-        lbl = f"VolManaged {int(r['target_vol']*100)}% ({r['window']}d)"
+        lbl = f"VolManaged {int(r['target_vol'] * 100)}% ({r['window']}d)"
         lines.append(
             f"| {lbl} | {h1['cagr_shv']:+.1%} | {h1['max_dd']:.1%} | {h1['alpha']:+.1%} ({h1['t']:.2f}) | {h2['cagr_shv']:+.1%} | {h2['max_dd']:.1%} | {h2['alpha']:+.1%} ({h2['t']:.2f}) | {h2['beta']:.2f} |"
         )
@@ -361,13 +364,15 @@ def run_study() -> str:
         )
 
     # Comparison against static mix and honest findings
-    lines.extend([
-        "",
-        "## Comparison Against Static QQQ + SHV Mix",
-        "",
-        "| Variant | Avg Exposure | Strat CAGR | Static CAGR | CAGR Diff | Strat Max DD | Static Max DD | DD Improvement | Beats Static? |",
-        "|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Comparison Against Static QQQ + SHV Mix",
+            "",
+            "| Variant | Avg Exposure | Strat CAGR | Static CAGR | CAGR Diff | Strat Max DD | Static Max DD | DD Improvement | Beats Static? |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for r in variant_results:
         st = r["strat"]["full"]
@@ -376,27 +381,29 @@ def run_study() -> str:
         dd_imp = stat["max_dd"] - st["max_dd"]  # positive means strat had shallower drawdown
         beats = "YES" if r["beats_static_cagr"] else "NO"
         lines.append(
-            f"| {int(r['target_vol']*100)}% vol, {r['window']}d win | {st['avg_exposure']:.1%} | {st['cagr_shv']:+.1%} | {stat['cagr_shv']:+.1%} | {cagr_diff:+.2%} | {st['max_dd']:.1%} | {stat['max_dd']:.1%} | {dd_imp:+.1%} pts | **{beats}** |"
+            f"| {int(r['target_vol'] * 100)}% vol, {r['window']}d win | {st['avg_exposure']:.1%} | {st['cagr_shv']:+.1%} | {stat['cagr_shv']:+.1%} | {cagr_diff:+.2%} | {st['max_dd']:.1%} | {stat['max_dd']:.1%} | {dd_imp:+.1%} pts | **{beats}** |"
         )
 
-    lines.extend([
-        "",
-        "## Comparison Against QQQ SMA200 Gate",
-        "",
-        "| Strategy | CAGR (SHV) | Max DD | Alpha vs QQQ | t | H2 Alpha (t) | H2 Beta |",
-        "|---|---|---|---|---|---|---|",
-        f"| QQQ SMA200 Gate | {sma_base['full']['cagr_shv']:+.1%} | {sma_base['full']['max_dd']:.1%} | {sma_base['full']['alpha']:+.1%} | {sma_base['full']['t']:.2f} | {sma_base['h2']['alpha']:+.1%} ({sma_base['h2']['t']:.2f}) | {sma_base['h2']['beta']:.2f} |",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Comparison Against QQQ SMA200 Gate",
+            "",
+            "| Strategy | CAGR (SHV) | Max DD | Alpha vs QQQ | t | H2 Alpha (t) | H2 Beta |",
+            "|---|---|---|---|---|---|---|",
+            f"| QQQ SMA200 Gate | {sma_base['full']['cagr_shv']:+.1%} | {sma_base['full']['max_dd']:.1%} | {sma_base['full']['alpha']:+.1%} | {sma_base['full']['t']:.2f} | {sma_base['h2']['alpha']:+.1%} ({sma_base['h2']['t']:.2f}) | {sma_base['h2']['beta']:.2f} |",
+        ]
+    )
     for r in variant_results:
         st = r["strat"]["full"]
         h2 = r["strat"]["h2"]
         lines.append(
-            f"| VolManaged {int(r['target_vol']*100)}% ({r['window']}d) | {st['cagr_shv']:+.1%} | {st['max_dd']:.1%} | {st['alpha']:+.1%} | {st['t']:.2f} | {h2['alpha']:+.1%} ({h2['t']:.2f}) | {h2['beta']:.2f} |"
+            f"| VolManaged {int(r['target_vol'] * 100)}% ({r['window']}d) | {st['cagr_shv']:+.1%} | {st['max_dd']:.1%} | {st['alpha']:+.1%} | {st['t']:.2f} | {h2['alpha']:+.1%} ({h2['t']:.2f}) | {h2['beta']:.2f} |"
         )
 
     # Findings section
     cleared_variants = [
-        f"{int(r['target_vol']*100)}% vol, {r['window']}d"
+        f"{int(r['target_vol'] * 100)}% vol, {r['window']}d"
         for r in variant_results
         if r["strat"]["full"]["t"] >= 2.0
         and r["strat"]["full"]["alpha"] > 0
@@ -418,15 +425,17 @@ def run_study() -> str:
         stat = r["static"]["full"]
         cagr_diff = st["cagr_shv"] - stat["cagr_shv"]
         findings.append(
-            f"   - {int(r['target_vol']*100)}% vol, {r['window']}d: {st['cagr_shv']:+.1%} CAGR vs {stat['cagr_shv']:+.1%} static ({cagr_diff:+.1%} gap), Max DD: {st['max_dd']:.1%} vs {stat['max_dd']:.1%}"
+            f"   - {int(r['target_vol'] * 100)}% vol, {r['window']}d: {st['cagr_shv']:+.1%} CAGR vs {stat['cagr_shv']:+.1%} static ({cagr_diff:+.1%} gap), Max DD: {st['max_dd']:.1%} vs {stat['max_dd']:.1%}"
         )
 
     sm = sma_base["full"]
-    findings.extend([
-        f"2. **Comparison to SMA200 Trend Gate:** QQQ SMA200 gate CAGR: {sm['cagr_shv']:+.1%}, Max DD: {sm['max_dd']:.1%}, Alpha vs QQQ: {sm['alpha']:+.1%} (t={sm['t']:.2f}).",
-        f"3. **Outcome:** {'Variants passed: ' + ', '.join(cleared_variants) if cleared_variants else 'No volatility-managed variant passed the promotion bar over the static benchmark.'}",
-        "",
-    ])
+    findings.extend(
+        [
+            f"2. **Comparison to SMA200 Trend Gate:** QQQ SMA200 gate CAGR: {sm['cagr_shv']:+.1%}, Max DD: {sm['max_dd']:.1%}, Alpha vs QQQ: {sm['alpha']:+.1%} (t={sm['t']:.2f}).",
+            f"3. **Outcome:** {'Variants passed: ' + ', '.join(cleared_variants) if cleared_variants else 'No volatility-managed variant passed the promotion bar over the static benchmark.'}",
+            "",
+        ]
+    )
 
     lines.extend(findings)
 

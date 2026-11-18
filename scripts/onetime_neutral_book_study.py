@@ -35,7 +35,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import contextlib
 import logging
 import os
 import sys
@@ -283,32 +282,34 @@ def generate_markdown(
     lines: list[str] = []
     if dry_run:
         lines.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
-    lines.extend([
-        "# Neutral Stock Book on the S&P 500 — Walk-Forward Backtest (2026-11)",
-        "",
-        "Evaluates the cross-sectional market-neutral stock book engine (F1) across the S&P 500 universe",
-        "using point-in-time constituent membership (`sp500_members(as_of)`).",
-        "",
-        "## Methodology and Global Rules",
-        "",
-        "- **Signal Components**: True residual momentum (12-1 residuals from 36-month OLS regression on market,",
-        "  removing market beta) and 1-month short-term reversal (negative trailing 21d return), strictly standardized within GICS sectors.",
-        "- **Universe**: S&P 500 point-in-time constituents reconstructed from `data/sp500_changes.csv` via `sp500_members(as_of)`.",
-        "- **Windows**: Walk-forward split H1 = 2010–2018 (grid optimization), H2 = 2019 → 2026-11 (out-of-sample verdict).",
-        "- **Baselines**: QQQ and an equal-weight buy-and-hold index of the universe.",
-        "- **Cash**: Reported at 0% (paper metric) and T-bill yield (^IRX / 252, SHV copier metric).",
-        "- **Costs and Drag**: 5 bp per side (institutional baseline), 20 bp per side (conservative retail), plus flat 1.0%/yr borrow drag on shorts.",
-        "- **Portfolio Constraint**: Dollar-neutral (long = +0.9, short = -0.9, gross = 1.8 <= 2.0 Reg T headroom), equal counts per sector side.",
-        "",
-        "## S&P 500 Point-in-Time Universe Coverage",
-        "",
-        "Historical members lacking yfinance price data are dropped and counted per year.",
-        "Because delisted/acquired components often lack free API history, the backtest retains a residual survivorship tilt",
-        "for the missing fraction:",
-        "",
-        "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
-        "|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "# Neutral Stock Book on the S&P 500 — Walk-Forward Backtest (2026-11)",
+            "",
+            "Evaluates the cross-sectional market-neutral stock book engine (F1) across the S&P 500 universe",
+            "using point-in-time constituent membership (`sp500_members(as_of)`).",
+            "",
+            "## Methodology and Global Rules",
+            "",
+            "- **Signal Components**: True residual momentum (12-1 residuals from 36-month OLS regression on market,",
+            "  removing market beta) and 1-month short-term reversal (negative trailing 21d return), strictly standardized within GICS sectors.",
+            "- **Universe**: S&P 500 point-in-time constituents reconstructed from `data/sp500_changes.csv` via `sp500_members(as_of)`.",
+            "- **Windows**: Walk-forward split H1 = 2010–2018 (grid optimization), H2 = 2019 → 2026-11 (out-of-sample verdict).",
+            "- **Baselines**: QQQ and an equal-weight buy-and-hold index of the universe.",
+            "- **Cash**: Reported at 0% (paper metric) and T-bill yield (^IRX / 252, SHV copier metric).",
+            "- **Costs and Drag**: 5 bp per side (institutional baseline), 20 bp per side (conservative retail), plus flat 1.0%/yr borrow drag on shorts.",
+            "- **Portfolio Constraint**: Dollar-neutral (long = +0.9, short = -0.9, gross = 1.8 <= 2.0 Reg T headroom), equal counts per sector side.",
+            "",
+            "## S&P 500 Point-in-Time Universe Coverage",
+            "",
+            "Historical members lacking yfinance price data are dropped and counted per year.",
+            "Because delisted/acquired components often lack free API history, the backtest retains a residual survivorship tilt",
+            "for the missing fraction:",
+            "",
+            "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
+            "|---|---|---|---|---|",
+        ]
+    )
 
     for c in coverage_stats:
         lines.append(f"| {c['year']} | {c['total']} | {c['with_data']} | {c['dropped']} | {c['missing_share']:.1f}% |")

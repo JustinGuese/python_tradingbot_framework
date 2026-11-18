@@ -69,7 +69,9 @@ class BuybackSectorHedgedBot(BuybackDriftBot):
             weights[sec] = weights.get(sec, 0.0) - w
 
         if self._park_cash:
-            weights = park_idle_cash(weights, proxy=self.CASH_PROXY, max_gross=self.MAX_GROSS)
+            weights = park_idle_cash(
+                weights, proxy=self.CASH_PROXY, max_gross=self.MAX_GROSS - 0.1
+            )  # keep Reg T headroom
 
         logger.info(
             "%s: hedged %d longs with sector ETFs -> %s",

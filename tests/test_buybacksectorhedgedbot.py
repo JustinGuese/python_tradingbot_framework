@@ -114,7 +114,8 @@ def test_single_active_signal_hedged_with_sector_etf(make_bot, monkeypatch):
     raw = bot.targetWeights(rows)
     assert raw["AAPL"] == pytest.approx(0.5)
     assert raw["XLK"] == pytest.approx(-0.5)
-    assert raw["SHV"] == pytest.approx(1.0)
+    # park_idle_cash keeps 0.1 of Reg T headroom: min(1 - net, (MAX_GROSS - 0.1) - gross) = 1.9 - 1.0
+    assert raw["SHV"] == pytest.approx(0.9)
 
     # Every short is a sector ETF in SECTORS9
     shorts = [sym for sym, w in raw.items() if w < 0]
@@ -124,7 +125,7 @@ def test_single_active_signal_hedged_with_sector_etf(make_bot, monkeypatch):
 
     coerced = bot._coerce_target_weights(raw, set(bot.tickers))
     assert sum(coerced.values()) == pytest.approx(1.0)
-    assert gross_weight(coerced) == pytest.approx(2.0)
+    assert gross_weight(coerced) == pytest.approx(1.9)  # 2.0 limit minus the 0.1 Reg T headroom
     assert gross_weight(coerced) <= 2.0
 
 

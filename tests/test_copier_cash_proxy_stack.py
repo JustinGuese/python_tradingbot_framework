@@ -1,6 +1,7 @@
 """Tests proving a bot-supplied SHV weight is not parked a second time by copier."""
 
 from unittest.mock import MagicMock
+
 import pytest
 
 from tradingbot.livetrade.broker import LiveBroker
@@ -24,16 +25,14 @@ def _make_copier(cash_proxy: str = "SHV", cash_buffer: float = 0.02):
 
 def test_copier_does_not_double_park_when_bot_supplies_shv():
     """A bot parking idle cash into SHV should not be parked a second time by copier."""
-    copier, broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
+    copier, _broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
 
     # Bot weights produced with park_idle_cash
     bot_targets = park_idle_cash({"AAPL": 0.6}, proxy="SHV")
     assert pytest.approx(bot_targets["AAPL"]) == 0.6
     assert pytest.approx(bot_targets["SHV"]) == 0.4
 
-    broker_targets = {
-        s: {"weight": w, "type": "stock"} for s, w in bot_targets.items()
-    }
+    broker_targets = {s: {"weight": w, "type": "stock"} for s, w in bot_targets.items()}
 
     copier._park_idle_cash(broker_targets)
 
@@ -47,7 +46,7 @@ def test_copier_does_not_double_park_when_bot_supplies_shv():
 
 def test_copier_counts_existing_shv_on_partial_parking():
     """If bot supplies partial SHV, copier only parks the remaining uninvested cash."""
-    copier, broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
+    copier, _broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
 
     # Bot holds 50% AAPL and 20% SHV (gross = 0.70)
     broker_targets = {
@@ -68,7 +67,7 @@ def test_copier_counts_existing_shv_on_partial_parking():
 
 def test_copier_all_cash_bot_parked_in_shv():
     """Bot holding 100% SHV (all cash parked) is not modified by copier."""
-    copier, broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
+    copier, _broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
 
     bot_targets = park_idle_cash({}, proxy="SHV")
     assert bot_targets == {"SHV": 1.0}
@@ -81,7 +80,7 @@ def test_copier_all_cash_bot_parked_in_shv():
 
 def test_copier_multi_bot_aggregated_shv_not_overparked():
     """Multiple bots supplying SHV weights aggregate without copier overparking."""
-    copier, broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
+    copier, _broker = _make_copier(cash_proxy="SHV", cash_buffer=0.02)
 
     # Bot 1: 50% AAPL, 50% SHV (allocated 60% of copier) -> 0.30 AAPL, 0.30 SHV
     # Bot 2: 40% MSFT, 60% SHV (allocated 40% of copier) -> 0.16 MSFT, 0.24 SHV

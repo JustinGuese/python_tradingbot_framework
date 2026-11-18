@@ -21,6 +21,9 @@ from tradingbot.neutralstockbot import NeutralStockBot
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.universes import SP500, SP500_SECTOR
 
+# Live rows carry a `timestamp` column; backtest rows are indexed by label.
+LIVE_ROWS = {"SPY": pd.Series({"timestamp": pd.Timestamp("2026-11-18"), "close": 1.0})}
+
 
 @pytest.fixture
 def make_neutral_bot(mocker):
@@ -69,8 +72,8 @@ def test_monthly_rebalance_mid_month_returns_none(make_neutral_bot):
     bot.datas = data
 
     # When holdings exist, mid-month bar returns None
-    with patch("tradingbot.neutralstockbot.current_weights", return_value={"AAPL": 0.05}):
-        res = bot.targetWeights({})
+    with patch("tradingbot.utils.live_state.current_weights", return_value={"AAPL": 0.05}):
+        res = bot.targetWeights(LIVE_ROWS)
         assert res is None
 
 
@@ -101,8 +104,8 @@ def test_monthly_rebalance_builds_when_flat(make_neutral_bot):
     bot.datas = datas
 
     # When flat (holdings empty): builds book
-    with patch("tradingbot.neutralstockbot.current_weights", return_value={}):
-        weights = bot.targetWeights({})
+    with patch("tradingbot.utils.live_state.current_weights", return_value={}):
+        weights = bot.targetWeights(LIVE_ROWS)
         assert weights is not None
         assert len(weights) > 0
 

@@ -29,6 +29,9 @@ from tradingbot.quantsmd_quarterly_te_cost_gate_gated import (
 )
 from tradingbot.utils.botclass import Bot, BotSnapshot
 
+# Live rows carry a `timestamp` column; backtest rows are indexed by label.
+LIVE_ROWS = {"SPY": pd.Series({"timestamp": pd.Timestamp("2026-11-18"), "close": 1.0})}
+
 
 @pytest.fixture(autouse=True)
 def stub_bot_init(monkeypatch):
@@ -86,7 +89,7 @@ def test_quarterly_te_cost_gate_live_two_fresh_instances_mid_quarter_return_none
     _attach_mock_state(bot1, holdings, prices, pv)
 
     assert bot1._state["last_target"] is None
-    res1 = bot1.targetWeights({})
+    res1 = bot1.targetWeights(LIVE_ROWS)
     assert res1 is None
 
     # Instance 2: another fresh CronJob run, same holdings and market state
@@ -95,7 +98,7 @@ def test_quarterly_te_cost_gate_live_two_fresh_instances_mid_quarter_return_none
     _attach_mock_state(bot2, holdings, prices, pv)
 
     assert bot2._state["last_target"] is None
-    res2 = bot2.targetWeights({})
+    res2 = bot2.targetWeights(LIVE_ROWS)
     assert res2 is None
 
 
@@ -111,7 +114,7 @@ def test_quarterly_te_cost_gate_live_flat_book_builds():
     _setup_bot_datas(bot, df)
     _attach_mock_state(bot, holdings, prices, pv)
 
-    weights = bot.targetWeights({})
+    weights = bot.targetWeights(LIVE_ROWS)
     assert weights is not None
     assert set(weights) == set(UNIVERSE[:3])
     for w in weights.values():
@@ -129,7 +132,7 @@ def test_quarterly_te_cost_gate_live_quarter_first_bar_rebalances():
     _setup_bot_datas(bot, df)
     _attach_mock_state(bot, holdings, prices, pv)
 
-    weights = bot.targetWeights({})
+    weights = bot.targetWeights(LIVE_ROWS)
     assert isinstance(weights, dict)
     assert set(weights) == set(UNIVERSE[:3])
 
@@ -155,7 +158,7 @@ def test_quarterly_te_cost_gate_live_te_breach_rebalances_early():
     _setup_bot_datas(bot, df)
     _attach_mock_state(bot, holdings, prices, pv)
 
-    weights = bot.targetWeights({})
+    weights = bot.targetWeights(LIVE_ROWS)
     assert isinstance(weights, dict)
     assert len(weights) > 0
 
@@ -168,13 +171,13 @@ def test_quarterly_te_cost_gate_gated_live_stateless():
     bot_held = QuantsmdQuarterlyTeCostGateGatedBot()
     _setup_bot_datas(bot_held, df)
     _attach_mock_state(bot_held, {"USD": 0.0, "SPY": 100.0}, {"SPY": 100.0}, 10000.0)
-    assert bot_held.targetWeights({}) is None
+    assert bot_held.targetWeights(LIVE_ROWS) is None
 
     # Instance with flat book -> builds
     bot_flat = QuantsmdQuarterlyTeCostGateGatedBot()
     _setup_bot_datas(bot_flat, df)
     _attach_mock_state(bot_flat, {"USD": 10000.0}, {}, 10000.0)
-    weights = bot_flat.targetWeights({})
+    weights = bot_flat.targetWeights(LIVE_ROWS)
     assert weights is not None
     assert len(weights) > 0
 
@@ -203,7 +206,7 @@ def test_continuous_futures_trend_live_flat_book_mid_month_with_uptrends_builds(
     bot.datas = {t: pd.DataFrame({"close": df[t]}, index=df.index) for t in CFT_UNIVERSE}
     _attach_mock_state(bot, portfolio={"USD": 10000.0}, prices={}, pv=10000.0)
 
-    weights = bot.targetWeights({})
+    weights = bot.targetWeights(LIVE_ROWS)
     assert weights is not None
     assert len(weights) > 0
     assert set(weights) == set(CFT_UNIVERSE)
@@ -223,7 +226,7 @@ def test_continuous_futures_trend_live_held_book_mid_month_returns_none():
     pv = 5000.0 + 10.0 * prices["SPY"]
     _attach_mock_state(bot, portfolio=holdings, prices=prices, pv=pv)
 
-    res = bot.targetWeights({})
+    res = bot.targetWeights(LIVE_ROWS)
     assert res is None
 
 
@@ -236,5 +239,36 @@ def test_continuous_futures_trend_live_flat_book_mid_month_no_uptrends_returns_n
     bot.datas = {t: pd.DataFrame({"close": df[t]}, index=df.index) for t in CFT_UNIVERSE}
     _attach_mock_state(bot, portfolio={"USD": 10000.0}, prices={}, pv=10000.0)
 
-    res = bot.targetWeights({})
+    res = bot.targetWeights(LIVE_ROWS)
     assert res is None
+
+
+# =========================================================================== #
+# Review fixes: backtest path untouched, failed holdings read never rebuilds
+# =========================================================================== #
+
+
+def test_continuous_futures_trend_backtest_rows_do_not_catch_up_mid_month():
+    """Backtest rows (no `timestamp` column) must keep the monthly-only behaviour."""
+    bot = QuantsmdContinuousFuturesTrendBot()
+    n = 400
+    cols = {t: 100.0 * np.exp(0.002 * np.arange(n)) for t in CFT_UNIVERSE}
+    df = _frame(cols, "2026-11-18")  # a mid-month bar
+    bot.datas = {t: pd.DataFrame({"close": df[t]}, index=df.index) for t in CFT_UNIVERSE}
+    backtest_rows = {"SPY": pd.Series({"close": 1.0}, name=pd.Timestamp("2026-11-18"))}
+    assert bot.targetWeights(backtest_rows) is None
+
+
+def test_failed_holdings_read_raises_instead_of_rebuilding():
+    """If holdings cannot be read live, the bot must not treat the book as flat."""
+    bot = QuantsmdContinuousFuturesTrendBot()
+    n = 400
+    cols = {t: 100.0 * np.exp(0.002 * np.arange(n)) for t in CFT_UNIVERSE}
+    df = _frame(cols, "2026-11-18")
+    bot.datas = {t: pd.DataFrame({"close": df[t]}, index=df.index) for t in CFT_UNIVERSE}
+    snapshot = BotSnapshot(name=bot.bot_name, portfolio={"SPY": 5.0, "USD": 0.0})
+    type(bot).dbBot = property(lambda self: snapshot)
+    bot.getLatestPricesBatch = MagicMock(return_value={})  # no price -> current_weights raises
+    bot.portfolio_value = MagicMock(return_value=1000.0)
+    with pytest.raises(RuntimeError):
+        bot.targetWeights(LIVE_ROWS)
