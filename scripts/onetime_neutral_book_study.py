@@ -334,12 +334,12 @@ def generate_markdown(
             m = vdata.get(wname, {})
             if not m:
                 continue
-            alpha_str = f"{m.get('alpha', 0.0):+.1f}% ({m.get('alpha_t', 0.0):.2f})"
+            alpha_str = f"{m.get('alpha', 0.0) * 100:+.1f}% ({m.get('alpha_t', 0.0):.2f})"
             beta_str = f"{m.get('beta', 0.0):.2f}"
             corr_str = f"{m.get('corr', 0.0):.2f}"
             dd_str = f"{m.get('max_dd', 0.0):.1f}%"
             ew_str = (
-                f"{m.get('alpha_ew', 0.0):+.1f}% ({m.get('alpha_ew_t', 0.0):.2f})"
+                f"{m.get('alpha_ew', 0.0) * 100:+.1f}% ({m.get('alpha_ew_t', 0.0):.2f})"
                 if m.get("alpha_ew") is not None
                 else "n/a"
             )

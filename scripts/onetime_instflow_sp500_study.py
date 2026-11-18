@@ -421,13 +421,44 @@ def generate_markdown(
         if h1_a > 0 and h2_a > 0 and beta < 0.5 and t >= 2.0:
             cleared.append((vname, t, beta))
 
+    def _t(vname: str, window: str) -> float:
+        return float(variant_results.get(vname, {}).get(window, {}).get("alpha_t", 0.0))
+
     if cleared:
-        doc.append(f"**Passed Promotion Bar**: {len(cleared)} variant(s) cleared the bar:\n")
+        doc.append(f"**Cleared the full-window bar**: {len(cleared)} variant(s):\n")
         for name, t_stat, beta_val in cleared:
-            doc.append(f"- **{name}**: t={t_stat:.2f}, beta={beta_val:.2f}")
+            h2_t = _t(name, "H2")
+            status = "passes out of sample" if h2_t >= 2.0 else "`unproven` (out-of-sample half below t 2)"
+            doc.append(
+                f"- **{name}**: full t={t_stat:.2f}, H1 t={_t(name, 'H1'):.2f}, H2 t={h2_t:.2f}, "
+                f"beta={beta_val:.2f}: {status}"
+            )
+        doc.append(
+            "\nThe full-window t includes the half the defaults were chosen on, so it is not evidence on its own; "
+            "the H2 column above is the out-of-sample reading.\n"
+        )
     else:
         doc.append(
             "**Outcome**: `unproven`. No variant cleared the standing bar (t >= 2.0, alpha > 0 in both halves, beta < 0.5).\n"
+        )
+
+    # Universe comparison, computed from the table: does the S&P 100 result survive on the point-in-time S&P 500?
+    best: dict[str, tuple[str, float]] = {}
+    for vname in variant_results:
+        uni = "sp500" if vname.startswith("sp500") else "sp100"
+        full_t = _t(vname, "FULL")
+        if uni not in best or full_t > best[uni][1]:
+            best[uni] = (vname, full_t)
+    if "sp100" in best and "sp500" in best:
+        doc.append(
+            f"**Universe check**: best S&P 100 variant is `{best['sp100'][0]}` (full t={best['sp100'][1]:.2f}); "
+            f"best point-in-time S&P 500 variant is `{best['sp500'][0]}` (full t={best['sp500'][1]:.2f}). "
+            + (
+                "The S&P 100 result does not carry to the point-in-time S&P 500 universe, which points to a "
+                "survivorship or universe effect in the S&P 100 list (today's constituents).\n"
+                if best["sp500"][1] < 2.0 <= best["sp100"][1]
+                else "Both universes are on the same side of t 2.\n"
+            )
         )
 
     return "\n".join(doc) + "\n"

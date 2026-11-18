@@ -159,7 +159,7 @@ I would not retry large-cap earnings drift, long-only FX carry, insider clusters
 
 ## Implementation Status (PLAN-alphaideas.md, 2026-11)
 
-All 16 steps from the strategy review execution plan have been implemented and verified:
+The 16 steps of the strategy review plan are implemented. Study outcomes are in `docs/architecture/new-strategies-2026-11.md` section 4: none of the new strategies cleared the promotion bar, and no copier weights were changed.
 
 ### Shared Contracts & Infrastructure (Wave 0)
 - **[x] S0a (`tradingbot/utils/live_state.py`)**: `current_weights(bot)` implemented and verified in `tests/test_live_state.py`. Resolves signed holdings valued at latest prices, excluding `USD`.

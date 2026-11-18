@@ -199,11 +199,11 @@ def load_price_data() -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     return closes, qqq, rf
 
 
-def simulate_weights_stream(
+def simulate_weights_stream_with_cash(
     closes: pd.DataFrame,
     sleeve_weights: dict[str, float],
     step_days: int = 1,
-) -> tuple[pd.Series, pd.Series]:
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     """Simulate daily returns and turnover from target weights recomputed via compose_weights.
 
     Weights decided with data <= t earn the return of the next bar (t+1); the first bar earns 0.
@@ -214,12 +214,14 @@ def simulate_weights_stream(
 
     stream_rets = []
     stream_turnover = []
+    stream_cash: list[float] = []
     held_w: dict[str, float] = {}
 
     for i, dt in enumerate(dates):
         if i == 0:
             stream_rets.append(0.0)
             stream_turnover.append(0.0)
+            stream_cash.append(0.0)
             sub_closes = closes.loc[:dt]
             held_w = compose_weights(
                 sub_closes, day=dt.date(), buyback_events=[], sc13d_events=[], sleeve_weights=sleeve_weights
@@ -228,6 +230,8 @@ def simulate_weights_stream(
             # Return earned on dt from weights decided at dt-1
             day_ret = sum(held_w.get(s, 0.0) * daily_rets.loc[dt, s] for s in held_w if s in daily_rets.columns)
             stream_rets.append(day_ret)
+            # Idle share held through dt: compose_weights parks it in SHV, whose unadjusted close earns ~0.
+            stream_cash.append(float(held_w.get("SHV", 0.0)))
 
             # Rebalance with data <= dt
             sub_closes = closes.loc[:dt]
@@ -241,7 +245,18 @@ def simulate_weights_stream(
 
     ret_series = pd.Series(stream_rets, index=dates)
     to_series = pd.Series(stream_turnover, index=dates)
-    return ret_series, to_series
+    cash_series = pd.Series(stream_cash, index=dates)
+    return ret_series, to_series, cash_series
+
+
+def simulate_weights_stream(
+    closes: pd.DataFrame,
+    sleeve_weights: dict[str, float],
+    step_days: int = 1,
+) -> tuple[pd.Series, pd.Series]:
+    """Daily returns and turnover (the two-value contract); see simulate_weights_stream_with_cash."""
+    r, to, _ = simulate_weights_stream_with_cash(closes, sleeve_weights, step_days)
+    return r, to
 
 
 def run_parity_study() -> str:
@@ -267,7 +282,7 @@ def run_parity_study() -> str:
 
     for var_name, s_weights in variants:
         print(f"Simulating {var_name}...", file=sys.stderr)
-        r_stream, to_stream = simulate_weights_stream(closes, s_weights)
+        r_stream, to_stream, cash_stream = simulate_weights_stream_with_cash(closes, s_weights)
 
         r_h1 = r_stream.loc[:H1_END]
         q_h1 = q_ret.reindex(r_h1.index)
@@ -285,7 +300,12 @@ def run_parity_study() -> str:
         rf_full = rf.reindex(r_stream.index)
         m_full = compute_metrics(r_stream, q_full, rf_full, to_stream)
 
-        results[var_name] = {"h1": m_h1, "h2": m_h2, "full": m_full}
+        # Like-for-like with the published streams, which credit T-bill yield on idle cash.
+        r_tb = r_stream + cash_stream * rf.reindex(r_stream.index).ffill().fillna(0.0)
+        r_h2_tb = r_tb.loc[H2_START:]
+        m_h2_tb = compute_metrics(r_h2_tb, q_ret.reindex(r_h2_tb.index), rf.reindex(r_h2_tb.index), to_h2)
+
+        results[var_name] = {"h1": m_h1, "h2": m_h2, "full": m_full, "h2_tb": m_h2_tb}
 
         record_trial(
             bot="SleeveBlendBot_Parity",
@@ -319,6 +339,7 @@ def run_parity_study() -> str:
     ]
 
     failed_sleeves: list[str] = []
+    tb_rows: list[tuple[str, float, float, float, float, bool]] = []
     for key, pub in PUBLISHED_H2.items():
         reb = results[key]["h2"]
         gap_a = (reb.alpha - pub["alpha"]) * 100
@@ -326,6 +347,11 @@ def run_parity_study() -> str:
         gap_b = reb.beta - pub["beta"]
         gap_dd = (reb.max_dd - pub["max_dd"]) * 100
 
+        reb_tb = results[key]["h2_tb"]
+        tb_gap_a = (reb_tb.alpha - pub["alpha"]) * 100
+        tb_gap_t = reb_tb.t - pub["t"]
+        tb_passed = abs(tb_gap_a) <= 1.0 and abs(tb_gap_t) <= 0.5
+        tb_rows.append((key, reb_tb.alpha, reb_tb.t, tb_gap_a, tb_gap_t, tb_passed))
         passed = abs(gap_a) <= 1.0 and abs(gap_t) <= 0.5
         label = "PASS" if passed else "FAIL"
         if not passed:
@@ -385,6 +411,22 @@ def run_parity_study() -> str:
         )
     else:
         lines.append("All sleeves met parity criteria (|alpha gap| <= 1.0% and |t gap| <= 0.5).")
+    lines.extend(
+        [
+            "",
+            "Basis: the table above credits 0% on idle cash (what a paper bot's `portfolio_worth` earns). The published",
+            "sleeve streams credit T-bill yield on idle cash (`lift-over-t1-2026-11.md`, lever 1). Like-for-like, with",
+            "`^IRX` credited on each sleeve's idle share:",
+            "",
+            "| Price Sleeve | Rebuilt H2 alpha (T-bill) | t | Alpha gap | t gap | Within tolerance |",
+            "|---|---|---|---|---|---|",
+        ]
+    )
+    for key, a_tb, t_tb, ga, gt, ok in tb_rows:
+        lines.append(f"| {key} | {a_tb:+.1%} | {t_tb:.2f} | {ga:+.2f}% | {gt:+.2f} | {'yes' if ok else 'no'} |")
+    n_ok = sum(1 for r in tb_rows if r[5])
+    lines.append("")
+    lines.append(f"On the T-bill basis {n_ok} of {len(tb_rows)} sleeves are within tolerance.")
 
     return "\n".join(lines)
 
