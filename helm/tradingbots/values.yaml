@@ -580,6 +580,8 @@ bots:
 
 - name: option_catalystcallbot
   schedule: "15 15 * * 1-5" # 75-delta call into earnings, sold the day before
+  # Paused 2026-11-18: flat, all cash, exactly zero P&L for 34 days, so it produces no evidence.
+  suspend: true
 
 - name: option_mispricingbot
   schedule: "20 15 * * 1-5" # IV vs HAR fair vol, gap explained (earnings/VXN/news); butterfly or hedged straddle
@@ -592,12 +594,16 @@ bots:
 
 - name: option_earningscalendarbot
   schedule: "35 15 * * 1-5" # ATM call calendar into earnings when front IV is rich; live-only
+  # Paused 2026-11-18: flat, all cash, exactly zero P&L for 34 days, so it produces no evidence.
+  suspend: true
 
 - name: option_collarbot
   schedule: "40 15 * * 1-5" # AAPL shares + 25-delta put / 25-delta call collar
 
 - name: option_indexvolbot
   schedule: "45 15 * * 1-5" # SPY 10-delta iron condor, 10% wings, 35 DTE, only when ATM IV >= HAR fair + 3 pts
+  # Paused 2026-11-18: flat, all cash, exactly zero P&L for 34 days, so it produces no evidence.
+  suspend: true
 
 # Round 3 (2026-09-28), all paper and live-only: no per-name option history
 # exists to backtest them yet (scripts/onetime_option_replay_backtest.py will,
@@ -612,6 +618,8 @@ bots:
   schedule: "0 16 * * 1-5" # z-scored IV vs Yang-Zhang forecast, both directions, vega + crash-stress caps
 - name: option_dispersionbot
   schedule: "55 15 * * 1-5" # short SPY fly vs long member straddles at high implied correlation (waits for 60 days of history)
+  # Paused 2026-11-18: flat, all cash, exactly zero P&L for 34 days, so it produces no evidence.
+  suspend: true
 - name: option_earningscrushbot
   schedule: "30 14,16,19 * * 1-5" # enters within 2h of the close (19:30, or 16:30 on an early close), 14:30 closes after the open
 

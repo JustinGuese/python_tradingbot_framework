@@ -102,6 +102,7 @@ nav:
       - Event 13D Activist Drift: backtests/event-13d-2026-11.md
       - Buyback Drift Broad Universe: backtests/buyback-broad-2026-11.md
       - Event Buyback S&P 100: backtests/event-buyback-2026-11.md
+      - Buyback Point-in-Time S&P 500: backtests/buyback-pit-2026-11.md
       - Multi-Asset Carry: backtests/multiassetcarrybot.md
       - Short Vol Carry: backtests/shortvolcarrybot.md
   - API Reference:
