@@ -7,9 +7,13 @@ Monthly continuous-futures trend: sign of (fast MA - slow MA), inverse-vol sized
 Each name's signal is +1 when the fast moving average is above the slow one, else
 -1; weights are 1/realised-vol, normalised so the gross book is 1.0.
 
-Departures from source: long-only. The source is long/short unit-gross; here
-every would-be short leg is left in cash instead, so the book sums to less than
-1.0 whenever some names are in downtrends. No leverage and no roll model.
+Departures from source:
+  * Long-only ETF proxies: uses SPY, QQQ, IEF, USO, GLD, DBA instead of futures
+    contracts (t=2.36 result in docs/backtests/cft-longhistory-2026-11.md).
+  * Long-only: every would-be short leg is left in cash instead, so the book sums
+    to less than 1.0 whenever some names are in downtrends. No leverage and no roll model.
+  * Stateless live rebalance: when flat (`current_weights(self)` is empty) and any
+    trend is up, builds the book on any bar, not only on the first of a month.
 """
 
 from __future__ import annotations
@@ -20,10 +24,11 @@ from typing import ClassVar
 import pandas as pd
 
 from tradingbot.utils.botclass import Bot
+from tradingbot.utils.live_state import current_weights
 from tradingbot.utils.quantsmd_common import closes_frame, period_rolled
 from tradingbot.utils.runner import run_bot
 
-UNIVERSE = ["MES=F", "MNQ=F", "ZN=F", "CL=F", "GC=F", "ZC=F"]
+UNIVERSE = ["SPY", "QQQ", "IEF", "USO", "GLD", "DBA"]
 FAST = 63
 SLOW = 252
 VOL_WINDOW = 63
@@ -35,19 +40,23 @@ def compute_weights(
     fast: int = FAST,
     slow: int = SLOW,
     vol_window: int = VOL_WINDOW,
+    *,
+    is_flat: bool = False,
 ) -> dict[str, float] | None:
     """Long-only inverse-vol trend weights, rebalanced on the first bar of a month.
 
     ``closes`` is a wide adjusted-close frame (index ascending, one column per
     ticker, history up to and including the current bar). Returns ``None`` when
-    the last bar is not the first of a new month, and ``{}`` when there is not
-    enough history or no trend is up.
+    the last bar is not the first of a new month (unless ``is_flat`` is True and
+    an uptrend is present), and ``{}`` when there is not enough history or no
+    trend is up on a month-first bar.
 
     Weight for a long leg is ``(1/vol_i) / sum_j(1/vol_j)``, where the denominator
     runs over every valid ticker, long or would-be short, so that short legs are
     removed from the book rather than re-levelled onto the longs.
     """
-    if not period_rolled(closes.index, "M"):
+    month_rolled = period_rolled(closes.index, "M")
+    if not month_rolled and not is_flat:
         return None
     if len(closes) < slow + 1:
         return {}
@@ -68,6 +77,9 @@ def compute_weights(
     for ticker in rest.index:
         if fast_ma[ticker] > slow_ma[ticker]:
             weights[str(ticker)] = float(rest[ticker]) / denominator
+
+    if not month_rolled and not weights:
+        return None
     return weights
 
 
@@ -80,9 +92,8 @@ class QuantsmdContinuousFuturesTrendBot(Bot):
         slow: Slow simple-moving-average window in trading days. Must exceed fast.
         vol_window: Trading days in the realised-vol estimate used for sizing.
 
-    Caveat: yfinance micro-futures (MES=F, MNQ=F) history starts around 2019, and
-    the framework has no contract roll, multiplier or margin model. Treat this as a
-    signal proxy on continuous price series, not as a futures-account replication.
+    Uses liquid ETF proxies (SPY, QQQ, IEF, USO, GLD, DBA) matching the published
+    backtest. When flat live, it enters on any bar with active uptrends.
     """
 
     param_grid: ClassVar[dict] = {
@@ -118,9 +129,14 @@ class QuantsmdContinuousFuturesTrendBot(Bot):
         self.vol_window = vol_window
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
-        """Monthly long-only trend weights; ``None`` off the first bar of a month."""
+        """Monthly long-only trend weights; builds on any bar when flat with uptrends."""
         closes = closes_frame(self.datas, self.tradeable_tickers)
-        return compute_weights(closes, self.fast, self.slow, self.vol_window)
+        try:
+            holdings = current_weights(self)
+        except Exception:
+            holdings = None
+        is_flat = not bool(holdings)
+        return compute_weights(closes, self.fast, self.slow, self.vol_window, is_flat=is_flat)
 
 
 if __name__ == "__main__":

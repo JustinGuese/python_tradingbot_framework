@@ -81,6 +81,29 @@ nav:
     - Bot Class System: architecture/bot-class-system.md
     - Database Models: architecture/database-models.md
     - Short Selling: architecture/short-selling.md
+    - New Strategies & Rebalance (Nov 2026): architecture/new-strategies-2026-11.md
+  - Studies & Backtests:
+    - Strategy Review & New Sleeves (Nov 2026):
+      - S&P 500 Institutional Flow: backtests/instflow-sp500-2026-11.md
+      - InstFlow Turnover Hysteresis: backtests/instflow-hysteresis-2026-11.md
+      - Market-Neutral Stock Book: backtests/neutral-book-2026-11.md
+      - Sector-Hedged Buybacks: backtests/buyback-sector-hedge-2026-11.md
+      - Option-Implied Skew Long/Short: backtests/implied-longshort-2026-11.md
+      - Institutional 13F Signal: backtests/inst13f-2026-11.md
+      - Hyperliquid Funding Carry: backtests/funding-carry-2026-11.md
+      - Volatility-Managed QQQ: backtests/volmanaged-qqq-2026-11.md
+      - Sleeve Blend Parity: backtests/sleeveblend-parity-2026-11.md
+      - Sleeve Blend Volatility Scaling: backtests/blend-volscale-2026-11.md
+      - Retail Blend Study: backtests/retail-blend-2026-11.md
+      - Five-Sleeve Multi-Asset Blend: backtests/sleeve-blend-2026-11.md
+    - Core Strategy Studies:
+      - Continuous Futures Trend: backtests/cft-longhistory-2026-11.md
+      - InstitutionalFlowBot: backtests/institutionalflowbot.md
+      - Event 13D Activist Drift: backtests/event-13d-2026-11.md
+      - Buyback Drift Broad Universe: backtests/buyback-broad-2026-11.md
+      - Event Buyback S&P 100: backtests/event-buyback-2026-11.md
+      - Multi-Asset Carry: backtests/multiassetcarrybot.md
+      - Short Vol Carry: backtests/shortvolcarrybot.md
   - API Reference:
     - Core Classes:
       - Bot: api/bot.md

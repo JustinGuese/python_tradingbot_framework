@@ -28,6 +28,7 @@ import pandas as pd
 
 from tradingbot import quantsmd_quarterly_te_cost_gate as base
 from tradingbot.utils.botclass import Bot
+from tradingbot.utils.live_state import current_weights
 from tradingbot.utils.quantsmd_common import ETF8, closes_frame
 from tradingbot.utils.quantsmd_v2 import regime_scale, scale_book
 from tradingbot.utils.runner import run_bot
@@ -54,6 +55,7 @@ def compute_weights(
     max_annual_turnover: float,
     state: dict[str, Any],
     off_scale: float = OFF_SCALE,
+    current_holdings: dict[str, float] | None = None,
 ) -> dict[str, float] | None:
     """Return the regime-gated rebalance book, or ``None`` when no rebalance is due.
 
@@ -72,6 +74,7 @@ def compute_weights(
         te_window,
         max_annual_turnover,
         state,
+        current_holdings=current_holdings,
     )
     if book is None:
         return None
@@ -94,8 +97,7 @@ class QuantsmdQuarterlyTeCostGateGatedBot(Bot):
         off_scale: Multiplier on the rebalance book while SPY is at or below its
             200-bar SMA. 0.0 moves to cash; 0.5 halves the book.
 
-    As in the original, the gate's state lives on the instance. Each live
-    CronJob run starts with no state, so its first call always builds the book.
+    Like the base strategy, live rebalances are stateless via `current_weights(self)`.
     """
 
     # A 126-bar lookback with quarterly rebalances needs more than the default 1y.
@@ -143,6 +145,10 @@ class QuantsmdQuarterlyTeCostGateGatedBot(Bot):
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         """Return the gated book on a rebalance bar, or ``None`` to leave it untouched."""
         closes = closes_frame(self.datas, self.tradeable_tickers)
+        try:
+            holdings = current_weights(self)
+        except Exception:
+            holdings = None
         return compute_weights(
             closes,
             self.lookback,
@@ -153,6 +159,7 @@ class QuantsmdQuarterlyTeCostGateGatedBot(Bot):
             self.max_annual_turnover,
             self._state,
             self.off_scale,
+            current_holdings=holdings,
         )
 
 

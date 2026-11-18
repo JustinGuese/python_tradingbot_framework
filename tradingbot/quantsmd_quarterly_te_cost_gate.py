@@ -12,10 +12,13 @@ the rolling 365-day one-way turnover stays within 4.0x.
 
 Departures from source:
   * The source gate (RebalancePolicy with tracking-error and turnover limits) is
-    not in the source file. The gate here is a stateful approximation.
-  * State lives on the instance, so each live CronJob run starts fresh. The first
-    call always builds the book. Quarterly and tracking-error timing only apply
-    within one process, which means inside backtests. This is a known limitation.
+    not in the source file. The gate here is an approximation.
+  * Live rebalance (stateless): live CronJob runs take the held book from
+    `current_weights(self)`. A rebalance occurs on a quarter-first bar, on a
+    tracking-error breach against those real holdings, or when flat.
+  * The rolling 365-day turnover cap requires multi-day history and is
+    evaluated in backtests (where state is tracked on the instance across bars)
+    but dropped in live runs where each CronJob starts fresh.
 
 Universe: ETF8 (SPY, EFA, EEM, TLT, IEF, GLD, DBC, VNQ). SPY is the benchmark.
 """
@@ -25,6 +28,7 @@ from typing import Any, ClassVar
 import pandas as pd
 
 from tradingbot.utils.botclass import Bot
+from tradingbot.utils.live_state import current_weights
 from tradingbot.utils.quantsmd_common import ETF8, closes_frame, equal_weight, period_rolled
 from tradingbot.utils.runner import run_bot
 
@@ -49,6 +53,7 @@ def compute_weights(
     te_window: int,
     max_annual_turnover: float,
     state: dict[str, Any],
+    current_holdings: dict[str, float] | None = None,
 ) -> dict[str, float] | None:
     """Return the target book when a rebalance is due, otherwise ``None``.
 
@@ -57,12 +62,12 @@ def compute_weights(
     (the book held since the last rebalance, or ``None``) and ``"turnover"``
     (a list of ``(timestamp, one_way_turnover)`` pairs).
 
-    Fewer than ``lookback + 1`` rows returns ``{}``. The first call ever
-    always builds the book. Later calls rebalance on a quarter-first bar, or
-    when the held book's annualised tracking error against SPY over the last
-    ``te_window`` bars exceeds ``te_threshold``. A rebalance is skipped and
-    returns ``None`` when it would push the rolling 365-day turnover above
-    ``max_annual_turnover``.
+    Fewer than ``lookback + 1`` rows returns ``{}``. The first call ever (or a
+    flat live book) always builds the book. Later calls rebalance on a quarter-first
+    bar, or when the held book's annualised tracking error against SPY over the last
+    ``te_window`` bars exceeds ``te_threshold``. In backtests, a rebalance is skipped
+    and returns ``None`` when it would push the rolling 365-day turnover above
+    ``max_annual_turnover``; that cap is dropped in live runs.
     """
     if len(closes) < lookback + 1:
         return {}
@@ -71,6 +76,11 @@ def compute_weights(
     proposed = equal_weight(picks, cap)
 
     last = state.get("last_target")
+    is_live = False
+    if last is None and current_holdings:
+        last = current_holdings
+        is_live = True
+
     if last is None:
         due = True
     else:
@@ -86,10 +96,16 @@ def compute_weights(
     prior = last or {}
     turnover = 0.5 * sum(abs(proposed.get(t, 0.0) - prior.get(t, 0.0)) for t in set(proposed) | set(prior))
     now = closes.index[-1]
-    state["turnover"] = [(d, x) for d, x in state["turnover"] if (now - d).days <= _TURNOVER_WINDOW_DAYS]
-    if last is not None and sum(x for _, x in state["turnover"]) + turnover > max_annual_turnover:
+    if "turnover" in state:
+        state["turnover"] = [(d, x) for d, x in state["turnover"] if (now - d).days <= _TURNOVER_WINDOW_DAYS]
+    if (
+        not is_live
+        and last is not None
+        and sum(x for _, x in state.get("turnover", [])) + turnover > max_annual_turnover
+    ):
         return None
-    state["turnover"].append((now, turnover))
+    if "turnover" in state:
+        state["turnover"].append((now, turnover))
     state["last_target"] = proposed
     return proposed
 
@@ -106,10 +122,11 @@ class QuantsmdQuarterlyTeCostGateBot(Bot):
         te_window: Bars used to measure tracking error.
         max_annual_turnover: Cap on one-way turnover summed over the last 365 days.
 
-    The gate's state lives on the instance. Each live CronJob run starts with
-    no state, so its first call always builds the book. Quarterly and
-    tracking-error timing only apply within one process, such as a backtest.
-    This is a known limitation.
+    The gate rebalances on quarter-first bars, early on tracking-error breach
+    against SPY, or when flat. In backtests, state lives on the instance and the
+    rolling 365-day turnover cap is enforced. In live runs (where each CronJob
+    starts fresh), current holdings are read from `current_weights(self)` and
+    the turnover cap is dropped.
     """
 
     # A 126-bar lookback with quarterly rebalances needs more than the default 1y.
@@ -155,6 +172,10 @@ class QuantsmdQuarterlyTeCostGateBot(Bot):
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         """Return the book on a rebalance bar, or ``None`` to leave it untouched."""
         closes = closes_frame(self.datas, self.tradeable_tickers)
+        try:
+            holdings = current_weights(self)
+        except Exception:
+            holdings = None
         return compute_weights(
             closes,
             self.lookback,
@@ -164,6 +185,7 @@ class QuantsmdQuarterlyTeCostGateBot(Bot):
             self.te_window,
             self.max_annual_turnover,
             self._state,
+            current_holdings=holdings,
         )
 
 
