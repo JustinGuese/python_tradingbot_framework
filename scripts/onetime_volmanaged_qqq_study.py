@@ -395,27 +395,36 @@ def run_study() -> str:
         )
 
     # Findings section
+    cleared_variants = [
+        f"{int(r['target_vol']*100)}% vol, {r['window']}d"
+        for r in variant_results
+        if r["strat"]["full"]["t"] >= 2.0
+        and r["strat"]["full"]["alpha"] > 0
+        and r["strat"]["full"]["cagr_shv"] > r["static"]["full"]["cagr_shv"]
+        and abs(r["strat"]["full"]["beta"]) < 0.5
+    ]
+    verdict_status = "PASS" if cleared_variants else "unproven"
+
     findings = [
         "",
         "## Findings and Verdict",
         "",
-        "**Verdict: `unproven` (just lower beta).**",
+        f"**Verdict: `{verdict_status}`.**",
         "",
-        "1. **Fails to beat static mix on return:** Across all 4 pre-registered variants, volatility-managed QQQ delivers a **lower CAGR** than a static buy-and-hold mix of QQQ and SHV with the identical average exposure.",
+        "1. **Comparison to Static Mix:**",
     ]
     for r in variant_results:
         st = r["strat"]["full"]
         stat = r["static"]["full"]
         cagr_diff = st["cagr_shv"] - stat["cagr_shv"]
         findings.append(
-            f"   - {int(r['target_vol']*100)}% vol, {r['window']}d: {st['cagr_shv']:+.1%} CAGR vs {stat['cagr_shv']:+.1%} static ({cagr_diff:+.1%} drag)"
+            f"   - {int(r['target_vol']*100)}% vol, {r['window']}d: {st['cagr_shv']:+.1%} CAGR vs {stat['cagr_shv']:+.1%} static ({cagr_diff:+.1%} gap), Max DD: {st['max_dd']:.1%} vs {stat['max_dd']:.1%}"
         )
 
     sm = sma_base["full"]
     findings.extend([
-        "2. **Drawdown reduction is standard beta reduction:** While volatility management lowers peak-to-trough drawdowns (e.g. -15.6% vs -23.7% for 10% target vol), it does so by scaling down exposure during volatile markets — which are frequently followed by sharp market rebounds (e.g. March-April 2020), causing the strategy to miss the initial recovery.",
-        f"3. **Underperforms the SMA200 trend gate:** The QQQ SMA200 gate achieves {sm['cagr_shv']:+.1%} CAGR with a {sm['max_dd']:.1%} max drawdown and positive full-window alpha ({sm['alpha']:+.1%}, t={sm['t']:.2f}), whereas the 10% vol-managed strategies lag on returns.",
-        "4. **Conclusion:** Volatility-managed QQQ does not produce excess risk-adjusted return over a static equity/cash mix with equivalent exposure. It is purely a lower-beta implementation, not genuine alpha.",
+        f"2. **Comparison to SMA200 Trend Gate:** QQQ SMA200 gate CAGR: {sm['cagr_shv']:+.1%}, Max DD: {sm['max_dd']:.1%}, Alpha vs QQQ: {sm['alpha']:+.1%} (t={sm['t']:.2f}).",
+        f"3. **Outcome:** {'Variants passed: ' + ', '.join(cleared_variants) if cleared_variants else 'No volatility-managed variant passed the promotion bar over the static benchmark.'}",
         "",
     ])
 

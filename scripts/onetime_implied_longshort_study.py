@@ -41,6 +41,7 @@ import datetime
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -350,6 +351,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use synthetic option quotes for verification if DB unavailable",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run synthetic dry-run smoke test (writes to temp dir)",
+    )
     return parser.parse_args()
 
 
@@ -419,7 +425,11 @@ def check_db_available() -> bool:
 
 def main() -> int:
     args = parse_args()
-    out_path = Path(args.out)
+    is_synthetic = bool(args.mock or args.dry_run)
+    if is_synthetic:
+        out_path = Path(tempfile.gettempdir()) / Path(args.out).name
+    else:
+        out_path = Path(args.out)
 
     if args.names.strip():
         names = [s.strip().upper() for s in args.names.split(",") if s.strip()]
@@ -433,7 +443,7 @@ def main() -> int:
     signals_df = pd.DataFrame()
     db_ok = check_db_available()
 
-    if db_ok and not args.mock:
+    if db_ok and not is_synthetic:
         try:
             signals_df = load_signals_from_db(
                 underlyings=fetch_tickers,
@@ -446,7 +456,7 @@ def main() -> int:
             logger.warning("Database query failed: %s", e)
 
     # If DB unavailable and not mock, write pending study doc and exit cleanly
-    if signals_df.empty and not args.mock:
+    if signals_df.empty and not is_synthetic:
         logger.info("No option quotes available from DB; writing pending study document.")
         write_pending_doc(out_path)
         return 0
@@ -457,7 +467,7 @@ def main() -> int:
         write_pending_doc(out_path)
         return 0
 
-    if args.mock and signals_df.empty:
+    if is_synthetic and signals_df.empty:
         logger.info("Generating synthetic option signals for smoke test...")
         signals_df = generate_synthetic_option_signals(names, daily_px.index)
 
@@ -578,7 +588,10 @@ def main() -> int:
     verdict = "pass" if clears_bar else "unproven"
 
     # Build generated markdown doc
-    doc_lines = [
+    doc_lines = []
+    if is_synthetic:
+        doc_lines.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
+    doc_lines.extend([
         "# Option-Implied Skew Dollar-Neutral Long/Short Strategy Study (2026-11)",
         "",
         f"**Primary verdict: `{verdict}`**.",
@@ -601,7 +614,7 @@ def main() -> int:
         "",
         "| Variant | Signal | Top/Bottom N | Rebal | H1 t (QQQ) | H2 t (QQQ) | Full Alpha t (QQQ) | Full Beta | Full Alpha t (EW) | CAGR (5bp, 0% cash) | CAGR (5bp, T-bill) | CAGR (20bp) | Sharpe | Max DD |",
         "|:---|:---|---:|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+    ])
 
     for _, r in grid_df.iterrows():
         doc_lines.append(

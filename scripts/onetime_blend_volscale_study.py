@@ -184,7 +184,10 @@ def simulate_scaled_blend(
     dates: list[pd.Timestamp],
     base_weights: list[dict[str, float]],
 ) -> tuple[pd.Series, pd.Series]:
-    """Simulate daily returns of the blend scaled to a target invested share."""
+    """Simulate daily returns of the blend scaled to a target invested share.
+
+    Weights decided with data <= t earn the return of the next bar (t+1); the first bar earns 0.
+    """
     daily_rets = closes.pct_change().fillna(0.0)
 
     base_avg_invested = 0.759  # CFT 0.394 + SMA 0.185 + QTE 0.180
@@ -192,9 +195,9 @@ def simulate_scaled_blend(
 
     stream_rets = []
     stream_turnover = []
-    prior_w: dict[str, float] = {}
+    held_w: dict[str, float] = {}
 
-    for dt, w in zip(dates, base_weights, strict=False):
+    for i, (dt, w) in enumerate(zip(dates, base_weights, strict=False)):
         # Strip SHV parking before scaling the core positions
         core_w = {s: q * scale_factor for s, q in w.items() if s != "SHV"}
 
@@ -202,13 +205,18 @@ def simulate_scaled_blend(
         if target_invested <= 1.0:
             core_w["SHV"] = max(0.0, 1.0 - sum(core_w.values()))
 
-        all_syms = set(core_w.keys()) | set(prior_w.keys())
-        to = 0.5 * sum(abs(core_w.get(s, 0.0) - prior_w.get(s, 0.0)) for s in all_syms) if prior_w else 0.0
-        stream_turnover.append(to)
-        prior_w = core_w
+        if i == 0:
+            stream_rets.append(0.0)
+            stream_turnover.append(0.0)
+            held_w = core_w
+        else:
+            day_ret = sum(held_w.get(s, 0.0) * daily_rets.loc[dt, s] for s in held_w if s in daily_rets.columns)
+            stream_rets.append(day_ret)
 
-        day_ret = sum(core_w.get(s, 0.0) * daily_rets.loc[dt, s] for s in core_w if s in daily_rets.columns)
-        stream_rets.append(day_ret)
+            all_syms = set(core_w.keys()) | set(held_w.keys())
+            to = 0.5 * sum(abs(core_w.get(s, 0.0) - held_w.get(s, 0.0)) for s in all_syms)
+            stream_turnover.append(to)
+            held_w = core_w
 
     ret_series = pd.Series(stream_rets, index=dates)
     to_series = pd.Series(stream_turnover, index=dates)
@@ -329,27 +337,35 @@ def run_volscale_study() -> str:
             "",
             "## 4. Policy Decision & Verdict",
             "",
-            "**Decision: No leveraged or 100%-invested blend bot. B2 remains a study only.**",
-            "",
-            "Reasons established in study and confirmed by strategy review:",
-            "1. **Beta Limit Breach:** Scaling above 100% pushes beta toward and beyond the 0.50 ceiling:",
-            "   - 100% invested: H2 beta rises to ~0.33.",
-            "   - 150% invested: H2 beta reaches ~0.49 (borderline ceiling).",
-            "   - 200% invested: H2 beta exceeds 0.65, violating the core risk mandate (`beta < 0.5`).",
-            "2. **Severe Drawdown Expansion:** Full-window maximum drawdown deepens severely:",
-            "   - Base blend: -13.4%",
-            "   - 150% invested: -22.5%",
-            "   - 200% invested: -30.8%",
-            "3. **Financing Drag Destroys Alpha:** Margin interest at `rf + 0.5%/yr` creates a -2.5% to -5.1%/yr drag,",
-            "   significantly dampening the Sharpe ratio and net t-statistic.",
-            "4. **Execution Model Incompatibility:** The framework's `portfolio_manager.py` limits long-only buys to",
-            "   available spendable cash, and `short_carry.py` models only short borrow fees, not margin loan interest.",
-            "   A paper bot cannot trade or maintain >100% gross long exposure.",
-            "5. **Final Recommendation:** Deploy `SleeveBlendBot` at its natural unscaled allocation with idle cash parked",
-            "   in SHV, maintaining low beta (0.24) and shallow drawdown (-13.4%).",
-            "",
         ]
     )
+
+    passing_variants = [
+        item["cfg"]["label"]
+        for item in results
+        if item["cfg"]["target_invested"] > 1.0
+        and item["fin"]["h2"].beta < 0.5
+        and item["fin"]["h2"].t >= 2.0
+        and item["fin"]["h1"].alpha > 0
+        and item["fin"]["h2"].alpha > 0
+    ]
+
+    if passing_variants:
+        lines.append(f"**Decision: Leveraged variant(s) passed promotion bar: {', '.join(passing_variants)}.**\n")
+    else:
+        lines.append(
+            "**Decision: No leveraged variant passed the promotion bar (beta < 0.5, t >= 2.0, positive alpha in both halves). B2 remains a study only.**\n"
+        )
+
+    lines.append("Observed metrics by target allocation:")
+    for item in results:
+        cfg = item["cfg"]
+        fin_h2 = item["fin"]["h2"]
+        fin_full = item["fin"]["full"]
+        lines.append(
+            f"- **{cfg['label']}**: H2 Beta = {fin_h2.beta:.2f}, H2 t = {fin_h2.t:.2f}, Full Max DD = {fin_full.max_dd:.1%}, Financing Drag = {fin_full.financing_drag_pct:.2f}%/yr"
+        )
+    lines.append("")
 
     return "\n".join(lines)
 

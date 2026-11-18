@@ -529,7 +529,16 @@ def main() -> int:
     args = parser.parse_args()
 
     uri = RAW_POSTGRES_URI
+    if not uri or "stub:stub" in uri or "ci:ci@localhost" in uri:
+        logger.error("production database not reachable, study not run")
+        print("production database not reachable, study not run", file=sys.stderr)
+        return 1
+
     num_quarters, total_filings, total_holdings, quarter_rows, error_msg = check_quarter_counts(uri)
+    if error_msg is not None:
+        logger.error("production database not reachable, study not run: %s", error_msg)
+        print(f"production database not reachable, study not run ({error_msg})", file=sys.stderr)
+        return 1
 
     if num_quarters < MIN_REQUIRED_QUARTERS:
         logger.info(
@@ -543,8 +552,7 @@ def main() -> int:
             total_filings=total_filings,
             total_holdings=total_holdings,
             quarter_rows=quarter_rows,
-            reason=error_msg
-            or f"Only {num_quarters} valid quarters found in database (< {MIN_REQUIRED_QUARTERS} required).",
+            reason=f"Only {num_quarters} valid quarters found in database (< {MIN_REQUIRED_QUARTERS} required).",
         )
         return 0
 

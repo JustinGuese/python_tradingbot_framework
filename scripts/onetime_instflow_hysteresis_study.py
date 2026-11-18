@@ -33,6 +33,7 @@ import argparse
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import tradingbot.utils.db as db
+from scripts.study_prices import load_prices, require_coverage
 from tradingbot.institutionalflowbot import BENCHMARK
 from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.institutional_ta import accumulation_score, add_institutional_features, passes_mandate
@@ -108,40 +110,6 @@ def get_cache_dir() -> Path:
     default_p = Path(".cache/instflow")
     default_p.mkdir(parents=True, exist_ok=True)
     return default_p
-
-
-def fetch_symbol_ohlcv(symbol: str, start: str = FETCH_START, cache_dir: Path | None = None) -> pd.DataFrame:
-    """Fetch daily OHLCV from cache or yfinance."""
-    if cache_dir is not None:
-        cache_file = cache_dir / f"{symbol.replace('.', '_').replace('-', '_')}.parquet"
-        if cache_file.exists():
-            try:
-                df = pd.read_parquet(cache_file)
-                if not df.empty and "close" in df.columns:
-                    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
-                    return df
-            except Exception as e:
-                logger.debug("Failed reading cache for %s: %s", symbol, e)
-
-    try:
-        raw = yf.download(symbol, start=start, interval="1d", auto_adjust=True, progress=False)
-        if raw.empty:
-            return pd.DataFrame()
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
-        df = raw.dropna().reset_index()
-        df.columns = [str(c).lower() for c in df.columns]
-        df = df.rename(columns={"date": "timestamp", "datetime": "timestamp"})
-        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
-        df["symbol"] = symbol
-        df = df[["symbol", "timestamp", "open", "high", "low", "close", "volume"]]
-
-        if cache_dir is not None and not df.empty:
-            df.to_parquet(cache_file, index=False)
-        return df
-    except Exception as exc:
-        logger.debug("Failed to download %s: %s", symbol, exc)
-        return pd.DataFrame()
 
 
 def download_irx_daily(start: str = FETCH_START) -> pd.Series:
@@ -345,9 +313,19 @@ def compute_metrics(
 def generate_markdown(
     variant_results: dict[str, dict[str, Any]],
     universe_size: int,
+    dry_run: bool = False,
 ) -> str:
     """Generate study markdown report directly from computed numbers."""
-    doc = [
+    v1 = variant_results.get("instflow_hold_none")
+    v2 = variant_results.get("instflow_hold_30")
+    v3 = variant_results.get("instflow_hold_40")
+    if v1 is not None and v2 is not None and v3 is not None and v1 == v2 == v3:
+        raise RuntimeError("Hysteresis variants produced identical metrics; parameter had no effect.")
+
+    doc = []
+    if dry_run:
+        doc.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
+    doc.extend([
         "# InstitutionalFlowBot Turnover Hysteresis Study (2026-11)",
         "",
         "Evaluates whether adding rank hysteresis (`hold_rank`) to InstitutionalFlowBot reduces churn and trading costs "
@@ -375,7 +353,7 @@ def generate_markdown(
         "",
         "| Variant | top_n | hold_rank | Description |",
         "|---|---|---|---|",
-    ]
+    ])
 
     for vname, cfg in PRE_REGISTERED_VARIANTS.items():
         doc.append(f"| {vname} | {cfg['top_n']} | {cfg['hold_rank']} | {cfg['description']} |")
@@ -454,8 +432,7 @@ def generate_markdown(
         doc.append(
             "**Outcome**: `Default stays None`.\n"
             "Neither `hold_rank=30` nor `hold_rank=40` cleared the hurdle of beating the default on both H2 alpha t "
-            "and 20 bp CAGR. While turnover hysteresis successfully reduces weekly fills, the delayed replacement of "
-            "fading momentum names introduces drag that offsets the fee savings. InstitutionalFlowBot ships with default `hold_rank=None`."
+            f"and 20 bp CAGR (default H2 t={def_h2_t:.2f}, default 20bp CAGR={def_full_20bp:.2f}%). InstitutionalFlowBot ships with default `hold_rank=None`.\n"
         )
 
     return "\n".join(doc) + "\n"
@@ -463,6 +440,8 @@ def generate_markdown(
 
 def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
     t0 = time.time()
+    if dry_run:
+        out_path = Path(tempfile.gettempdir()) / out_path.name
     cache_dir = get_cache_dir()
     init_local_db(cache_dir)
     logger.info("Starting InstitutionalFlow turnover hysteresis study (dry_run=%s)", dry_run)
@@ -476,9 +455,13 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
         logger.info("Full study mode: testing with %d symbols", len(sample_symbols))
 
     # 2. Load frames and compute TA features
+    raw_frames = load_prices(sample_symbols, start=FETCH_START, cache_dir=cache_dir)
+    if not dry_run:
+        require_coverage(raw_frames, SP100, min_share=0.95, label="SP100 current universe")
+
     frames: dict[str, pd.DataFrame] = {}
     for s in sample_symbols:
-        f = fetch_symbol_ohlcv(s, start=FETCH_START, cache_dir=cache_dir)
+        f = raw_frames.get(s, pd.DataFrame())
         if not f.empty and len(f) > 50:
             try:
                 frames[s] = add_institutional_features(f)
@@ -495,18 +478,18 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
 
     # 3. Pre-index frames by timestamp
     candidate_universe = {s for s in frames if s != BENCHMARK}
-    common_dates = set(qqq_frame["timestamp"])
-    for _s, f in frames.items():
-        common_dates = common_dates.intersection(set(f["timestamp"]))
-    sorted_dates = sorted(common_dates)
+    dates = qqq_frame[(qqq_frame["timestamp"] >= START_DATE) & (qqq_frame["timestamp"] <= END_DATE)][
+        "timestamp"
+    ].tolist()
+    sorted_dates = sorted(dates)
 
-    by_date: dict[pd.Timestamp, dict[str, Any]] = {}
+    by_date: dict[pd.Timestamp, dict[str, Any]] = {d: {} for d in sorted_dates}
     for s, f in frames.items():
-        f_sub = f.set_index("timestamp")
-        for dt, row in f_sub.iterrows():
-            if dt not in by_date:
-                by_date[dt] = {}
-            by_date[dt][s] = row
+        sub = f[(f["timestamp"] >= START_DATE) & (f["timestamp"] <= END_DATE)].set_index("timestamp")
+        d_map = sub.to_dict("index")
+        for dt, row_dict in d_map.items():
+            if dt in by_date:
+                by_date[dt][s] = row_dict
 
     # 4. Evaluate each pre-registered variant
     variant_results: dict[str, dict[str, Any]] = {}
@@ -557,7 +540,7 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
             logger.debug("Failed to record trial: %s", e)
 
     # 5. Generate and write markdown report
-    doc_text = generate_markdown(variant_results, len(candidate_universe))
+    doc_text = generate_markdown(variant_results, len(candidate_universe), dry_run=dry_run)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(doc_text)
     logger.info("Wrote study report to %s (%d bytes)", out_path, len(doc_text))

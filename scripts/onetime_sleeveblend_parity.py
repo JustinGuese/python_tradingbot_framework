@@ -204,30 +204,40 @@ def simulate_weights_stream(
     sleeve_weights: dict[str, float],
     step_days: int = 1,
 ) -> tuple[pd.Series, pd.Series]:
-    """Simulate daily returns and turnover from target weights recomputed via compose_weights."""
+    """Simulate daily returns and turnover from target weights recomputed via compose_weights.
+
+    Weights decided with data <= t earn the return of the next bar (t+1); the first bar earns 0.
+    """
     daily_rets = closes.pct_change().fillna(0.0)
     dates = closes.loc[COMMON_START:].index
     dates = [d for d in dates if d.dayofweek < 5]
 
     stream_rets = []
     stream_turnover = []
-    prior_w: dict[str, float] = {}
+    held_w: dict[str, float] = {}
 
-    for dt in dates:
-        sub_closes = closes.loc[:dt]
-        w = compose_weights(
-            sub_closes, day=dt.date(), buyback_events=[], sc13d_events=[], sleeve_weights=sleeve_weights
-        )
+    for i, dt in enumerate(dates):
+        if i == 0:
+            stream_rets.append(0.0)
+            stream_turnover.append(0.0)
+            sub_closes = closes.loc[:dt]
+            held_w = compose_weights(
+                sub_closes, day=dt.date(), buyback_events=[], sc13d_events=[], sleeve_weights=sleeve_weights
+            )
+        else:
+            # Return earned on dt from weights decided at dt-1
+            day_ret = sum(held_w.get(s, 0.0) * daily_rets.loc[dt, s] for s in held_w if s in daily_rets.columns)
+            stream_rets.append(day_ret)
 
-        # Turnover vs prior target weights
-        all_syms = set(w.keys()) | set(prior_w.keys())
-        to = 0.5 * sum(abs(w.get(s, 0.0) - prior_w.get(s, 0.0)) for s in all_syms) if prior_w else 0.0
-        stream_turnover.append(to)
-        prior_w = w
-
-        # One-day forward return
-        day_ret = sum(w.get(s, 0.0) * daily_rets.loc[dt, s] for s in w if s in daily_rets.columns)
-        stream_rets.append(day_ret)
+            # Rebalance with data <= dt
+            sub_closes = closes.loc[:dt]
+            new_w = compose_weights(
+                sub_closes, day=dt.date(), buyback_events=[], sc13d_events=[], sleeve_weights=sleeve_weights
+            )
+            all_syms = set(new_w.keys()) | set(held_w.keys())
+            to = 0.5 * sum(abs(new_w.get(s, 0.0) - held_w.get(s, 0.0)) for s in all_syms)
+            stream_turnover.append(to)
+            held_w = new_w
 
     ret_series = pd.Series(stream_rets, index=dates)
     to_series = pd.Series(stream_turnover, index=dates)
@@ -308,6 +318,7 @@ def run_parity_study() -> str:
         "|---|---|---|---|---|---|",
     ]
 
+    failed_sleeves: list[str] = []
     for key, pub in PUBLISHED_H2.items():
         reb = results[key]["h2"]
         gap_a = (reb.alpha - pub["alpha"]) * 100
@@ -315,11 +326,18 @@ def run_parity_study() -> str:
         gap_b = reb.beta - pub["beta"]
         gap_dd = (reb.max_dd - pub["max_dd"]) * 100
 
+        passed = abs(gap_a) <= 1.0 and abs(gap_t) <= 0.5
+        label = "PASS" if passed else "FAIL"
+        if not passed:
+            failed_sleeves.append(key)
+
+        notes = label
+        if "quarterly" in key:
+            notes += " (Stateless: TE-breach early exit omitted)"
+
         lines.extend(
             [
-                f"| **{key}** | Alpha/yr | {pub['alpha']:+.1%} | {reb.alpha:+.1%} | **{gap_a:+.2f}%** | "
-                + ("Stateless: TE-breach early exit omitted" if "quarterly" in key else "Close match")
-                + " |",
+                f"| **{key}** | Alpha/yr | {pub['alpha']:+.1%} | {reb.alpha:+.1%} | **{gap_a:+.2f}%** | {notes} |",
                 f"| | t-stat | {pub['t']:.2f} | {reb.t:.2f} | **{gap_t:+.2f}** | |",
                 f"| | Beta | {pub['beta']:.2f} | {reb.beta:.2f} | **{gap_b:+.2f}** | |",
                 f"| | Max DD | {pub['max_dd']:.1%} | {reb.max_dd:.1%} | **{gap_dd:+.1f}%** | |",
@@ -357,20 +375,16 @@ def run_parity_study() -> str:
             "",
             "## 4. Findings & Verdict",
             "",
-            "**Verdict: `unproven`.**",
-            "",
-            "1. **ContinuousFuturesTrend Parity:** Close agreement on H2 alpha and t-stat. The inverse-vol monthly sizing rule",
-            "   operates with high fidelity between the study and `compose_weights`.",
-            "2. **SmaDailyGated Parity:** Identical daily rebalance timing and 50/200 SMA sector trend with SPY regime gate.",
-            "3. **QuarterlyTeCostGate Gap:** A modest gap exists in `QuarterlyTeCostGate` (+5.8% to +6.3% alpha). As pre-registered",
-            "   in PLAN-alphaideas.md Step B1, tracking-error early rebalance is deliberately omitted from the blend bot to keep",
-            "   live rebalancing completely stateless across daily CronJob instances. This slight conservatism avoids keeping",
-            "   intra-quarter state on the instance and confirms the documented departure.",
-            "4. **Conclusion:** Parity is established within acceptable implementation tolerance. No tuning or curve-fitting was",
-            "   applied to eliminate the documented gap.",
+            f"**Verdict: `{'PASS' if not failed_sleeves else 'FAIL'}`.**",
             "",
         ]
     )
+    if failed_sleeves:
+        lines.append(
+            f"Parity check failed for {len(failed_sleeves)} sleeve(s): {', '.join(failed_sleeves)} (|alpha gap| > 1.0% or |t gap| > 0.5)."
+        )
+    else:
+        lines.append("All sleeves met parity criteria (|alpha gap| <= 1.0% and |t gap| <= 0.5).")
 
     return "\n".join(lines)
 

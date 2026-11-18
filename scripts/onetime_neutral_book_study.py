@@ -39,6 +39,7 @@ import contextlib
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import tradingbot.utils.db as db
+from scripts.study_prices import load_prices, require_coverage
 from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.cs_neutral_book import build_cs_neutral_book
 from tradingbot.utils.trial_registry import record_trial
@@ -92,44 +94,6 @@ def get_cache_dir() -> Path:
     default_p = Path(".cache/sp500")
     default_p.mkdir(parents=True, exist_ok=True)
     return default_p
-
-
-def fetch_symbol_ohlcv(symbol: str, start: str = FETCH_START, cache_dir: Path | None = None) -> pd.DataFrame:
-    """Fetch daily OHLCV from yfinance with disk caching."""
-    if cache_dir is not None:
-        cache_file = cache_dir / f"{symbol.replace('.', '_').replace('-', '_')}.parquet"
-        if cache_file.exists():
-            try:
-                df = pd.read_parquet(cache_file)
-                if not df.empty and "close" in df.columns:
-                    return df
-            except Exception:
-                pass
-
-    try:
-        data = yf.download(
-            symbol,
-            start=start,
-            end="2026-11-05",
-            progress=False,
-            auto_adjust=True,
-        )
-        if data.empty:
-            return pd.DataFrame()
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = [c[0].lower() for c in data.columns]
-        else:
-            data.columns = [c.lower() for c in data.columns]
-
-        df = data[["close"]].dropna()
-        if cache_dir is not None and not df.empty:
-            cache_file = cache_dir / f"{symbol.replace('.', '_').replace('-', '_')}.parquet"
-            with contextlib.suppress(Exception):
-                df.to_parquet(cache_file)
-        return df
-    except Exception as e:
-        logger.debug("Failed fetching %s: %s", symbol, e)
-        return pd.DataFrame()
 
 
 def load_irx_series(start: str = START_DATE, end: str = END_DATE) -> pd.Series:
@@ -313,9 +277,13 @@ def generate_markdown(
     coverage_stats: list[dict[str, Any]],
     results: dict[str, dict[str, Any]],
     dropped_names: dict[str, list[str]],
+    dry_run: bool = False,
 ) -> str:
     """Generate the full backtest report in markdown format."""
-    lines: list[str] = [
+    lines: list[str] = []
+    if dry_run:
+        lines.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
+    lines.extend([
         "# Neutral Stock Book on the S&P 500 — Walk-Forward Backtest (2026-11)",
         "",
         "Evaluates the cross-sectional market-neutral stock book engine (F1) across the S&P 500 universe",
@@ -340,7 +308,7 @@ def generate_markdown(
         "",
         "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
         "|---|---|---|---|---|",
-    ]
+    ])
 
     for c in coverage_stats:
         lines.append(f"| {c['year']} | {c['total']} | {c['with_data']} | {c['dropped']} | {c['missing_share']:.1f}% |")
@@ -400,9 +368,22 @@ def generate_markdown(
     lines.append("## Verdict and Promotion Assessment")
     lines.append("")
     lines.append("- **Bar**: alpha vs QQQ, t >= 2.0, positive in both halves, beta < 0.5.")
-    lines.append("- The market-neutral book demonstrates near-zero beta to QQQ across all 12 variants.")
-    lines.append("- High reversal weighting produces higher turnover and cost drag at 20 bp.")
-    lines.append("- Idle cash parking via SHV (`park_idle_cash`) provides substantial risk-free baseline lift.")
+    best_h2_t = max((v.get("H2", {}).get("alpha_t", -999.0) for v in results.values()), default=0.0)
+    max_abs_beta = max((abs(v.get("H2", {}).get("beta", 0.0)) for v in results.values()), default=0.0)
+    passing_variants = [
+        vname
+        for vname, v in results.items()
+        if v.get("H1", {}).get("alpha", 0.0) > 0
+        and v.get("H2", {}).get("alpha", 0.0) > 0
+        and v.get("H2", {}).get("alpha_t", -999.0) >= 2.0
+        and abs(v.get("H2", {}).get("beta", 999.0)) < 0.5
+    ]
+    lines.append(f"- **Best H2 t-stat**: {best_h2_t:.2f} across all {len(results)} variants.")
+    lines.append(f"- **Max |beta| on H2**: {max_abs_beta:.2f} across all variants.")
+    if passing_variants:
+        lines.append(f"- **Outcome**: PASS ({len(passing_variants)} variant(s) passed: {', '.join(passing_variants)}).")
+    else:
+        lines.append("- **Outcome**: FAIL (no variant passed the promotion bar).")
     lines.append("")
     return "\n".join(lines)
 
@@ -410,6 +391,8 @@ def generate_markdown(
 def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
     """Run the neutral stock book walk-forward study."""
     t0 = time.time()
+    if dry_run:
+        out_path = Path(tempfile.gettempdir()) / out_path.name
     cache_dir = get_cache_dir()
     init_local_db(cache_dir)
 
@@ -471,21 +454,21 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
         }
     else:
         # Full study load
-        qqq_df = fetch_symbol_ohlcv("QQQ", start=FETCH_START, cache_dir=cache_dir)
-        spy_df = fetch_symbol_ohlcv("SPY", start=FETCH_START, cache_dir=cache_dir)
         rf_series = load_irx_series(start=START_DATE, end=END_DATE)
 
-        # Load price panel
+        # Load union of sp500_members(d) over all rebalance dates plus SP500 and SPY/QQQ
+        rebalance_sample = pd.date_range(START_DATE, END_DATE, freq="MS")
         all_members = set(SP500)
-        p_cols: dict[str, pd.Series] = {}
-        if not qqq_df.empty:
-            p_cols["QQQ"] = qqq_df["close"]
-        if not spy_df.empty:
-            p_cols["SPY"] = spy_df["close"]
+        for dt in rebalance_sample:
+            all_members.update(sp500_members(dt.strftime("%Y-%m-%d")))
+        symbols_to_load = sorted(all_members | {"SPY", "QQQ"})
 
-        for s in list(all_members)[:100]:  # Cap symbol loading for offline speed
-            df_s = fetch_symbol_ohlcv(s, start=FETCH_START, cache_dir=cache_dir)
-            if not df_s.empty:
+        raw_frames = load_prices(symbols_to_load, start=FETCH_START, cache_dir=cache_dir)
+        require_coverage(raw_frames, SP500, min_share=0.95, label="SP500 current universe")
+
+        p_cols: dict[str, pd.Series] = {}
+        for s, df_s in raw_frames.items():
+            if not df_s.empty and "close" in df_s.columns:
                 p_cols[s] = df_s["close"]
 
         prices = pd.DataFrame(p_cols).dropna(how="all").ffill()
@@ -567,7 +550,7 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
         )
 
     # 4. Generate markdown report
-    md = generate_markdown(coverage_stats, variant_results, dropped_names)
+    md = generate_markdown(coverage_stats, variant_results, dropped_names, dry_run=dry_run)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(md, encoding="utf-8")
     logger.info("Wrote study report to %s in %.1fs", out_path, time.time() - t0)

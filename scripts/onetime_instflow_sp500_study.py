@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import tradingbot.utils.db as db
+from scripts.study_prices import load_prices, require_coverage
 from tradingbot.institutionalflowbot import BENCHMARK
 from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.institutional_ta import accumulation_score, add_institutional_features, passes_mandate
@@ -88,39 +90,6 @@ def get_cache_dir() -> Path:
     default_p = Path(".cache/sp500")
     default_p.mkdir(parents=True, exist_ok=True)
     return default_p
-
-
-def fetch_symbol_ohlcv(symbol: str, start: str = FETCH_START, cache_dir: Path | None = None) -> pd.DataFrame:
-    """Fetch daily OHLCV from yfinance with disk caching."""
-    if cache_dir is not None:
-        cache_file = cache_dir / f"{symbol.replace('.', '_').replace('-', '_')}.parquet"
-        if cache_file.exists():
-            try:
-                df = pd.read_parquet(cache_file)
-                if not df.empty and "close" in df.columns:
-                    return df
-            except Exception:
-                pass
-
-    try:
-        raw = yf.download(symbol, start=start, interval="1d", auto_adjust=True, progress=False)
-        if raw.empty:
-            return pd.DataFrame()
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
-        df = raw.dropna().reset_index()
-        df.columns = [str(c).lower() for c in df.columns]
-        df = df.rename(columns={"date": "timestamp", "datetime": "timestamp"})
-        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_localize(None)
-        df["symbol"] = symbol
-        df = df[["symbol", "timestamp", "open", "high", "low", "close", "volume"]]
-
-        if cache_dir is not None and not df.empty:
-            df.to_parquet(cache_file, index=False)
-        return df
-    except Exception as exc:
-        logger.debug("Failed to download %s: %s", symbol, exc)
-        return pd.DataFrame()
 
 
 def download_irx_daily(start: str = FETCH_START) -> pd.Series:
@@ -349,9 +318,13 @@ def generate_markdown(
     coverage_stats: dict[int, dict[str, Any]],
     variant_results: dict[str, dict[str, Any]],
     dropped_names: dict[str, list[str]],
+    dry_run: bool = False,
 ) -> str:
     """Generate Markdown study doc following PLAN-alphaideas.md standards."""
-    doc = [
+    doc = []
+    if dry_run:
+        doc.append("SYNTHETIC SMOKE TEST, NOT RESULTS\n")
+    doc.extend([
         "# InstitutionalFlow on the S&P 500 — Walk-Forward Backtest (2026-11)\n",
         "Evaluates whether the large-cap momentum + trend filter edge discovered on the S&P 100 ",
         "generalizes to the broader S&P 500 when using point-in-time constituent membership (`sp500_members(as_of)`).\n",
@@ -368,7 +341,7 @@ def generate_markdown(
         "for the missing fraction:\n",
         "| Year | Total Members | Names with Data | Dropped for Missing History | Missing Share |",
         "|---|---|---|---|---|",
-    ]
+    ])
 
     for yr in sorted(coverage_stats.keys()):
         s = coverage_stats[yr]
@@ -453,8 +426,6 @@ def generate_markdown(
     else:
         doc.append(
             "**Outcome**: `unproven`. No variant cleared the standing bar (t >= 2.0, alpha > 0 in both halves, beta < 0.5).\n"
-            "While momentum on S&P 500 produces positive returns, widening the universe beyond S&P 100 introduces "
-            "lower-liquidity names and reduces the risk-adjusted edge vs QQQ. InstitutionalFlow remains paper-only on S&P 100."
         )
 
     return "\n".join(doc) + "\n"
@@ -462,6 +433,8 @@ def generate_markdown(
 
 def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
     t0 = time.time()
+    if dry_run:
+        out_path = Path(tempfile.gettempdir()) / out_path.name
     cache_dir = get_cache_dir()
     init_local_db(cache_dir)
     logger.info("Starting InstitutionalFlow S&P 500 walk-forward study (dry_run=%s)", dry_run)
@@ -482,9 +455,12 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
         logger.info("Full study mode: %d unique symbols to fetch/load", len(sample_symbols))
 
     # 2. Fetch/load frames
+    raw_frames = load_prices(sample_symbols, start=FETCH_START, cache_dir=cache_dir)
+    if not dry_run:
+        require_coverage(raw_frames, SP100, min_share=0.95, label="SP100 current universe")
+
     frames: dict[str, pd.DataFrame] = {}
-    for s in sample_symbols:
-        f = fetch_symbol_ohlcv(s, start=FETCH_START, cache_dir=cache_dir)
+    for s, f in raw_frames.items():
         if not f.empty and len(f) > 50:
             try:
                 frames[s] = add_institutional_features(f)
@@ -586,7 +562,7 @@ def run_study(dry_run: bool = False, out_path: Path = DEFAULT_DOC_OUT) -> int:
         )
 
     # 5. Generate and write markdown document
-    md = generate_markdown(coverage_stats, variant_results, dropped_names)
+    md = generate_markdown(coverage_stats, variant_results, dropped_names, dry_run=dry_run)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(md, encoding="utf-8")
     logger.info("Wrote study doc to %s in %.1fs", out_path, time.time() - t0)

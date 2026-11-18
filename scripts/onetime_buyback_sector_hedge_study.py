@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from scripts.study_prices import load_prices, require_coverage
 from tradingbot.utils.alpha_report import alpha_stats
 from tradingbot.utils.buyback_rules import _extract_symbol_and_entry
 from tradingbot.utils.quantsmd_common import SECTORS9
@@ -77,17 +78,15 @@ def load_data(start: str = START_DATE) -> tuple[pd.DataFrame, pd.DataFrame, pd.S
     etf_raw = yf.download(etf_tickers, start=start, auto_adjust=True, progress=False)["Close"]
     etf_raw.index = pd.DatetimeIndex(etf_raw.index).normalize()
 
-    # Load stock prices from cache or fallback download
+    # Load stock prices via study_prices with coverage check
+    cache_dir = Path(os.environ.get("RETUNE_SCRATCH", ".cache/sp500"))
+    raw_frames = load_prices(SP100, start=start, cache_dir=cache_dir)
+    require_coverage(raw_frames, SP100, min_share=0.95, label="SP100 current universe")
+
     stock_closes: dict[str, pd.Series] = {}
-    cache_prices = Path(".cache/broad/prices.pkl")
-    if cache_prices.exists():
-        with open(cache_prices, "rb") as f:
-            raw_prices = pickle.load(f)
-        for s in SP100:
-            if s in raw_prices and not raw_prices[s].empty:
-                ser = raw_prices[s]
-                ser.index = pd.DatetimeIndex(ser.index).normalize()
-                stock_closes[s] = ser
+    for s, df_s in raw_frames.items():
+        if not df_s.empty and "close" in df_s.columns:
+            stock_closes[s] = df_s["close"]
 
     stocks_df = pd.DataFrame(stock_closes).reindex(etf_raw.index).ffill()
 
@@ -128,6 +127,36 @@ def precompute_active_by_date(
     return active_by_day
 
 
+def _compute_hedge_weights(
+    active: list[str],
+    variant: str,
+    valid_cols: set[str],
+) -> dict[str, float]:
+    valid_active = [s for s in active if s in valid_cols]
+    if not valid_active:
+        return {}
+    n = len(valid_active)
+    w = min(1.0 / n, CAP)
+    total_long_w = n * w
+    weights: dict[str, float] = {s: w for s in valid_active}
+
+    if variant == "qqq_hedge":
+        weights["QQQ"] = -total_long_w
+    elif variant == "sector_hedge":
+        for s in valid_active:
+            sec = sector_etf(s)
+            weights[sec] = weights.get(sec, 0.0) - w
+    elif variant == "blend_50_50":
+        half_long = 0.5 * total_long_w
+        weights["QQQ"] = -half_long
+        for s in valid_active:
+            sec = sector_etf(s)
+            sec_w = 0.5 * w
+            weights[sec] = weights.get(sec, 0.0) - sec_w
+
+    return weights
+
+
 def run_simulation(
     variant: str,
     active_by_date: dict[Any, list[str]],
@@ -136,7 +165,10 @@ def run_simulation(
     daily_rf: pd.Series,
     cost_bp: float = 5.0,
 ) -> dict[str, Any]:
-    """Simulate daily returns for a hedge variant net of trading costs and borrow fee."""
+    """Simulate daily returns for a hedge variant net of trading costs and borrow fee.
+
+    Weights decided with data <= t earn the return of the next bar (t+1); the first bar earns 0.
+    """
     dates = stocks_df.index
     stock_rets = stocks_df.pct_change().fillna(0.0)
     etf_rets = etf_df.pct_change().fillna(0.0)
@@ -146,65 +178,50 @@ def run_simulation(
     daily_idle_cash = np.zeros(n_days)
     daily_long_ret = np.zeros(n_days)
     daily_short_ret = np.zeros(n_days)
-
-    prev_weights: dict[str, float] = {}
-    cost_per_side = cost_bp / 10000.0
     turnover_costs = np.zeros(n_days)
+
+    cost_per_side = cost_bp / 10000.0
+    valid_stock_cols = set(stock_rets.columns)
+    prev_weights: dict[str, float] = {}
 
     for i, d in enumerate(dates):
         cur_date = d.date() if isinstance(d, (pd.Timestamp, datetime)) else d
         raw_active = active_by_date.get(cur_date, [])
-        active = [s for s in raw_active if s in stock_rets.columns]
+        cur_weights = _compute_hedge_weights(raw_active, variant, valid_stock_cols)
 
-        cur_weights: dict[str, float] = {}
-        if active:
-            n = len(active)
-            w = min(1.0 / n, CAP)
-            long_ret = 0.0
-            short_ret = 0.0
-            total_long_w = n * w
+        if i == 0:
+            # First bar earns 0
+            daily_idle_cash[0] = 1.0
+            turnover_costs[0] = 0.0
+            prev_weights = cur_weights
+        else:
+            # Return earned on bar d comes from weights decided at bar d-1 (prev_weights)
+            long_ret = sum(
+                w * stock_rets.at[d, s]
+                for s, w in prev_weights.items()
+                if w > 0 and s in stock_rets.columns
+            )
+            short_ret = sum(
+                w * etf_rets.at[d, s]
+                for s, w in prev_weights.items()
+                if w < 0 and s in etf_rets.columns
+            )
 
-            for s in active:
-                cur_weights[s] = w
-                long_ret += w * stock_rets.at[d, s]
+            prev_long_w = sum(w for w in prev_weights.values() if w > 0)
+            prev_gross_short = sum(abs(w) for w in prev_weights.values() if w < 0)
+            prev_gross = prev_long_w + prev_gross_short
+            prev_idle = max(0.0, min(1.0, 2.0 - prev_gross))
 
-            if variant == "qqq_hedge":
-                cur_weights["QQQ"] = -total_long_w
-                short_ret = -total_long_w * etf_rets.at[d, "QQQ"]
-                daily_gross_short[i] = total_long_w
-            elif variant == "sector_hedge":
-                sec_shorts: dict[str, float] = {}
-                for s in active:
-                    sec = sector_etf(s)
-                    sec_shorts[sec] = sec_shorts.get(sec, 0.0) - w
-                    short_ret -= w * etf_rets.at[d, sec]
-                cur_weights.update(sec_shorts)
-                daily_gross_short[i] = total_long_w
-            elif variant == "blend_50_50":
-                half_long = 0.5 * total_long_w
-                cur_weights["QQQ"] = -half_long
-                short_ret -= half_long * etf_rets.at[d, "QQQ"]
-                for s in active:
-                    sec = sector_etf(s)
-                    sec_w = 0.5 * w
-                    cur_weights[sec] = cur_weights.get(sec, 0.0) - sec_w
-                    short_ret -= sec_w * etf_rets.at[d, sec]
-                daily_gross_short[i] = total_long_w
-
-            # Idle cash capacity (max_gross = 2.0, net = 0.0)
-            gross = 2.0 * total_long_w
-            idle = min(1.0, 2.0 - gross)
-            daily_idle_cash[i] = max(0.0, idle)
             daily_long_ret[i] = long_ret
             daily_short_ret[i] = short_ret
-        else:
-            daily_idle_cash[i] = 1.0
+            daily_gross_short[i] = prev_gross_short
+            daily_idle_cash[i] = prev_idle
 
-        # Turnover cost
-        all_syms = set(prev_weights.keys()) | set(cur_weights.keys())
-        turnover = sum(abs(cur_weights.get(s, 0.0) - prev_weights.get(s, 0.0)) for s in all_syms)
-        turnover_costs[i] = turnover * cost_per_side
-        prev_weights = cur_weights
+            # Turnover to new target weights decided at d
+            all_syms = set(prev_weights.keys()) | set(cur_weights.keys())
+            turnover = sum(abs(cur_weights.get(s, 0.0) - prev_weights.get(s, 0.0)) for s in all_syms)
+            turnover_costs[i] = turnover * cost_per_side
+            prev_weights = cur_weights
 
     # Daily borrow fee: flat 1.0%/yr on gross short weight
     borrow_drag = daily_gross_short * (BORROW_FEE_ANNUAL / 252.0)
@@ -367,6 +384,7 @@ def generate_doc(
             f"{m['alpha_ew']:+.2%} ({m['t_ew']:.2f}) | {pass_str} |"
         )
 
+    cash_parking_diff = (results_5bp[best_variant]["cagr_tbill"] - results_5bp[best_variant]["cagr_zero"]) * 100.0
     lines.extend(
         [
             "",
@@ -375,7 +393,7 @@ def generate_doc(
             f"1. **Walk-Forward Winner:** `{best_variant}` achieved H2 alpha of {results_5bp[best_variant]['h2_alpha']:+.2%} (t={results_5bp[best_variant]['h2_t']:.2f}).",
             f"2. **Residual Volatility:** Sector hedging produced residual volatility of {results_5bp['sector_hedge']['residual_vol']:.2%} vs {results_5bp['qqq_hedge']['residual_vol']:.2%} for the broad QQQ hedge.",
             f"3. **Market Beta:** Beta to QQQ remained low across all variants ({results_5bp['sector_hedge']['beta']:.2f} for sector hedge).",
-            "4. **Cash Parking Benefit:** Parking idle cash into SHV added substantial risk-free yield over 0% cash across the 16-year period.",
+            f"4. **Cash Parking Benefit:** Parking idle cash into SHV added {cash_parking_diff:+.2f}% CAGR over 0% cash for `{best_variant}` across the study period.",
             "",
             "## Implementation Notes",
             "",
