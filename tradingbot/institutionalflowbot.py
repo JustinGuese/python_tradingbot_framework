@@ -91,6 +91,7 @@ class InstitutionalFlowBot(Bot):
         "top_n": [5, 10, 20],
         "rebalance_weekday": [4, None],
         "market_gate": [True, False],
+        "hold_rank": [None, 30, 40],
     }
 
     # 252-bar relative strength plus SMA200 warmup: "1y" would leave nothing.
@@ -100,6 +101,8 @@ class InstitutionalFlowBot(Bot):
     # sit out and any holding in them is pinned (see Bot.MIN_UNIVERSE_COVERAGE).
     MIN_UNIVERSE_COVERAGE: ClassVar[float] = 0.95
 
+    hold_rank: int | None = None
+
     def __init__(
         self,
         top_n: int = 20,
@@ -107,6 +110,7 @@ class InstitutionalFlowBot(Bot):
         market_gate: bool = True,
         min_adv_usd: float = 50e6,
         min_price: float = 10.0,
+        hold_rank: int | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -120,6 +124,7 @@ class InstitutionalFlowBot(Bot):
             market_gate=market_gate,
             min_adv_usd=min_adv_usd,
             min_price=min_price,
+            hold_rank=hold_rank,
             **kwargs,
         )
         self.top_n = top_n
@@ -127,6 +132,7 @@ class InstitutionalFlowBot(Bot):
         self.market_gate = market_gate
         self.min_adv_usd = min_adv_usd
         self.min_price = min_price
+        self.hold_rank = hold_rank
 
     def getYFDataWithTA(
         self,
@@ -141,6 +147,122 @@ class InstitutionalFlowBot(Bot):
             symbol=symbol, interval=interval, period=period, saveToDB=saveToDB, features=features
         )
         return add_institutional_features(data)
+
+    def _replay_trailing_holdings(self, rows: dict[str, pd.Series]) -> list[str]:
+        """
+        Replay weekly rankings statelessly over trailing 26 Fridays from self.datas.
+        A holding stays while it still passes the mandate and ranks within hold_rank;
+        open slots fill from the top.
+        """
+        if not self.datas or self.hold_rank is None:
+            eligible = {
+                t: rows[t]
+                for t in self.tradeable_tickers
+                if t in rows and passes_mandate(rows[t], min_adv_usd=self.min_adv_usd, min_price=self.min_price)
+            }
+            if not eligible:
+                return []
+            scores = accumulation_score(eligible)
+            return sorted(scores, key=lambda t: scores[t], reverse=True)[: self.top_n]
+
+        bench = rows.get(BENCHMARK)
+        current_ts = _bar_timestamp(bench) if bench is not None else None
+        target_weekday = self.rebalance_weekday if self.rebalance_weekday is not None else 4
+
+        # Normalize cached frames by setting DatetimeIndex
+        dfs: dict[str, pd.DataFrame] = {}
+        for t, df in self.datas.items():
+            if df is None or df.empty:
+                continue
+            df_idx = df.set_index("timestamp") if "timestamp" in df.columns else df.copy()
+            idx = pd.DatetimeIndex(df_idx.index)
+            if idx.tz is not None:
+                idx = idx.tz_localize(None)
+            df_idx.index = idx.normalize()
+            if df_idx.index.has_duplicates:
+                df_idx = df_idx[~df_idx.index.duplicated(keep="last")]
+            dfs[t] = df_idx
+
+        # Collect trailing Fridays from benchmark (or any available frame)
+        b_df = dfs.get(BENCHMARK)
+        if b_df is not None and not b_df.empty:
+            friday_idx = b_df.index[b_df.index.weekday == target_weekday]
+        else:
+            sample_df = next((d for d in dfs.values() if not d.empty), None)
+            if sample_df is not None:
+                friday_idx = sample_df.index[sample_df.index.weekday == target_weekday]
+            else:
+                friday_idx = pd.DatetimeIndex([])
+
+        trailing_fridays = list(friday_idx[-26:])
+        if current_ts is not None:
+            cur_norm = pd.Timestamp(current_ts)
+            if cur_norm.tzinfo is not None:
+                cur_norm = cur_norm.tz_localize(None)
+            cur_norm = cur_norm.normalize()
+            if (not trailing_fridays or trailing_fridays[-1] != cur_norm) and cur_norm.weekday() == target_weekday:
+                trailing_fridays.append(cur_norm)
+                trailing_fridays = trailing_fridays[-26:]
+
+        if not trailing_fridays:
+            eligible = {
+                t: rows[t]
+                for t in self.tradeable_tickers
+                if t in rows and passes_mandate(rows[t], min_adv_usd=self.min_adv_usd, min_price=self.min_price)
+            }
+            if not eligible:
+                return []
+            scores = accumulation_score(eligible)
+            return sorted(scores, key=lambda t: scores[t], reverse=True)[: self.top_n]
+
+        held: set[str] = set()
+        last_dt = trailing_fridays[-1]
+        last_picks: list[str] = []
+
+        for dt in trailing_fridays:
+            # 1. Market gate on historical Friday
+            if self.market_gate:
+                b_df_bench = dfs.get(BENCHMARK)
+                if b_df_bench is not None and dt in b_df_bench.index:
+                    b_row = b_df_bench.loc[dt]
+                    close, sma200 = b_row.get("close"), b_row.get("inst_sma200")
+                    if pd.isna(sma200) or pd.isna(close) or float(close) < float(sma200):
+                        held = set()
+                        if dt == last_dt:
+                            return []
+                        continue
+
+            # 2. Get rows for this Friday
+            if dt == last_dt:
+                rows_dt = rows
+            else:
+                rows_dt = {t: dfs[t].loc[dt] for t in self.tradeable_tickers if t in dfs and dt in dfs[t].index}
+
+            eligible = {
+                t: rows_dt[t]
+                for t in self.tradeable_tickers
+                if t in rows_dt and passes_mandate(rows_dt[t], min_adv_usd=self.min_adv_usd, min_price=self.min_price)
+            }
+            if not eligible:
+                held = set()
+                if dt == last_dt:
+                    return []
+                continue
+
+            scores = accumulation_score(eligible)
+            ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
+
+            # 3. Apply hysteresis
+            survivors = [t for t in ranked[: self.hold_rank] if t in held][: self.top_n]
+            survivors_set = set(survivors)
+            open_slots = self.top_n - len(survivors)
+            fills = [t for t in ranked if t not in survivors_set][:open_slots]
+            picks = survivors + fills
+            held = set(picks)
+            if dt == last_dt:
+                last_picks = picks
+
+        return last_picks
 
     def targetWeights(self, rows: dict[str, pd.Series]) -> dict[str, float] | None:
         bench = rows.get(BENCHMARK)
@@ -159,23 +281,37 @@ class InstitutionalFlowBot(Bot):
                 logger.info("%s: %s below its 200-day MA (or warming up) — all cash", self.bot_name, BENCHMARK)
                 return {}
 
-        eligible = {
-            t: rows[t]
-            for t in self.tradeable_tickers
-            if t in rows and passes_mandate(rows[t], min_adv_usd=self.min_adv_usd, min_price=self.min_price)
-        }
-        if not eligible:
-            logger.info("%s: no stock passes the mandate filter — all cash", self.bot_name)
-            return {}
+        if getattr(self, "hold_rank", None) is None:
+            eligible = {
+                t: rows[t]
+                for t in self.tradeable_tickers
+                if t in rows and passes_mandate(rows[t], min_adv_usd=self.min_adv_usd, min_price=self.min_price)
+            }
+            if not eligible:
+                logger.info("%s: no stock passes the mandate filter — all cash", self.bot_name)
+                return {}
 
-        scores = accumulation_score(eligible)
-        picks = sorted(scores, key=lambda t: scores[t], reverse=True)[: self.top_n]
+            scores = accumulation_score(eligible)
+            picks = sorted(scores, key=lambda t: scores[t], reverse=True)[: self.top_n]
+            logger.info(
+                "%s: %d/%d pass the mandate; holding %s",
+                self.bot_name,
+                len(eligible),
+                len(self.tradeable_tickers),
+                {t: round(scores[t], 2) for t in picks},
+            )
+            return dict.fromkeys(picks, 1.0 / self.top_n)
+
+        picks = self._replay_trailing_holdings(rows)
+        if not picks:
+            logger.info("%s: no holdings survived or passed mandate — all cash", self.bot_name)
+            return {}
         logger.info(
-            "%s: %d/%d pass the mandate; holding %s",
+            "%s: holding %d names with hold_rank=%s: %s",
             self.bot_name,
-            len(eligible),
-            len(self.tradeable_tickers),
-            {t: round(scores[t], 2) for t in picks},
+            len(picks),
+            self.hold_rank,
+            picks,
         )
         return dict.fromkeys(picks, 1.0 / self.top_n)
 

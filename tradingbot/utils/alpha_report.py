@@ -39,6 +39,7 @@ MAX_GAP_DAYS = 4
 MIN_OBS = 60  # below this a t-stat is noise whatever it says
 ACTIVE_DAYS = 7  # bots with no row this recent are gone, not reported
 MAX_BENCHMARK_AGE_DAYS = 4
+DEFAULT_RISK_FREE_RATE = 0.04  # 4% fallback
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,116 @@ class AlphaStats:
     beta: float
     corr: float
     n: int
+
+
+def load_irx(start: date | str | None = None) -> pd.Series:
+    """Download daily ^IRX closes from yfinance, or empty Series on failure."""
+    try:
+        import yfinance as yf
+
+        ticker = yf.Ticker("^IRX")
+        hist = ticker.history(period="5y" if not start else None, start=start)
+        if not hist.empty and "Close" in hist:
+            s = hist["Close"].dropna()
+            s.index = pd.DatetimeIndex(s.index).tz_localize(None).normalize()
+            return s
+    except Exception as e:
+        logger.warning("Could not download ^IRX (%s); using default rate", e)
+    return pd.Series(dtype=float)
+
+
+def cash_adjusted_stats(
+    r_bot: pd.Series,
+    r_bench: pd.Series,
+    usd_share: pd.Series | float | None = None,
+    irx: pd.Series | float | None = None,
+    *,
+    holdings: pd.Series | None = None,
+    portfolio_worth: pd.Series | None = None,
+    periods_per_year: float = 252,
+) -> AlphaStats | None:
+    """Alpha of `r_bot` over `r_bench` after crediting ^IRX/252 on daily USD share.
+
+    USD share is `holdings["USD"] / portfolio_worth` on each date.
+    When USD share is 0%, identical to plain alpha_stats.
+    """
+    if usd_share is None:
+        if holdings is not None and portfolio_worth is not None:
+            shares = {}
+            for dt in r_bot.index:
+                norm_dt = pd.to_datetime(dt).normalize() if isinstance(dt, (date, datetime, pd.Timestamp)) else dt
+                h = holdings.get(dt) if hasattr(holdings, "get") else None
+                if h is None and hasattr(holdings, "get"):
+                    h = holdings.get(norm_dt)
+                w = portfolio_worth.get(dt) if hasattr(portfolio_worth, "get") else None
+                if w is None and hasattr(portfolio_worth, "get"):
+                    w = portfolio_worth.get(norm_dt)
+                usd = h.get("USD", 0.0) if isinstance(h, dict) else 0.0
+                shares[dt] = float(usd) / float(w) if (w is not None and float(w) > 0) else 0.0
+            usd_share_series = pd.Series(shares, index=r_bot.index)
+        else:
+            usd_share_series = pd.Series(0.0, index=r_bot.index)
+    elif isinstance(usd_share, (int, float, np.number)):
+        usd_share_series = pd.Series(float(usd_share), index=r_bot.index)
+    elif isinstance(usd_share, pd.Series):
+        if len(usd_share) > 0 and isinstance(usd_share.iloc[0], dict):
+            # usd_share passed as holdings series, irx passed as portfolio_worth
+            h_series = usd_share
+            w_series = irx if isinstance(irx, pd.Series) else None
+            shares = {}
+            for dt in r_bot.index:
+                norm_dt = pd.to_datetime(dt).normalize() if isinstance(dt, (date, datetime, pd.Timestamp)) else dt
+                h = h_series.get(dt)
+                if h is None:
+                    h = h_series.get(norm_dt)
+                w = w_series.get(dt) if w_series is not None else None
+                if w is None and w_series is not None:
+                    w = w_series.get(norm_dt)
+                usd = h.get("USD", 0.0) if isinstance(h, dict) else 0.0
+                shares[dt] = float(usd) / float(w) if (w is not None and float(w) > 0) else 0.0
+            usd_share_series = pd.Series(shares, index=r_bot.index)
+            irx = None
+        else:
+            s = usd_share.copy()
+            if isinstance(s.index, pd.DatetimeIndex):
+                s.index = s.index.normalize()
+            bot_idx = r_bot.index
+            if isinstance(bot_idx, pd.DatetimeIndex):
+                bot_idx = bot_idx.normalize()
+            s = s[~s.index.duplicated(keep="last")]
+            usd_share_series = s.reindex(bot_idx).ffill().bfill().fillna(0.0)
+            usd_share_series.index = r_bot.index
+    else:
+        usd_share_series = pd.Series(0.0, index=r_bot.index)
+
+    if irx is None:
+        irx_download = load_irx()
+        irx = irx_download if not irx_download.empty else DEFAULT_RISK_FREE_RATE
+
+    if isinstance(irx, (int, float, np.number)):
+        rate = float(irx)
+        if rate > 0.5:
+            rate = rate / 100.0
+        daily_yield = pd.Series(rate / periods_per_year, index=r_bot.index)
+    elif isinstance(irx, pd.Series):
+        s = irx.copy()
+        if isinstance(s.index, pd.DatetimeIndex):
+            s.index = s.index.normalize()
+        s = s[~s.index.duplicated(keep="last")]
+        if len(s.dropna()) and float(s.dropna().mean()) > 0.5:
+            s = s / 100.0
+        daily_rate = s / periods_per_year
+        bot_idx = r_bot.index
+        if isinstance(bot_idx, pd.DatetimeIndex):
+            bot_idx = bot_idx.normalize()
+        daily_yield = daily_rate.reindex(bot_idx).ffill().bfill().fillna(0.0)
+        daily_yield.index = r_bot.index
+    else:
+        daily_yield = pd.Series(0.0, index=r_bot.index)
+
+    credit = usd_share_series.clip(lower=0.0) * daily_yield
+    r_adj = r_bot + credit
+    return alpha_stats(r_adj, r_bench, periods_per_year=periods_per_year)
 
 
 def alpha_stats(r_bot: pd.Series, r_bench: pd.Series, periods_per_year: float = 252) -> AlphaStats | None:
@@ -133,9 +244,16 @@ class ReportRow:
     bot_return: float
     qqq_return: float
     verdict: str
+    cash_stats: AlphaStats | None = None
 
 
-def build_report(worth_by_bot: dict[str, pd.Series], today: date, benchmark: str = BENCHMARK) -> list[ReportRow]:
+def build_report(
+    worth_by_bot: dict[str, pd.Series],
+    today: date,
+    benchmark: str = BENCHMARK,
+    holdings_by_bot: dict[str, pd.Series] | None = None,
+    irx: pd.Series | float | None = None,
+) -> list[ReportRow]:
     """
     One row per active bot (a worth row within ACTIVE_DAYS), measured from its
     first row against the benchmark over the same dates. Ranked by t.
@@ -160,6 +278,19 @@ def build_report(worth_by_bot: dict[str, pd.Series], today: date, benchmark: str
             continue
         rets = joint_returns(worth, bench)
         stats = alpha_stats(rets["p"], rets["b"]) if len(rets) else None
+        cash_stats = None
+        if len(rets) and holdings_by_bot and name in holdings_by_bot:
+            h_series = holdings_by_bot[name]
+            shares = {}
+            for dt, h in h_series.items():
+                norm_dt = pd.to_datetime(dt).normalize()
+                usd = h.get("USD", 0.0) if isinstance(h, dict) else 0.0
+                w = worth.get(dt)
+                if w is None:
+                    w = worth.get(norm_dt)
+                shares[norm_dt] = float(usd) / float(w) if (w is not None and float(w) > 0) else 0.0
+            usd_share_series = pd.Series(shares)
+            cash_stats = cash_adjusted_stats(rets["p"], rets["b"], usd_share=usd_share_series, irx=irx)
         rows.append(
             ReportRow(
                 bot_name=name,
@@ -170,6 +301,7 @@ def build_report(worth_by_bot: dict[str, pd.Series], today: date, benchmark: str
                 bot_return=float(shared["p"].iloc[-1] / shared["p"].iloc[0] - 1.0),
                 qqq_return=float(shared["b"].iloc[-1] / shared["b"].iloc[0] - 1.0),
                 verdict=verdict(stats),
+                cash_stats=cash_stats,
             )
         )
     return sorted(rows, key=lambda r: -(r.stats.t if r.stats else -np.inf))
@@ -180,6 +312,13 @@ def load_worth(session) -> dict[str, pd.Series]:
     rows = session.query(PortfolioWorth.bot_name, PortfolioWorth.date, PortfolioWorth.portfolio_worth).all()
     frame = pd.DataFrame(rows, columns=["bot", "date", "worth"])
     return {name: g.set_index("date")["worth"].astype(float) for name, g in frame.groupby("bot")}
+
+
+def load_holdings(session) -> dict[str, pd.Series]:
+    """Every bot's holdings series, keyed by bot name."""
+    rows = session.query(PortfolioWorth.bot_name, PortfolioWorth.date, PortfolioWorth.holdings).all()
+    frame = pd.DataFrame(rows, columns=["bot", "date", "holdings"])
+    return {name: g.set_index("date")["holdings"] for name, g in frame.groupby("bot")}
 
 
 def write_report(session, rows: list[ReportRow], report_date: date) -> int:
@@ -204,7 +343,11 @@ def write_report(session, rows: list[ReportRow], report_date: date) -> int:
 
 def format_report(rows: list[ReportRow]) -> str:
     """A fixed-width ranked table for the job log."""
-    head = f"{'bot':<34}{'since':>11}{'n':>5}{'alpha':>9}{'t':>7}{'beta':>7}{'corr':>7}{'maxDD':>8}{'ret':>8}{'QQQ':>8}  verdict"
+    has_cash_stats = any(r.cash_stats is not None for r in rows)
+    if has_cash_stats:
+        head = f"{'bot':<34}{'since':>11}{'n':>5}{'alpha':>9}{'t':>7}{'beta':>7}{'corr':>7}{'cAlpha':>9}{'ct':>7}{'maxDD':>8}{'ret':>8}{'QQQ':>8}  verdict"
+    else:
+        head = f"{'bot':<34}{'since':>11}{'n':>5}{'alpha':>9}{'t':>7}{'beta':>7}{'corr':>7}{'maxDD':>8}{'ret':>8}{'QQQ':>8}  verdict"
     lines = [head, "-" * len(head)]
     for r in rows:
         s = r.stats
@@ -213,8 +356,12 @@ def format_report(rows: list[ReportRow]) -> str:
             if s
             else f"{0:>5}{'':>9}{'':>7}{'':>7}{'':>7}"
         )
+        c_nums = ""
+        if has_cash_stats:
+            cs = r.cash_stats
+            c_nums = f"{cs.alpha:>+9.1%}{cs.t:>7.2f}" if cs else f"{'':>9}{'':>7}"
         lines.append(
-            f"{r.bot_name[:33]:<34}{r.window_start!s:>11}{nums}{r.max_dd:>8.1%}{r.bot_return:>+8.1%}"
+            f"{r.bot_name[:33]:<34}{r.window_start!s:>11}{nums}{c_nums}{r.max_dd:>8.1%}{r.bot_return:>+8.1%}"
             f"{r.qqq_return:>+8.1%}  {r.verdict}"
         )
     return "\n".join(lines)
@@ -224,7 +371,10 @@ def run_weekly_report(today: date | None = None) -> list[ReportRow]:
     """Build, store and log this week's report. Raises if the benchmark is missing or stale."""
     today = today or datetime.now(UTC).date()
     with get_db_session() as session:
-        rows = build_report(load_worth(session), today)
+        worth = load_worth(session)
+        holdings = load_holdings(session)
+        irx = load_irx()
+        rows = build_report(worth, today, holdings_by_bot=holdings, irx=irx if not irx.empty else None)
         write_report(session, rows, today)
     logger.info("Alpha vs QQQ, live windows, as of %s:\n%s", today, format_report(rows))
     for r in rows:

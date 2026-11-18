@@ -85,3 +85,7 @@ def test_bot_class_exposes_param_grid_and_backtest_period():
     assert grid["fast"] == [42, 63, 84]
     assert grid["slow"] == [189, 252]
     assert grid["vol_window"] == [42, 63]
+
+
+def test_universe_etf_proxies():
+    assert UNIVERSE == ["SPY", "QQQ", "IEF", "USO", "GLD", "DBA"]

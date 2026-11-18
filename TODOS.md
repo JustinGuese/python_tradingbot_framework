@@ -103,3 +103,89 @@ Retail venues (eToro, MT5/MQL5, Collective2) copy `InstitutionalFlowBot` alone s
 1. Open real-money eToro and MT5 broker accounts, otherwise no real track record is built (both are demo today).
 2. Fill the live rows of docs/backtests/retail-venue-coverage-2026-11.md (eToro search, MT5 symbol scan). Check that eToro `is_tradeable` returns False for unlisted names instead of raising.
 3. After 60 and 120 live days, check `alphareport` for InstitutionalFlowBot and the live-vs-paper tracking script.
+
+---
+
+## Strategy review, 2026-11-18
+
+**Short version:** nothing live has a proven edge yet, and more single-asset or indicator variants will not change that. The t-stat is limited by how few independent bets each bot makes, and CAGR by low beta and idle cash; these need different fixes.
+
+## Where the bots stand (live `portfolio_worth`, computed today)
+
+- **No bot with 100+ live days has a positive t ≥ 2.** The best are XAUZenbotTreeBot at 1.31 (which CLAUDE.md already marks dead) and TARegimeAdaptiveBot at about 1.0.
+- **The C2 blend is negative so far:** alpha −8.5%/yr, t −1.04, beta 0.19 over 40 days. TSMOMTrendBot alone is at t −1.97.
+- **Three "different" bots are one bet.** EarningsInsiderTiltBot and RegimeAdaptiveBot have a residual correlation of 0.93, and DeepSeekToolBot is at 0.77 with both.
+- **Six option bots have had zero P&L for 35 days**, so they collect no evidence: CatalystCall, CreditSpread, CrossVol, Dispersion, EarningsCalendar and IndexVol.
+
+## Improving t on existing bots
+
+t is roughly (alpha ÷ residual volatility) × √years. The blend's ratio is about 0.7, so a live t of 2 takes about 8 years; only more independent bets or less residual noise shortens that.
+
+1. **Fix two bots whose live version is not what was backtested.**
+   - [quantsmd_quarterly_te_cost_gate.py](tradingbot/quantsmd_quarterly_te_cost_gate.py) keeps its rebalance state on the instance. Each CronJob run starts fresh and rebuilds the book, so live it is a daily momentum rotation, not the quarterly strategy that scored t 1.94.
+   - [quantsmd_continuous_futures_trend.py](tradingbot/quantsmd_continuous_futures_trend.py) trades `MES=F`-style futures tickers. The t 2.36 result since 2008 was on ETF proxies (SPY, QQQ, IEF, USO, GLD, DBA). It is 100% cash since launch, probably because it launched a day after the monthly rebalance bar.
+2. **Swap TSMOMTrendBot for the ETF-proxy trend book in the blend.** Rebuilt on 2010–2026, TSMOM has alpha +0.8% at t 0.41 and a negative first half. The five-sleeve blend in [sleeve-blend-2026-11.md](docs/backtests/sleeve-blend-2026-11.md) scored t 3.01 out of sample, but no bot or copier runs it.
+3. **Hedge buybacks with sector ETFs, not QQQ.** A QQQ short leaves alpha-vs-QQQ t unchanged by construction, so BuybackHedgedBot only lowers beta. Shorting each name's sector ETF removes noise QQQ does not explain, which is what raises t.
+4. **InstitutionalFlowBot: cut turnover and widen the universe.**
+   - It makes 13 fills a week, and going from 5 bp to 20 bp costs 4.8 points of CAGR. Keep a holding until it drops out of the top 35 or so, instead of the top 20.
+   - Move from the S&P 100 to the S&P 500 with point-in-time membership. Only `SP100` exists in [universes.py](tradingbot/utils/universes.py).
+5. **Rebuild option_ImpliedSignalBot as long/short inside its universe.** Its "pass" is mostly the universe: an equal-weight hold of the 50 names scores t 3.83 on its own, and the bot's alpha against that is t 0.66. It also runs beta 1.08 with a −49.5% drawdown. The `rr25` signal alone looks real (t 1.68 against equal-weight), so test top 10 long against bottom 10 short.
+
+## Improving CAGR
+
+CAGR is roughly T-bill yield on cash + beta × QQQ + alpha. The blend makes about 6.6% because beta is 0.13–0.26 and 40–50% sits in cash at 0%.
+
+- **Hold SHV for the unallocated weight inside the paper bots.** The lift study measured +0.1 to +0.3 in t and about +1 point of alpha for the mostly-cash bots.
+- **Scale the blend to a volatility target.** Leverage does not change t. At 2× gross the inverse-vol blend would have roughly 8% alpha, beta 0.5 and a −27% drawdown before financing cost. That is my arithmetic from the 1× backtest, not a new backtest. `MAX_GROSS` now allows it.
+- **Add plain QQQ on top for the retail venues.** This raises return but adds no alpha, so it is a product decision, not an edge.
+
+## What to try next
+
+| # | Idea | Why | What exists |
+|---|---|---|---|
+| 1 | Market-neutral stock book: residual momentum plus 1-month reversal, sector-neutral, about 50 names per side | Hundreds of independent bets a year, where every current bot has 20 or fewer | Signal code in [numerai_features.py](tradingbot/utils/numerai_features.py); no bot, no backtest vs QQQ |
+| 2 | `rr25` skew long/short (item 5 above) | Only signal here with stock-level evidence | Data and bot exist |
+| 3 | Sector-hedged buyback sleeve (item 3 above) | Strongest event result (t 2.56) with less noise | Bot and shorts exist |
+| 4 | 13F holdings signal with the 45-day filing lag | Untested data source | Backfill script only; I did not check the tables |
+| 5 | Volatility-managed QQQ | One-file test; published evidence is disputed | Nothing |
+| 6 | Finish the Hyperliquid funding-carry study | It never produced numbers (API errors) | Script exists |
+
+I would do 1 first, with the variants and the kill rule written down before the run. TODOS.md already notes that with about 110 bots the best of pure noise is t ≈ 2.5, so each new variant raises the bar.
+
+I would not retry large-cap earnings drift, long-only FX carry, insider clusters, calendar legs, wider TradingView universes, broad buybacks or cross-vol. Each has a write-up in [docs/backtests/](docs/backtests/) showing no edge.
+
+
+---
+
+## Implementation Status (PLAN-alphaideas.md, 2026-11)
+
+The 16 steps of the strategy review plan are implemented. Study outcomes are in `docs/architecture/new-strategies-2026-11.md` section 4: none of the new strategies cleared the promotion bar, and no copier weights were changed.
+
+### Shared Contracts & Infrastructure (Wave 0)
+- **[x] S0a (`tradingbot/utils/live_state.py`)**: `current_weights(bot)` implemented and verified in `tests/test_live_state.py`. Resolves signed holdings valued at latest prices, excluding `USD`.
+- **[x] S0b (`tradingbot/utils/sector_map.py`)**: `SECTOR_ETF` mapping all S&P 100 constituents to `SECTORS9` and `sector_etf(symbol)` implemented and verified in `tests/test_sector_map.py`.
+- **[x] S0c (`tradingbot/utils/universes.py`, `data/sp500_changes.csv`)**: `SP500`, `SP500_SECTOR`, and point-in-time constituent reconstruction `sp500_members(as_of)` implemented; verified in `tests/test_sp500_membership.py`.
+- **[x] S0d (`tradingbot/utils/cash_park.py`)**: `park_idle_cash(weights, proxy="SHV")` implemented; verified in `tests/test_cash_park.py` and copier stacking verified in `tests/test_copier_cash_proxy_stack.py`.
+
+### Fixes to Existing Bots (Wave 1)
+- **[x] A1 (`tradingbot/quantsmd_quarterly_te_cost_gate.py`)**: Stateless live rebalance using `current_weights(self)`. Rebalances on quarter-first bar, tracking error breach, or flat book. Verified in `tests/test_live_rebalance_state.py`.
+- **[x] A2 (`tradingbot/quantsmd_continuous_futures_trend.py`)**: Switched universe to liquid ETF proxies (`SPY, QQQ, IEF, USO, GLD, DBA`) and stateless entry. Verified in `tests/test_quantsmd_continuous_futures_trend.py` and `tests/test_live_rebalance_state.py`.
+- **[x] I1 (`tradingbot/utils/alpha_report.py`, `tradingbot/alphareport.py`)**: Cash-adjusted alpha statistics (`cash_adjusted_stats`) crediting ^IRX/252 on daily cash weight. Verified in `tests/test_alpha_report_cash.py`.
+
+### Studies & New Bots (Wave 1)
+- **[x] C1 (`tradingbot/institutionalflowbot.py`, `scripts/onetime_instflow_hysteresis_study.py`)**: `hold_rank` parameter for turnover reduction. Verified in `tests/test_instflow_hysteresis.py`.
+- **[x] C2 (`scripts/onetime_instflow_sp500_study.py`, `docs/backtests/instflow-sp500-2026-11.md`)**: Point-in-time S&P 500 walk-forward backtest reporting annual constituent coverage and survivorship tilt.
+- **[x] D1 (`tradingbot/buybacksectorhedgedbot.py`, `scripts/onetime_buyback_sector_hedge_study.py`, `docs/backtests/buyback-sector-hedge-2026-11.md`)**: Form 8-K buyback drift hedged with Sector SPDR ETFs (`SECTOR_ETF`). Verified in `tests/test_buybacksectorhedgedbot.py`.
+- **[x] E1 (`tradingbot/optionimpliedlongshortbot.py`, `scripts/onetime_implied_longshort_study.py`, `docs/backtests/implied-longshort-2026-11.md`)**: Dollar-neutral 25-delta risk reversal (`rr25`) and composite skew long/short strategy.
+- **[x] F1 (`tradingbot/utils/cs_neutral_book.py`, `tests/test_cs_neutral_book.py`)**: Pure market-neutral equity engine (residual momentum OLS regression, 1-month reversal, within-sector z-scoring, dollar-neutral). Verified in `tests/test_cs_neutral_book.py`.
+- **[x] F2 (`tradingbot/neutralstockbot.py`, `scripts/onetime_neutral_book_study.py`, `docs/backtests/neutral-book-2026-11.md`)**: `NeutralStockBot` live bot and walk-forward study over 2010–2026 using point-in-time membership.
+- **[x] G1 (`scripts/onetime_inst13f_study.py`, `docs/backtests/inst13f-2026-11.md`)**: SEC Form 13F institutional signal walk-forward study.
+- **[x] G2 (`scripts/onetime_funding_carry_study.py`, `docs/backtests/funding-carry-2026-11.md`)**: Hyperliquid funding carry study rerun and doc generation.
+- **[x] H1 (`scripts/onetime_volmanaged_qqq_study.py`, `docs/backtests/volmanaged-qqq-2026-11.md`)**: Volatility-managed QQQ study vs static QQQ + SHV mix.
+
+### Blends & Composition (Wave 2)
+- **[x] B1 (`tradingbot/sleeveblendbot.py`, `tests/test_sleeveblendbot.py`)**: 5-sleeve multi-strategy blend (`ContinuousFuturesTrend: 0.394, buyback_sp100: 0.205, SmaDailyGated: 0.185, QuarterlyTeCostGate: 0.180, activist_13d: 0.036`), stateless composition, idle cash in SHV. Verified in `tests/test_sleeveblendbot.py`.
+- **[x] B2 (`scripts/onetime_sleeveblend_parity.py`, `scripts/onetime_blend_volscale_study.py`, `docs/backtests/sleeveblend-parity-2026-11.md`, `docs/backtests/blend-volscale-2026-11.md`)**: Blend parity check and leverage/volatility scaling study.
+
+### Documentation & Rollout (Wave 3)
+- **[x] Z1 (`mkdocs.yml`, `docs/architecture/new-strategies-2026-11.md`, `TODOS.md`)**: Architectural documentation covering new strategies, the stateless-live-rebalance rule, and SHV cash parking; navigation indexing in `mkdocs.yml`; and status tracking in `TODOS.md`.

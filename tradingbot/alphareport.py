@@ -42,6 +42,16 @@ def main() -> int:
     except LookupError as e:
         logger.error("alpha report not written: %s", e)
         return 1
+    for r in rows:
+        if r.cash_stats and r.stats:
+            logger.info(
+                "%s: plain alpha %+.1f%% (t=%.2f) | cash-adjusted alpha %+.1f%% (t=%.2f)",
+                r.bot_name,
+                r.stats.alpha * 100,
+                r.stats.t,
+                r.cash_stats.alpha * 100,
+                r.cash_stats.t,
+            )
     logger.info("alpha report: %d bots written", len(rows))
     return 0
 

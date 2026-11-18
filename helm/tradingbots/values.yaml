@@ -782,6 +782,35 @@ bots:
   # Exits 1 on an all-null series (a renamed API field) or an empty run.
   schedule: "30 5 * * *"
 
+# Wave 1 & 2 new strategies (PLAN-alphaideas.md step Z2): every new bot goes live with a paper track.
+- name: sleeveblendbot
+  # Five-sleeve blend (ContinuousFuturesTrend 0.394, buyback_sp100 0.205, SmaDailyGated 0.185,
+  # QuarterlyTeCostGate 0.180, activist_13d 0.036). Rebalances statelessly as of each sleeve's
+  # last bar; idle cash parked in SHV. See docs/backtests/sleeve-blend-2026-11.md.
+  schedule: "20 21 * * 1-5" # Daily 9:20 PM UTC (after US close, buyback scan and 13D scan)
+  suspend: false
+
+- name: buybacksectorhedgedbot
+  # Sector-hedged buyback drift: active longs in S&P 100 buyback names offset by shorts
+  # in their respective sector ETFs (SECTORS9). Dollar-neutral, gross <= 2.0. Idle cash in SHV.
+  # See docs/backtests/buyback-sector-hedge-2026-11.md.
+  schedule: "12 21 * * 1-5" # Daily 9:12 PM UTC (after the 21:00 UTC buyback scan and US close)
+  suspend: false
+
+- name: optionimpliedlongshortbot
+  # Dollar-neutral option-implied skew strategy: long top-N / short bottom-N by implied
+  # composite signal, gross <= 1.8. Idle weight parked in SHV.
+  # See docs/backtests/implied-longshort-2026-11.md.
+  schedule: "25 21 * * 5" # Weekly on Fridays at 9:25 PM UTC (after US close)
+  suspend: false
+
+- name: neutralstockbot
+  # Market-neutral S&P 500 stock book: residual momentum + 1-month reversal, within-sector
+  # z-scored, top-25 long / bottom-25 short (gross 1.8), idle cash in SHV. Rebalances on month roll or when flat.
+  # See docs/backtests/neutral-book-2026-11.md.
+  schedule: "30 21 * * 1-5" # Daily at 9:30 PM UTC (after US close; rebalances on month roll or when flat)
+  suspend: false
+
 # NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is
