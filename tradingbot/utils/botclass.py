@@ -30,6 +30,7 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -101,6 +102,7 @@ class Bot:
     ALLOW_SHORT: ClassVar[bool] = False
     MAX_GROSS: ClassVar[float] = 1.0
     SHORTABLE: ClassVar[set[str] | list[str] | tuple[str, ...] | None] = None
+    CARRY_ACCRUAL: ClassVar[bool] = False
 
     # Optional override for the history backtest_bot fetches. None means "use
     # _get_backtest_period(interval)", which is right for strategies whose signal
@@ -864,6 +866,81 @@ class Bot:
         latest_signals = data_copy["signal"].iloc[-nrMedianLatest:]
         return int(latest_signals.mean())
 
+    def carry_rates(self, ts: Any = None) -> dict[str, float]:
+        """Annual carry rate per held symbol at timestamp `ts` (e.g. +0.02 for +2%/yr).
+
+        Subclasses opt in via CARRY_ACCRUAL = True and override this method.
+        May also include "USD" for interest on collateral/idle cash.
+        """
+        return {}
+
+    def _accrue_carry(self, now: datetime | None = None) -> float:
+        """Credit/debit accrued carry since the bot's last successful run to portfolio['USD']."""
+        repository = self.__dict__.get("_bot_repository")
+        if repository is None:
+            return 0.0
+
+        now_dt = now or datetime.now(UTC).replace(tzinfo=None)
+        if now_dt.tzinfo is not None:
+            now_dt = now_dt.astimezone(UTC).replace(tzinfo=None)
+
+        last_run = repository.last_successful_run(self.bot_name)
+        if last_run is None:
+            return 0.0
+        if last_run.tzinfo is not None:
+            last_run = last_run.astimezone(UTC).replace(tzinfo=None)
+
+        days_elapsed = (now_dt - last_run).total_seconds() / 86400.0
+        if days_elapsed <= 0:
+            return 0.0
+
+        carry_fn = getattr(self, "carry_rates", None)
+        if not callable(carry_fn):
+            return 0.0
+        rates = carry_fn(now_dt) or {}
+        if not rates:
+            return 0.0
+
+        portfolio = self.dbBot.portfolio
+        total_accrual = 0.0
+
+        for sym, qty in portfolio.items():
+            if sym == "USD":
+                continue
+            holding = float(qty or 0.0)
+            if holding != 0.0 and sym in rates:
+                try:
+                    price = float(self.getLatestPrice(sym))
+                except Exception as e:
+                    logger.warning("Could not fetch latest price for %s during carry accrual: %s", sym, e)
+                    continue
+                accrual = holding * price * float(rates[sym]) * (days_elapsed / 365.0)
+                total_accrual += accrual
+                logger.info(
+                    "Accrued carry for %s: holding=%s, price=%.4f, rate=%.4f, days=%.4f -> credit=%.4f USD",
+                    sym, holding, price, rates[sym], days_elapsed, accrual,
+                )
+
+        if "USD" in rates:
+            cash = float(portfolio.get("USD", 0.0))
+            usd_accrual = cash * float(rates["USD"]) * (days_elapsed / 365.0)
+            total_accrual += usd_accrual
+            logger.info(
+                "Accrued carry for USD: cash=%.2f, rate=%.4f, days=%.4f -> credit=%.4f USD",
+                cash, rates["USD"], days_elapsed, usd_accrual,
+            )
+
+        if total_accrual != 0.0:
+            with get_db_session() as session:
+                bot_row = repository.get_bot_locked(session, self.bot_name)
+                updated_portfolio = dict(bot_row.portfolio or {})
+                updated_portfolio["USD"] = float(updated_portfolio.get("USD", 0.0)) + total_accrual
+                bot_row.portfolio = updated_portfolio
+                repository.update_bot(bot_row, session=session)
+            logger.info("Total carry accrued for %s: %.4f USD", self.bot_name, total_accrual)
+
+        return total_accrual
+
     def run(self) -> None:
         """
         Execute one iteration of the bot and log results.
@@ -884,6 +961,8 @@ class Bot:
                     target_delta=getattr(self, "OPTION_TARGET_DELTA", None),
                     settlement=getattr(self, "OPTION_SETTLEMENT", "cash"),
                 )
+            if getattr(self, "CARRY_ACCRUAL", False):
+                self._accrue_carry()
             decision = self.makeOneIteration()
             portfolio = self.dbBot.portfolio  # read after the iteration traded
             cash = portfolio.get("USD", 0)

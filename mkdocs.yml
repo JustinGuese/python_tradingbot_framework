@@ -96,6 +96,8 @@ nav:
       - Sleeve Blend Volatility Scaling: backtests/blend-volscale-2026-11.md
       - Retail Blend Study: backtests/retail-blend-2026-11.md
       - Five-Sleeve Multi-Asset Blend: backtests/sleeve-blend-2026-11.md
+      - Signed FX Carry & Momentum: backtests/carryblend-2026-11.md
+      - Carry & Momentum Blend Study: backtests/carryblend-blend-2026-11.md
     - Core Strategy Studies:
       - Continuous Futures Trend: backtests/cft-longhistory-2026-11.md
       - InstitutionalFlowBot: backtests/institutionalflowbot.md

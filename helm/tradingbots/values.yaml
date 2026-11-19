@@ -828,6 +828,23 @@ bots:
   schedule: "10 21 * * 1-5" # FX-ETF carry + bond roll yield, long-only, gated on carry > USD cash
   suspend: false
 
+- name: signedfxcarrybot
+  # Signed 9-pair FX carry: long top-k / short bottom-k foreign currencies by FRED rate differentials.
+  # Paper run only (suspend: false) to build forward record. Backtest evidence shows positive alpha
+  # on defaults (t ~1.7-1.9), but after realistic swap markup and multiple testing selection bias,
+  # out-of-sample alpha t < 2, hence unproven. Do not touch live trade / copier weights.
+  # See docs/backtests/carryblend-2026-11.md.
+  schedule: "20 21 * * 1-5" # Daily 9:20 PM UTC Mon-Fri (after close & FRED rates)
+  suspend: false
+
+- name: fxmomentumlsbot
+  # FX ETF total-return momentum long/short (FXE, FXB, FXA, FXC, FXF, FXY).
+  # Paper run only (suspend: false) to build forward record. Backtest evidence shows positive alpha
+  # on defaults (t ~1.96), but walk-forward H2 alpha t < 2, hence unproven. Do not touch live trade / copier weights.
+  # See docs/backtests/carryblend-2026-11.md.
+  schedule: "25 21 * * 1-5" # Daily 9:25 PM UTC Mon-Fri (after US close)
+  suspend: false
+
 # Background (both were unscheduled until 2026-11-19) — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is
