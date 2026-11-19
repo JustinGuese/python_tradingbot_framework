@@ -610,16 +610,16 @@ bots:
 # once option_quotes has months). docs/backtests/option-round3-2026-09.md.
 - name: option_crossvolbot
   schedule: "50 15 * * 1-5" # condors on the 50 captured names furthest above their HAR forecast, up to 5
-  # Paused 2026-10-01. Replayed on real DoltHub chains for 25 names, 2025-01 to 2026-09, at
-  # bid/ask on listed expiries: alpha -10%/yr, t -3.56 (H1 -2.27, H2 -2.81), 34 trades.
-  # The 8-point gap variant is negative too (t -2.76). Never traded live; the book is flat cash.
-  suspend: true
+  # Re-activated 2026-11-19 (paper) to collect a live record. Evidence AGAINST it: replayed on real
+  # DoltHub chains for 25 names, 2025-01 to 2026-09, at bid/ask on listed expiries: alpha -10%/yr,
+  # t -3.56 (H1 -2.27, H2 -2.81), 34 trades. The 8-point gap variant is negative too (t -2.76).
+  # Judge by the weekly alphareport; expect it to stay negative unless the gap filter changes.
 - name: option_mispricingscanbot
   schedule: "0 16 * * 1-5" # z-scored IV vs Yang-Zhang forecast, both directions, vega + crash-stress caps
 - name: option_dispersionbot
   schedule: "55 15 * * 1-5" # short SPY fly vs long member straddles at high implied correlation (waits for 60 days of history)
-  # Paused 2026-11-18: flat, all cash, exactly zero P&L for 34 days, so it produces no evidence.
-  suspend: true
+  # Re-activated 2026-11-19. It stays flat until implied_correlation holds min_history=60 SPY
+  # observations (33 as of 2026-11-10, captured since 2026-03-18); it logs "waiting" until then.
 - name: option_earningscrushbot
   schedule: "30 14,16,19 * * 1-5" # enters within 2h of the close (19:30, or 16:30 on an early close), 14:30 closes after the open
 
@@ -819,10 +819,19 @@ bots:
   schedule: "30 21 * * 1-5" # Daily at 9:30 PM UTC (after US close; rebalances on month roll or when flat)
   suspend: false
 
-# NOT SCHEDULED — multiassetcarrybot and shortvolcarrybot are implemented,
+# Activated 2026-11-19 (paper) to collect forward records despite negative backtests; see the
+# comment block below for the evidence. Judge both by the weekly alphareport, not by return.
+- name: shortvolcarrybot
+  schedule: "15 21 * * 1-5" # SVXY short vol while ^VIX3M/^VIX contango, permanent VIXM hedge; after the close
+  suspend: false
+- name: multiassetcarrybot
+  schedule: "10 21 * * 1-5" # FX-ETF carry + bond roll yield, long-only, gated on carry > USD cash
+  suspend: false
+
+# Background (both were unscheduled until 2026-11-19) — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is
-# deployed:
+# deployed (now run as paper only, for the forward record):
 #   * multiassetcarrybot  −2.49% -> −1.36% CAGR over 19.45y. Still negative, and
 #     both sleeves still lose independently. The cause is the long-only
 #     constraint, not the parameters — do not re-attempt without signed exposure.
@@ -836,8 +845,7 @@ bots:
 #     adds nothing a moving average doesn't. docs/backtests/prediction-markets-2026-09.md.
 # The measured negative results are the useful part — read
 # docs/backtests/multiassetcarrybot.md and docs/backtests/shortvolcarrybot.md
-# before rebuilding either idea. Adding a `- name:` block here is all it takes to
-# turn one on, so read those first.
+# before rebuilding either idea.
 
 # Live Trade Copier — mirrors weighted paper-bot portfolios to a real brokerage.
 # See docs/guides/live-trading.md for the full guide.
