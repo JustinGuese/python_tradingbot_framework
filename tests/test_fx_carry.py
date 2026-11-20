@@ -40,14 +40,16 @@ from tradingbot.utils.fx_carry import (
 
 class TestSignedTopKWeights:
     def test_basic_properties_k2_gross1(self):
-        scores = pd.Series({
-            "EUR": 0.02,
-            "GBP": 0.01,
-            "AUD": 0.04,
-            "NZD": 0.05,
-            "JPY": -0.02,
-            "CHF": -0.01,
-        })
+        scores = pd.Series(
+            {
+                "EUR": 0.02,
+                "GBP": 0.01,
+                "AUD": 0.04,
+                "NZD": 0.05,
+                "JPY": -0.02,
+                "CHF": -0.01,
+            }
+        )
         k = 2
         gross = 1.0
         w = signed_topk_weights(scores, k=k, gross=gross)
@@ -70,10 +72,18 @@ class TestSignedTopKWeights:
         assert sum(w.values()) == pytest.approx(0.0)
 
     def test_properties_k3_gross1_5(self):
-        scores = pd.Series({
-            "A": 10.0, "B": 8.0, "C": 6.0, "D": 4.0,
-            "E": 2.0, "F": 0.0, "G": -2.0, "H": -4.0,
-        })
+        scores = pd.Series(
+            {
+                "A": 10.0,
+                "B": 8.0,
+                "C": 6.0,
+                "D": 4.0,
+                "E": 2.0,
+                "F": 0.0,
+                "G": -2.0,
+                "H": -4.0,
+            }
+        )
         k = 3
         gross = 1.5
         w = signed_topk_weights(scores, k=k, gross=gross)

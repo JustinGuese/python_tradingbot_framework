@@ -104,14 +104,10 @@ def load_fred_rates(
             try:
                 resp = requests.get(url, headers=headers, timeout=20)
             except Exception as exc:
-                raise RuntimeError(
-                    f"Network error fetching FRED rate series for {ccy} ({series_id}): {exc}"
-                ) from exc
+                raise RuntimeError(f"Network error fetching FRED rate series for {ccy} ({series_id}): {exc}") from exc
 
             if resp.status_code != 200:
-                raise RuntimeError(
-                    f"FRED returned HTTP {resp.status_code} for {ccy} ({series_id})"
-                )
+                raise RuntimeError(f"FRED returned HTTP {resp.status_code} for {ccy} ({series_id})")
 
             try:
                 raw_csv = pd.read_csv(io.StringIO(resp.text))
@@ -131,9 +127,7 @@ def load_fred_rates(
                 # FRED rates are reported in percent (e.g. 4.0 for 4%). Convert to decimal.
                 series_data[ccy] = s / 100.0
             except Exception as exc:
-                raise RuntimeError(
-                    f"Failed parsing FRED series for {ccy} ({series_id}): {exc}"
-                ) from exc
+                raise RuntimeError(f"Failed parsing FRED series for {ccy} ({series_id}): {exc}") from exc
 
         raw_rates = pd.DataFrame(series_data).sort_index()
 

@@ -250,18 +250,20 @@ def test_inverted_pairs_receive_reversed_sign_for_foreign_carry():
         r_usd - r_foreign < 0 -> SHORT USD / LONG foreign -> SHORT the pair (negative weight).
     """
     # Scenario 1: USD = 5.0%, JPY = 0.5% (low yield), NZD = 7.0% (high yield)
-    rates_row = pd.Series({
-        "USD": 0.050,
-        "NZD": 0.070,  # Direct: diff = +0.020 -> score = +0.020
-        "AUD": 0.065,  # Direct: diff = +0.015 -> score = +0.015
-        "GBP": 0.045,  # Direct: diff = -0.005 -> score = -0.005
-        "EUR": 0.035,  # Direct: diff = -0.015 -> score = -0.015
-        "JPY": 0.005,  # Inverted: diff = -0.045 -> score = r_usd - r_jpy = +0.045
-        "CHF": 0.010,  # Inverted: diff = -0.040 -> score = r_usd - r_chf = +0.040
-        "SEK": 0.030,  # Inverted: diff = -0.020 -> score = r_usd - r_sek = +0.020
-        "CAD": 0.040,  # Inverted: diff = -0.010 -> score = r_usd - r_cad = +0.010
-        "NOK": 0.080,  # Inverted: diff = +0.030 -> score = r_usd - r_nok = -0.030 (high foreign yield!)
-    })
+    rates_row = pd.Series(
+        {
+            "USD": 0.050,
+            "NZD": 0.070,  # Direct: diff = +0.020 -> score = +0.020
+            "AUD": 0.065,  # Direct: diff = +0.015 -> score = +0.015
+            "GBP": 0.045,  # Direct: diff = -0.005 -> score = -0.005
+            "EUR": 0.035,  # Direct: diff = -0.015 -> score = -0.015
+            "JPY": 0.005,  # Inverted: diff = -0.045 -> score = r_usd - r_jpy = +0.045
+            "CHF": 0.010,  # Inverted: diff = -0.040 -> score = r_usd - r_chf = +0.040
+            "SEK": 0.030,  # Inverted: diff = -0.020 -> score = r_usd - r_sek = +0.020
+            "CAD": 0.040,  # Inverted: diff = -0.010 -> score = r_usd - r_cad = +0.010
+            "NOK": 0.080,  # Inverted: diff = +0.030 -> score = r_usd - r_nok = -0.030 (high foreign yield!)
+        }
+    )
 
     weights = compute_signed_fx_carry_weights(rates_row, k=2, gross=1.0)
     assert weights != {}
@@ -285,18 +287,20 @@ def test_inverted_pairs_receive_reversed_sign_for_foreign_carry():
 def test_inverted_pair_reversal_sign_direct_vs_inverted():
     """Compare direct and inverted pairs when both have higher or lower yield than USD."""
     # When both EUR (direct) and JPY (inverted) yield 8.0% while USD yields 4.0%:
-    rates_high_foreign = pd.Series({
-        "USD": 0.04,
-        "EUR": 0.08,  # EUR - USD = +0.04 -> Direct pair LONG
-        "GBP": 0.07,
-        "AUD": 0.06,
-        "NZD": 0.05,
-        "JPY": 0.08,  # USD - JPY = -0.04 -> Inverted pair SHORT (reversed sign!)
-        "CAD": 0.03,
-        "CHF": 0.02,
-        "NOK": 0.01,
-        "SEK": 0.01,
-    })
+    rates_high_foreign = pd.Series(
+        {
+            "USD": 0.04,
+            "EUR": 0.08,  # EUR - USD = +0.04 -> Direct pair LONG
+            "GBP": 0.07,
+            "AUD": 0.06,
+            "NZD": 0.05,
+            "JPY": 0.08,  # USD - JPY = -0.04 -> Inverted pair SHORT (reversed sign!)
+            "CAD": 0.03,
+            "CHF": 0.02,
+            "NOK": 0.01,
+            "SEK": 0.01,
+        }
+    )
 
     w_high = compute_signed_fx_carry_weights(rates_high_foreign, k=2, gross=1.0)
     # EURUSD is direct with positive foreign carry -> LONG

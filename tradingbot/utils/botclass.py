@@ -918,7 +918,12 @@ class Bot:
                 total_accrual += accrual
                 logger.info(
                     "Accrued carry for %s: holding=%s, price=%.4f, rate=%.4f, days=%.4f -> credit=%.4f USD",
-                    sym, holding, price, rates[sym], days_elapsed, accrual,
+                    sym,
+                    holding,
+                    price,
+                    rates[sym],
+                    days_elapsed,
+                    accrual,
                 )
 
         if "USD" in rates:
@@ -927,7 +932,10 @@ class Bot:
             total_accrual += usd_accrual
             logger.info(
                 "Accrued carry for USD: cash=%.2f, rate=%.4f, days=%.4f -> credit=%.4f USD",
-                cash, rates["USD"], days_elapsed, usd_accrual,
+                cash,
+                rates["USD"],
+                days_elapsed,
+                usd_accrual,
             )
 
         if total_accrual != 0.0:

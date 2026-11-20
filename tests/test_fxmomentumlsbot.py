@@ -90,15 +90,21 @@ def _make_daily_data(
 
 def test_bot_configuration(make_fx_mom_bot):
     """Verify class attributes and defaults."""
-    bot = make_fx_mom_bot()
+    bot = make_fx_mom_bot(window=189, k=3)
     assert bot.ALLOW_SHORT is True
     assert bot.SHORTABLE == FX_ETFS
     assert bot.CARRY_ACCRUAL is False
     assert bot.MAX_GROSS >= 1.5
     assert set(bot.tickers) == set(FX_ETFS)
-    assert bot.window == 252
-    assert bot.k == 2
+    assert bot.window == 189
+    assert bot.k == 3
     assert bot.gross == 1.0
+    import inspect
+
+    from tradingbot.fxmomentumlsbot import FxMomentumLSBot as _B
+
+    sig = inspect.signature(_B.__init__).parameters
+    assert (sig["window"].default, sig["k"].default) == (189, 3)
 
     expected_grid = {
         "window": [63, 126, 189, 252, 378],
@@ -346,6 +352,3 @@ def test_backtest_bot_with_fxmomentumlsbot(make_fx_mom_bot):
     assert res is not None
     assert "yearly_return" in res
     assert res["nrtrades"] > 0
-
-
-

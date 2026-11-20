@@ -829,19 +829,21 @@ bots:
   suspend: false
 
 - name: signedfxcarrybot
-  # Signed 9-pair FX carry: long top-k / short bottom-k foreign currencies by FRED rate differentials.
-  # Paper run only (suspend: false) to build forward record. Backtest evidence shows positive alpha
-  # on defaults (t ~1.7-1.9), but after realistic swap markup and multiple testing selection bias,
-  # out-of-sample alpha t < 2, hence unproven. Do not touch live trade / copier weights.
+  # Signed 9-pair FX carry: long top-3 / short bottom-3 foreign currencies by FRED 3m rate differential,
+  # monthly, spot pairs with carry accrual (Bot.CARRY_ACCRUAL). Paper only, collecting a forward record.
+  # Backtest 2007-26 (default k=3, gross 1.0, no swap markup): alpha +0.66%/yr, t 0.36, beta 0.08;
+  # H1 -2.9% (t -0.96), H2 +4.5% (t 2.30). It lost in the first half (2008 carry crash), so UNPROVEN.
+  # The real MT5 swap markup is unmeasured: at 1%/yr full-window alpha is -0.3%. 19 variants tried.
   # See docs/backtests/carryblend-2026-11.md.
-  schedule: "20 21 * * 1-5" # Daily 9:20 PM UTC Mon-Fri (after close & FRED rates)
+  schedule: "20 21 * * 1-5" # Daily 9:20 PM UTC Mon-Fri (after close)
   suspend: false
 
 - name: fxmomentumlsbot
-  # FX ETF total-return momentum long/short (FXE, FXB, FXA, FXC, FXF, FXY).
-  # Paper run only (suspend: false) to build forward record. Backtest evidence shows positive alpha
-  # on defaults (t ~1.96), but walk-forward H2 alpha t < 2, hence unproven. Do not touch live trade / copier weights.
-  # See docs/backtests/carryblend-2026-11.md.
+  # FX ETF total-return momentum long/short (FXE, FXB, FXA, FXC, FXF, FXY): long top-3 / short bottom-3
+  # by 189-day return, monthly. Paper only, collecting a forward record. Defaults are the walk-forward H1
+  # winner (H2 t 1.70 vs 1.28 for the old 252/k=2). Backtest 2007-26 on T-bill-credited cash: alpha
+  # +1.64%/yr, t 2.04, beta -0.03, max DD -13%; H1 t 1.31, H2 t 1.70. UNPROVEN: best of 20 variants.
+  # See docs/backtests/carryblend-2026-11.md and carryblend-blend-2026-11.md.
   schedule: "25 21 * * 1-5" # Daily 9:25 PM UTC Mon-Fri (after US close)
   suspend: false
 

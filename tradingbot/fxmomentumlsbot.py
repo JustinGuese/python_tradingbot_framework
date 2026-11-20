@@ -9,7 +9,9 @@ Implements PLAN-carryblend.md S3:
 - Ranking and sizing via signed_topk_weights from tradingbot.utils.fx_carry
   (each side gross/2, equal weight).
 - ALLOW_SHORT = True, SHORTABLE = ("FXE", "FXB", "FXA", "FXC", "FXF", "FXY").
-- Parameters: window=252 (grid: 63, 126, 189, 252, 378), k=2 (grid: 2, 3), gross=1.0 (grid: 1.0, 1.5).
+- Parameters: window=189 (grid: 63, 126, 189, 252, 378), k=3 (grid: 2, 3), gross=1.0 (grid: 1.0, 1.5).
+  Defaults are the walk-forward H1 winner (beat the old 252/2 defaults on H2, t 1.70 vs 1.28); see
+  docs/backtests/carryblend-2026-11.md.
 - Returns {} if history has fewer than window+1 bars or fewer than 2*k valid tickers.
 - No carry accrual needed on this bot (CARRY_ACCRUAL = False) since ETF price embeds carry.
 """
@@ -86,8 +88,8 @@ class FxMomentumLSBot(Bot):
 
     def __init__(
         self,
-        window: int = 252,
-        k: int = 2,
+        window: int = 189,
+        k: int = 3,
         gross: float = 1.0,
         **kwargs: Any,
     ) -> None:

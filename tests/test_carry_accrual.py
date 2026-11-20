@@ -26,7 +26,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -37,7 +36,8 @@ from tradingbot.utils.backtest import backtest_bot
 from tradingbot.utils.bot_repository import BotRepository
 from tradingbot.utils.botclass import Bot
 from tradingbot.utils.config import ShortConfig
-from tradingbot.utils.db import Bot as BotModel, RunLog
+from tradingbot.utils.db import Bot as BotModel
+from tradingbot.utils.db import RunLog
 
 
 def _make_flat_frame(prices: list[float] | float, periods: int = 40, freq: str = "D") -> pd.DataFrame:
