@@ -215,11 +215,33 @@ class TestDailyCarryAccrual:
             daily_carry_accrual(weights, diffs)
 
 
+def _fake_fred(monkeypatch):
+    """Serve deterministic monthly FRED CSVs so the tests never touch the network."""
+    import requests
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, text):
+            self.text = text
+
+    months = pd.date_range("2018-01-01", "2026-10-01", freq="MS")
+
+    def fake_get(url, *args, **kwargs):
+        series_id = url.split("id=")[1]
+        offset = (sum(map(ord, series_id)) % 40) / 1000.0  # distinct, plausible 0-4% levels
+        rows = [f"{d.date()},{(1.0 + offset * 100 + (i % 12) * 0.1):.4f}" for i, d in enumerate(months)]
+        return _Resp(f"observation_date,{series_id}\n" + "\n".join(rows))
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+
 class TestLoadFredRates:
-    def test_load_fred_rates_lag_shift_25(self):
+    def test_load_fred_rates_lag_shift_25(self, monkeypatch, tmp_path):
         """Verify no-lookahead lag: rates(lag=25) is shifted by exactly 25 days relative to rates(lag=0)."""
-        rates_0 = load_fred_rates(lag_days=0)
-        rates_25 = load_fred_rates(lag_days=25)
+        _fake_fred(monkeypatch)
+        rates_0 = load_fred_rates(lag_days=0, cache_dir=tmp_path, refresh=True)
+        rates_25 = load_fred_rates(lag_days=25, cache_dir=tmp_path)
 
         # Both have same columns
         assert list(rates_0.columns) == G10_CURRENCIES
@@ -237,9 +259,10 @@ class TestLoadFredRates:
             atol=1e-7,
         )
 
-    def test_load_fred_rates_columns_and_decimals(self):
+    def test_load_fred_rates_columns_and_decimals(self, monkeypatch, tmp_path):
         """Rates must be in decimal form (e.g. 0.04 for 4%) across all G10 currencies."""
-        rates = load_fred_rates(lag_days=25)
+        _fake_fred(monkeypatch)
+        rates = load_fred_rates(lag_days=25, cache_dir=tmp_path, refresh=True)
         expected_cols = ["EUR", "GBP", "AUD", "NZD", "JPY", "CAD", "CHF", "NOK", "SEK", "USD"]
         assert list(rates.columns) == expected_cols
         assert list(FRED_RATE_SERIES.keys()) == expected_cols
