@@ -749,6 +749,21 @@ def backtest_bot(
                             }
                         )
 
+            if getattr(bot, "CARRY_ACCRUAL", False):
+                carry_fn = getattr(bot, "carry_rates", None)
+                if callable(carry_fn):
+                    rates = carry_fn(ts) or {}
+                    for ticker in tradeable:
+                        holding = portfolio.get(ticker, 0.0)
+                        if holding != 0 and ticker in rates:
+                            portfolio["USD"] = portfolio.get("USD", 0.0) + (
+                                holding * prices[ticker] * rates[ticker] / periods_per_year
+                            )
+                    if "USD" in rates:
+                        portfolio["USD"] = portfolio.get("USD", 0.0) + (
+                            portfolio.get("USD", 0.0) * rates["USD"] / periods_per_year
+                        )
+
             total_value = portfolio.get("USD", 0.0) + sum(portfolio.get(t, 0.0) * prices[t] for t in tradeable)
 
             # Resolve this bar into a target USD value per ticker, a per-ticker
