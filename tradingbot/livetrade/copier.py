@@ -48,6 +48,9 @@ class LiveTradeCopier:
         proxy = proxy.strip() if isinstance(proxy, str) else ""
         self.cash_proxy: str | None = None if proxy.lower() in ("", "none") else proxy
         self.cash_buffer = float(os.getenv("LIVETRADE_CASH_BUFFER", "0.02"))
+        # Set by _calculate_target_weights: True only when every source bot was read
+        # cleanly and is genuinely flat, so an empty target means "hold cash", not "failed".
+        self._target_is_flat = False
 
         # Inject our data service into the broker if it supports it
         if hasattr(self.broker, "data_service"):
@@ -60,8 +63,13 @@ class LiveTradeCopier:
         # 1. Calculate target weights across all bots (yf_symbol -> weight)
         target_weights = self._calculate_target_weights()
         if not target_weights:
-            logger.warning("No target weights calculated. Are bot portfolios empty or weights 0?")
-            return
+            if not self._target_is_flat:
+                logger.warning("No target weights calculated. Are bot portfolios empty or weights 0?")
+                return
+            # Every source bot is flat (e.g. a market gate moved it to cash). That is a real
+            # target, not a failure: fall through so the old positions are liquidated and the
+            # idle book is parked in the cash proxy like any other idle weight.
+            logger.info("All source bots are flat; reconciling to cash (idle weight goes to the cash proxy)")
 
         # 2. Map target weights to broker symbols
         broker_target_weights: dict[str, dict] = {}  # broker_symbol -> {"weight": float, "type": str}
@@ -178,13 +186,21 @@ class LiveTradeCopier:
     def _calculate_target_weights(self) -> dict[str, float]:
         """Aggregate weighted portfolios from all source bots into yf_symbol -> weight."""
         aggregated_weights: dict[str, float] = {}
+        self._target_is_flat = False
         total_user_weight = sum(self.bot_weights.values())
         if total_user_weight == 0:
             return {}
 
+        # An empty result only counts as "flat" when every weighted bot was read with a
+        # positive value and no price lookup failed: a data outage must never liquidate a book.
+        bots_read = 0
+        bots_weighted = 0
+        price_gap = False
+
         for bot_name, user_weight in self.bot_weights.items():
             if user_weight <= 0:
                 continue
+            bots_weighted += 1
 
             # An unapplied split shrinks the bot's weight in the symbol by the
             # ratio, and the copier would sell real shares to match.
@@ -197,6 +213,8 @@ class LiveTradeCopier:
 
             symbols = [s for s in portfolio if s != "USD"]
             if not symbols:
+                if float(portfolio.get("USD", 0.0)) > 0:
+                    bots_read += 1
                 continue
 
             prices = self.data_service.get_latest_prices_batch(symbols)
@@ -213,6 +231,7 @@ class LiveTradeCopier:
                 price = prices.get(s, 0.0)
                 if price <= 0:
                     logger.warning(f"Could not get price for {s}, skipping in weight calc")
+                    price_gap = True
                     continue
                 val = float(portfolio[s]) * price
                 bot_total_value += val
@@ -228,12 +247,16 @@ class LiveTradeCopier:
 
             if bot_total_value <= 0:
                 continue
+            bots_read += 1
 
             normalized_user_weight = user_weight / total_user_weight
             for s, val in symbol_values.items():
                 weight_in_live = (val / bot_total_value) * normalized_user_weight
                 aggregated_weights[s] = aggregated_weights.get(s, 0.0) + weight_in_live
 
+        self._target_is_flat = (
+            not aggregated_weights and bots_weighted > 0 and bots_read == bots_weighted and not price_gap
+        )
         return aggregated_weights
 
     def _calculate_orders(

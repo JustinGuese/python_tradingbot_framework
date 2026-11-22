@@ -939,8 +939,8 @@ liveTrade:
     # LIVE, and now genuinely reconciling. sync() is a full target-state sync, so the
     # first run with a non-empty target WILL liquidate whatever strategy 155809898 still
     # holds from the old handover and rebuild to QQQ/TQQQ. That did not happen while the
-    # target was empty (sync() early-returns at copier.py:44), which is why those stale
-    # positions survived untouched until now.
+    # target was empty (sync() used to early-return, which is why those stale positions
+    # survived untouched). A flat source bot now reconciles to cash/SHV like any target.
     dryRun: "false"
     # apiKeySecretKey: "COLLECTIVE2_API_KEY_XAUZERIFINE" # optional: only if a different C2 account
     # portfolioFraction: "0.5" # optional: override the shared liveTrade.portfolioFraction
