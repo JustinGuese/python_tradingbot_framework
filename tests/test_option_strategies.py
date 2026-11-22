@@ -1208,6 +1208,11 @@ def test_earnings_crush_bot_sells_a_rich_move_and_exits_after(sqlite_db, db_sess
         "tradingbot.utils.market_calendar.session_close_utc",
         lambda d: pd.Timestamp(d).tz_localize("UTC").to_pydatetime().replace(hour=20),
     )
+    if TODAY.weekday() >= 5:
+        # Weekend CI runs: Sat/Sun are not sessions, so "report tomorrow" would count 0 sessions.
+        # Count the next weekday as 1 session away, as it is on a trading day.
+        for mod in ("option_strategies", "option_rules"):
+            mocker.patch(f"tradingbot.utils.{mod}.business_days", lambda a, b: 1 if b > a else 0)
     at = lambda hhmm: pd.Timestamp(f"{TODAY} {hhmm}", tz="UTC").to_pydatetime()  # noqa: E731
     assert bot.makeOneIteration(now=at("14:30")) == 0  # morning: exits only
     assert bot.makeOneIteration(now=at("19:30")) == 1
