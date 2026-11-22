@@ -1154,7 +1154,10 @@ def _ohlc(data: pd.DataFrame) -> pd.DataFrame:
     estimators (Rogers-Satchell, Yang-Zhang) rightly read as almost no
     variance; the close-to-close vol then lands entirely in the overnight term.
     """
-    close = pd.Series(data["close"].to_numpy(), index=pd.bdate_range(end=TODAY, periods=len(data)))
+    close = pd.Series(
+        data["close"].to_numpy(),
+        index=pd.bdate_range(end=pd.offsets.BDay().rollback(pd.Timestamp(TODAY)), periods=len(data)),
+    )
     return pd.DataFrame({"open": close, "high": close * 1.0005, "low": close * 0.9995, "close": close})
 
 

@@ -1,5 +1,6 @@
 import logging
 import time
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from typing import Literal
 
 import yfinance as yf
@@ -413,6 +414,60 @@ class InteractiveBrokersBroker(LiveBroker):
         )
         return False
 
+    def _price_increment(self, contract: Contract, price: float) -> float | None:
+        """Minimum price variation IB enforces for ``contract`` at ``price``.
+
+        Uses the contract's market rule (tick size depends on the price band; LSE
+        ETFs are not a flat 0.01) and falls back to ``minTick``. None if IB gives
+        no usable answer. Cached per (conId, band rule), one round-trip per contract."""
+        cache = self.__dict__.setdefault("_tick_rules", {})
+        con_id = getattr(contract, "conId", None)
+        key = con_id if isinstance(con_id, int) and con_id else None
+        entry = cache.get(key) if key else None
+        if entry is None:
+            try:
+                details = self.ib.reqContractDetails(contract)
+                d = details[0]
+                increments: list[tuple[float, float]] = []
+                rule_ids = [r for r in str(d.marketRuleIds or "").split(",") if r.strip()]
+                venues = [v for v in str(d.validExchanges or "").split(",") if v.strip()]
+                idx = venues.index(contract.exchange) if contract.exchange in venues else 0
+                if rule_ids:
+                    rule = self.ib.reqMarketRule(int(rule_ids[min(idx, len(rule_ids) - 1)]))
+                    increments = sorted((float(i.lowEdge), float(i.increment)) for i in (rule or []))
+                min_tick = float(d.minTick) if d.minTick else 0.0
+                entry = (increments, min_tick)
+            except Exception as e:
+                logger.warning(f"Tick-size lookup failed for {getattr(contract, 'symbol', contract)}: {e}")
+                return None
+            if key:
+                cache[key] = entry
+        increments, min_tick = entry
+        step = min_tick
+        for low, inc in increments:
+            if price >= low and inc > 0:
+                step = inc
+        return step if step > 0 else None
+
+    def _round_limit_price(self, contract: Contract, price: float, ib_side: str) -> float:
+        """Snap ``price`` to the contract's tick grid, in the marketable direction
+        (BUY rounds up, SELL rounds down) so the order still crosses. IB rejects an
+        off-grid limit outright (Error 110)."""
+        step = self._price_increment(contract, price)
+        if not step:
+            return price
+        d_step, d_price = Decimal(str(step)), Decimal(str(price))
+        mode = ROUND_CEILING if ib_side == "BUY" else ROUND_FLOOR
+        ticks = (d_price / d_step).to_integral_value(rounding=mode)
+        snapped = float(max(ticks, Decimal(1)) * d_step)
+        # The grid can change at a band edge; if the snapped price moved band, redo once.
+        step2 = self._price_increment(contract, snapped)
+        if step2 and step2 != step:
+            d_step = Decimal(str(step2))
+            ticks = (Decimal(str(snapped)) / d_step).to_integral_value(rounding=mode)
+            snapped = float(max(ticks, Decimal(1)) * d_step)
+        return snapped
+
     def place_order(
         self,
         broker_symbol: str,
@@ -483,7 +538,8 @@ class InteractiveBrokersBroker(LiveBroker):
         if limit_price is not None:
             if float(limit_price) <= 0:
                 raise ValueError(f"Limit price must be positive, got {limit_price}")
-            order = LimitOrder(ib_side, final_qty, float(limit_price), tif="DAY")
+            limit_price = self._round_limit_price(contract, float(limit_price), ib_side)
+            order = LimitOrder(ib_side, final_qty, limit_price, tif="DAY")
         else:
             order = MarketOrder(ib_side, final_qty)
         if self.account_id:

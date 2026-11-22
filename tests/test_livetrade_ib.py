@@ -345,3 +345,64 @@ def test_symbol_map_ib_entries_are_complete():
         assert slot.get("price_symbol"), f"{yf}: price_symbol missing, sizing would use the US ticker"
         seen.setdefault(slot["symbol"], slot["conid"])
         assert seen[slot["symbol"]] == slot["conid"], f"{yf}: same ticker, different conid"
+
+
+# --- limit price tick-size snapping (IB Error 110 on LSEETF, 2026-11) ---------------------
+
+
+def _ticks(broker, increments, min_tick=0.0001, rule_ids="26", venues="LSEETF"):
+    d = SimpleNamespace(marketRuleIds=rule_ids, validExchanges=venues, minTick=min_tick)
+    broker.ib.reqContractDetails.return_value = [d]
+    broker.ib.reqMarketRule.return_value = [SimpleNamespace(lowEdge=lo, increment=inc) for lo, inc in increments]
+
+
+def _lse(con_id=1):
+    return SimpleNamespace(symbol="CSPX", conId=con_id, exchange="LSEETF")
+
+
+def test_ib_limit_buy_rounds_up_to_tick(broker):
+    _ticks(broker, [(0.0, 0.01)])
+    assert broker._round_limit_price(_lse(), 774.1395, "BUY") == pytest.approx(774.14)
+
+
+def test_ib_limit_sell_rounds_down_to_tick(broker):
+    _ticks(broker, [(0.0, 0.01)])
+    assert broker._round_limit_price(_lse(), 122.5159, "SELL") == pytest.approx(122.51)
+
+
+def test_ib_limit_already_on_grid_is_unchanged(broker):
+    _ticks(broker, [(0.0, 0.01)])
+    assert broker._round_limit_price(_lse(), 150.25, "BUY") == pytest.approx(150.25)
+    assert broker._round_limit_price(_lse(), 150.25, "SELL") == pytest.approx(150.25)
+
+
+def test_ib_limit_uses_the_price_band_increment(broker):
+    # Fine tick below 10, coarser tick above: the band at the order price decides.
+    _ticks(broker, [(0.0, 0.0001), (10.0, 0.005), (100.0, 0.05)])
+    assert broker._round_limit_price(_lse(), 9.5593, "BUY") == pytest.approx(9.5593)
+    assert broker._round_limit_price(_lse(), 16.1091, "BUY") == pytest.approx(16.11)
+    assert broker._round_limit_price(_lse(), 164.6466, "SELL") == pytest.approx(164.60)
+
+
+def test_ib_limit_falls_back_to_min_tick_without_market_rule(broker):
+    _ticks(broker, [], min_tick=0.05, rule_ids="")
+    assert broker._round_limit_price(_lse(), 42.7691, "BUY") == pytest.approx(42.80)
+
+
+def test_ib_limit_unchanged_when_tick_lookup_fails(broker):
+    broker.ib.reqContractDetails.side_effect = RuntimeError("no gateway")
+    assert broker._round_limit_price(_lse(), 42.7691, "BUY") == 42.7691
+
+
+def test_ib_tick_rules_are_cached_per_contract(broker):
+    _ticks(broker, [(0.0, 0.01)])
+    broker._round_limit_price(_lse(7), 10.123, "BUY")
+    broker._round_limit_price(_lse(7), 11.456, "SELL")
+    assert broker.ib.reqContractDetails.call_count == 1
+
+
+def test_ib_place_order_submits_tick_aligned_limit(broker):
+    _ticks(broker, [(0.0, 0.01)])
+    _place(broker, 1, side="BUY", contract=_lse(5), limit_price=394.4808)
+    order = broker.ib.placeOrder.call_args[0][1]
+    assert order.lmtPrice == pytest.approx(394.49)
