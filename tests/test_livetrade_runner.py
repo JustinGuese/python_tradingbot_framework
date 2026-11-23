@@ -357,5 +357,5 @@ def test_retail_brokers_copy_only_a_scheduled_bot_with_valid_weights():
         weights = json.loads(live[broker]["botWeights"])
         assert 0 < sum(weights.values()) <= 1.0 + 1e-9, broker
         assert {name.lower() for name in weights} <= scheduled, (broker, weights)
-    for broker in ("etoro", "mt5Mql5", "collective2XauZerifine"):
+    for broker in ("etoro", "mt5Mql5"):
         assert json.loads(live[broker]["botWeights"]) == {"InstitutionalFlowBot": 1.0}

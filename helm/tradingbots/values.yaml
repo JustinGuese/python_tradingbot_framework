@@ -930,12 +930,13 @@ liveTrade:
     # TARegimeMultiAssetBot starts in cash and funds a sleeve only on a buy signal,
     # so its share sits in SHV until signals fire. Legs C2 cannot trade are dropped
     # to cash by Collective2Broker.is_tradeable, not redistributed.
-    # RETAIL BOOK (2026-11-14): InstitutionalFlowBot alone, weekly top-20 S&P 100 momentum with a QQQ>SMA200 gate.
-    # docs/backtests/retail-blend-2026-11.md: H2 (2023-2026) CAGR +21.8%, max DD -11.9%, beta 0.44, alpha vs QQQ +9.0% (t 1.48),
-    # so UNPROVEN, and it lags QQQ (+28.2%) in a rally. IBKR keeps the low-beta blend. First sync after this change
-    # liquidates the old blend legs (target-state sync). Unmapped/untradeable names drop to cash, see
-    # docs/backtests/retail-venue-coverage-2026-11.md.
-    botWeights: '{"InstitutionalFlowBot": 1.0}'
+    # LOW-BETA BLEND again (2026-11-23). C2 is a public track record, and a paid Trade Leader plan
+    # is needed to submit at all, so the book has to be invested from day one. InstitutionalFlowBot
+    # has been flat in SHV since 2026-10-16 (QQQ < SMA200 gate), which would start the record as cash.
+    # The blend is the validated one (docs/backtests/c2-blend-2026-09.md): alpha +3.5%/yr at t 2.02,
+    # beta 0.13, max DD -8.5%. Live alpha is still unproven (t < 2 on every sleeve). eToro and MT5 keep
+    # InstitutionalFlowBot. First sync liquidates any InstitutionalFlowBot legs (target-state sync).
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
     # LIVE, and now genuinely reconciling. sync() is a full target-state sync, so the
     # first run with a non-empty target WILL liquidate whatever strategy 155809898 still
     # holds from the old handover and rebuild to QQQ/TQQQ. That did not happen while the
