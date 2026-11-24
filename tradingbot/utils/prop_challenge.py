@@ -319,16 +319,15 @@ def run_funded(r: np.ndarray, preset: FirmPreset) -> tuple[float, int, bool]:
             peak_eod = equity
 
         # Payout check every payout_every_days
-        if preset.payout_every_days > 0 and funded_days % preset.payout_every_days == 0:
-            if equity > 1.0:
-                profit = equity - 1.0
-                payout = profit * preset.account_size * preset.profit_split
-                total_payout_usd += payout
-                if preset.fee_refund_on_first_payout and not refund_paid:
-                    refund_paid = True
-                # Reset equity and peak to 1.0 on withdrawal
-                equity = 1.0
-                peak_eod = 1.0
+        if preset.payout_every_days > 0 and funded_days % preset.payout_every_days == 0 and equity > 1.0:
+            profit = equity - 1.0
+            payout = profit * preset.account_size * preset.profit_split
+            total_payout_usd += payout
+            if preset.fee_refund_on_first_payout and not refund_paid:
+                refund_paid = True
+            # Reset equity and peak to 1.0 on withdrawal
+            equity = 1.0
+            peak_eod = 1.0
 
     return (total_payout_usd, funded_days, refund_paid)
 
@@ -419,7 +418,7 @@ def historical_paths(r: np.ndarray, horizon: int, step: int = 1) -> np.ndarray:
     """
     r_arr = np.asarray(r, dtype=float).ravel()
     N = len(r_arr)
-    if N < horizon or horizon <= 0:
+    if horizon > N or horizon <= 0:
         return np.empty((0, horizon), dtype=float)
 
     starts = list(range(0, N - horizon + 1, max(1, int(step))))
@@ -476,9 +475,7 @@ def evaluate(paths: np.ndarray, preset: FirmPreset) -> ChallengeStats:
         p_refund = 0.0
 
     if preset.monthly_fee > 0:
-        monthly_fees = [
-            math.ceil(o.days / 21) * preset.monthly_fee for o in outcomes
-        ]
+        monthly_fees = [math.ceil(o.days / 21) * preset.monthly_fee for o in outcomes]
         mean_monthly_fee = float(np.mean(monthly_fees))
     else:
         mean_monthly_fee = 0.0

@@ -32,8 +32,6 @@ Paths:
 
 import argparse
 import logging
-import os
-import sys
 import warnings
 from pathlib import Path
 
@@ -47,8 +45,6 @@ from tradingbot.tsmomtrendbot import TSMOMTrendBot
 from tradingbot.utils.alpha_report import alpha_stats, load_irx
 from tradingbot.utils.prop_challenge import (
     PRESETS,
-    ChallengeStats,
-    FirmPreset,
     block_bootstrap,
     evaluate,
     historical_paths,
@@ -139,13 +135,15 @@ def build_markdown_doc(
     for name, counts in n_obs.items():
         lines.append(f"| {name} | {counts['h1']} | {counts['h2']} | {counts['total']} |")
 
-    lines.extend([
-        "",
-        "## Firm Rule Presets",
-        "",
-        "| Preset | Target (P1/P2) | Max Loss | Daily Loss | Trailing | Fee | Split | Note |",
-        "|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Firm Rule Presets",
+            "",
+            "| Preset | Target (P1/P2) | Max Loss | Daily Loss | Trailing | Fee | Split | Note |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for key, p in PRESETS.items():
         p1 = p.phases[0]
@@ -157,16 +155,18 @@ def build_markdown_doc(
             f"${p.fee:,.0f} | {format_pct(p.profit_split)} | {p.note} |"
         )
 
-    lines.extend([
-        "",
-        "## Out-of-Sample Results (H2: Chosen Leverage from H1)",
-        "",
-        "Leverage for each candidate and firm preset was selected solely on H1 by maximizing EV per attempt.",
-        "The chosen leverage is evaluated below on out-of-sample H2 paths.",
-        "",
-        "| Candidate | Preset | Chosen Lev | H2 P(Pass) | H2 P(Breach) | H2 P(Timeout) | H2 EV/Att (Boot) | H2 EV/Att (Hist) | QQQ EV at Lev | Verdict vs QQQ | Verdict vs Zero-Alpha |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Out-of-Sample Results (H2: Chosen Leverage from H1)",
+            "",
+            "Leverage for each candidate and firm preset was selected solely on H1 by maximizing EV per attempt.",
+            "The chosen leverage is evaluated below on out-of-sample H2 paths.",
+            "",
+            "| Candidate | Preset | Chosen Lev | H2 P(Pass) | H2 P(Breach) | H2 P(Timeout) | H2 EV/Att (Boot) | H2 EV/Att (Hist) | QQQ EV at Lev | Verdict vs QQQ | Verdict vs Zero-Alpha |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for row in chosen["h2_summary"]:
         lines.append(
@@ -177,16 +177,18 @@ def build_markdown_doc(
             f"`{row['verdict_qqq']}` | `{row['verdict_zero_alpha']}` |"
         )
 
-    lines.extend([
-        "",
-        "## Full Leverage Grid (H1: Fit / Selection Window)",
-        "",
-        "Headline metrics computed with 5,000-path circular block bootstrap (block=21, horizon=252).",
-        "Historical rolling paths (step=5, horizon=252) shown as consistency check.",
-        "",
-        "| Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |",
-        "|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Full Leverage Grid (H1: Fit / Selection Window)",
+            "",
+            "Headline metrics computed with 5,000-path circular block bootstrap (block=21, horizon=252).",
+            "Historical rolling paths (step=5, horizon=252) shown as consistency check.",
+            "",
+            "| Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for entry in h1_results:
         b = entry["boot"]
@@ -197,13 +199,15 @@ def build_markdown_doc(
             f"{format_usd(b.ev_per_attempt)} | {format_usd(h.ev_per_attempt)} |"
         )
 
-    lines.extend([
-        "",
-        "## Full Leverage Grid (H2: Out-of-Sample Window)",
-        "",
-        "| Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |",
-        "|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Full Leverage Grid (H2: Out-of-Sample Window)",
+            "",
+            "| Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
 
     for entry in h2_results:
         b = entry["boot"]
@@ -214,23 +218,26 @@ def build_markdown_doc(
             f"{format_usd(b.ev_per_attempt)} | {format_usd(h.ev_per_attempt)} |"
         )
 
-    lines.extend([
-        "",
-        "## Methodology & Intraday Caveat",
-        "",
-        "1. **Paths and Bootstrap:** For each window and leverage level, returns are levered according to",
-        "   `lever(r, L, rf, markup) = L * r - L * rf - L * markup / 252`. We simulate paths via circular block",
-        "   bootstrap (`n_paths=5000`, `block=21`, `horizon=252`, seed=7) as primary headline, and historical",
-        "   rolling paths (`horizon=252`, `step=5`) as robustness check.",
-        "2. **Controls:** We evaluate QQQ buy-and-hold at the same leverage, and a synthetic `blend minus alpha`",
-        "   control (C2 blend with full-sample alpha/252 subtracted, preserving exact volatility and beta with zero edge).",
-        "3. **Intraday Drawdown Caveat:** Daily close returns understate intraday drawdown swings. Breaches of daily-loss",
-        "   or trailing limits may occur intraday before a daily close recovers. The `--intraday-haircut` multiplier",
-        "   scales negative returns to stress-test breach rates.",
-        "4. **Rule Presets:** Presets are based on published prop-firm rules as of November 2026 and contain the note",
-        "   `VERIFY before buying`.",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Methodology & Intraday Caveat",
+            "",
+            "1. **Paths and Bootstrap:** For each window and leverage level, returns are levered according to",
+            "   `lever(r, L, rf, markup) = L * r - L * rf - L * markup / 252`. We simulate paths via circular block",
+            "   bootstrap (`n_paths=5000`, `block=21`, `horizon=252`, seed=7) as primary headline, and historical",
+            "   rolling paths (`horizon=252`, `step=5`) as robustness check.",
+            "2. **Controls:** We evaluate QQQ buy-and-hold at the same leverage, and a synthetic `blend minus alpha`",
+            "   control (C2 blend with full-sample alpha/252 subtracted, preserving exact volatility and beta with zero edge).",
+            "3. **Intraday Drawdown Caveat:** Daily close returns understate intraday drawdown swings. Breaches of daily-loss",
+            "   or trailing limits may occur intraday before a daily close recovers. The `--intraday-haircut` multiplier",
+            "   scales negative returns to stress-test breach rates.",
+            "4. **Rule Presets:** Presets are approximations assembled from third-party summaries of each firm's",
+            "   rules and were not checked against the firms' own terms. Each carries the note",
+            "   `VERIFY before buying`. Fees, targets and drawdown types change often.",
+            "",
+        ]
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -262,11 +269,13 @@ def main():
     r_tsmom = sleeve_returns(TSMOMTrendBot)
     r_gb = sleeve_returns(GoldenButterflyMomBot)
 
-    df_sleeves = pd.DataFrame({
-        "TARegimeMultiAsset": r_ta,
-        "TSMOM": r_tsmom,
-        "GoldenButterfly": r_gb,
-    }).dropna()
+    df_sleeves = pd.DataFrame(
+        {
+            "TARegimeMultiAsset": r_ta,
+            "TSMOM": r_tsmom,
+            "GoldenButterfly": r_gb,
+        }
+    ).dropna()
     df_sleeves = df_sleeves[df_sleeves.index >= START]
 
     # C2 blend from live weights in values.yaml (docs/backtests/c2-blend-2026-09.md)
@@ -293,10 +302,7 @@ def main():
 
     # Blend minus alpha: residual mean (alpha / 252) subtracted
     astats = alpha_stats(r_c2, r_qqq)
-    if astats is not None:
-        r_blend_minus_alpha = r_c2 - (astats.alpha / 252.0)
-    else:
-        r_blend_minus_alpha = r_c2.copy()
+    r_blend_minus_alpha = r_c2 - astats.alpha / 252.0 if astats is not None else r_c2.copy()
 
     # 3. Risk-free rate
     print("[3/5] Loading risk-free rate (^IRX)...")
@@ -388,7 +394,7 @@ def main():
     print("[5/5] Performing walk-forward selection and verdict computation...")
     h2_summary = []
     for cand_name in candidates:
-        for preset_name, preset in PRESETS.items():
+        for preset_name, _preset in PRESETS.items():
             # Pick best leverage by EV on H1 bootstrap paths
             best_lev = max(
                 LEVERAGE_GRID,
@@ -413,17 +419,19 @@ def main():
                 n=cand_h2_boot.n_paths,
             )
 
-            h2_summary.append({
-                "candidate": cand_name,
-                "preset": preset_name,
-                "leverage": best_lev,
-                "cand_boot": cand_h2_boot,
-                "cand_hist": cand_h2_hist,
-                "qqq_boot": qqq_h2_boot,
-                "bma_boot": bma_h2_boot,
-                "verdict_qqq": v_qqq,
-                "verdict_zero_alpha": v_bma,
-            })
+            h2_summary.append(
+                {
+                    "candidate": cand_name,
+                    "preset": preset_name,
+                    "leverage": best_lev,
+                    "cand_boot": cand_h2_boot,
+                    "cand_hist": cand_h2_hist,
+                    "qqq_boot": qqq_h2_boot,
+                    "bma_boot": bma_h2_boot,
+                    "verdict_qqq": v_qqq,
+                    "verdict_zero_alpha": v_bma,
+                }
+            )
 
     # Print summary table to stdout
     print("\n" + "=" * 105)
