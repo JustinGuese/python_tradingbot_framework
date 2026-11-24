@@ -163,8 +163,8 @@ def build_markdown_doc(
             "Leverage for each candidate and firm preset was selected solely on H1 by maximizing EV per attempt.",
             "The chosen leverage is evaluated below on out-of-sample H2 paths.",
             "",
-            "| Candidate | Preset | Chosen Lev | H2 P(Pass) | H2 P(Breach) | H2 P(Timeout) | H2 EV/Att (Boot) | H2 EV/Att (Hist) | QQQ EV at Lev | Verdict vs QQQ | Verdict vs Zero-Alpha |",
-            "|---|---|---|---|---|---|---|---|---|---|---|",
+            "| Candidate | Preset | Chosen Lev | H2 P(Pass) | H2 P(Breach) | H2 P(Timeout) | H2 EV/Att (Boot) | H2 EV/Att (Hist) | QQQ EV at Lev | Zero-Alpha EV at Lev | Verdict vs QQQ | Verdict vs Zero-Alpha |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
     )
 
@@ -174,7 +174,7 @@ def build_markdown_doc(
             f"{format_pct(row['cand_boot'].p_pass)} | {format_pct(row['cand_boot'].p_breach)} | "
             f"{format_pct(row['cand_boot'].p_timeout)} | {format_usd(row['cand_boot'].ev_per_attempt)} | "
             f"{format_usd(row['cand_hist'].ev_per_attempt)} | {format_usd(row['qqq_boot'].ev_per_attempt)} | "
-            f"`{row['verdict_qqq']}` | `{row['verdict_zero_alpha']}` |"
+            f"{format_usd(row['bma_boot'].ev_per_attempt)} | `{row['verdict_qqq']}` | `{row['verdict_zero_alpha']}` |"
         )
 
     lines.extend(
@@ -439,7 +439,7 @@ def main():
     print("=" * 105)
     print(
         f"{'Candidate':<20} {'Preset':<18} {'Lev':<4} {'H2 P(Pass)':<11} {'H2 P(Brch)':<11} "
-        f"{'H2 EV Boot':<11} {'H2 EV Hist':<11} {'QQQ EV':<10} {'Verdict vs QQQ':<22}"
+        f"{'H2 EV Boot':<11} {'H2 EV Hist':<11} {'QQQ EV':<10} {'0-alpha EV':<11} {'Verdict vs 0-alpha':<22}"
     )
     print("-" * 105)
     for row in h2_summary:
@@ -447,7 +447,8 @@ def main():
             f"{row['candidate']:<20} {row['preset']:<18} {row['leverage']:<4} "
             f"{format_pct(row['cand_boot'].p_pass):<11} {format_pct(row['cand_boot'].p_breach):<11} "
             f"{format_usd(row['cand_boot'].ev_per_attempt):<11} {format_usd(row['cand_hist'].ev_per_attempt):<11} "
-            f"{format_usd(row['qqq_boot'].ev_per_attempt):<10} {row['verdict_qqq']:<22}"
+            f"{format_usd(row['qqq_boot'].ev_per_attempt):<10} {format_usd(row['bma_boot'].ev_per_attempt):<11} "
+            f"{row['verdict_zero_alpha']:<22}"
         )
     print("=" * 105)
 
