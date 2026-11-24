@@ -573,6 +573,13 @@ Set these credentials in your secret store:
 
 ---
 
+## Prop-firm challenge sims
+
+To evaluate strategies against proprietary trading firm rules (such as FTMO, Topstep, or The5ers) before risking live capital, see the [Prop-Firm Challenges Guide](prop-challenges.md).
+Nightly forward paper simulations run via the `propsimlive` CronJob and record progress in `prop_challenge_sim` alongside a QQQ twin control.
+
+---
+
 ## ⏱️ Execution Window & Timing Design
 
 To align execution with empirical market dynamics and avoid the high volatility and wide spreads of opening auctions:

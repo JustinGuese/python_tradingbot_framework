@@ -116,6 +116,7 @@ helm upgrade --install tradingbots ./helm/tradingbots \
   - [AI Tools](guides/ai-tools.md)
   - [Telegram Monitor](guides/telegram-monitor.md)
   - [Local Development](guides/local-development.md)
+  - [Prop-Firm Challenges](guides/prop-challenges.md)
 - **Examples**: Real-world bot implementations
 
 ## Need Help?

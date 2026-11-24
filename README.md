@@ -104,6 +104,30 @@ Live paper bots with at least 4 weeks of history, sorted by CAGR, from the
 | TSMOMTrendBot | 46 | −5.8% | −38% | −22.1% | −1.38 | 0.25 | −5.8% | too short |
 | option_EarningsCrushBot | 39 | −6.1% | −44% | −38.3% | −1.15 | 0.16 | −6.1% | too short |
 
+## 🏆 Prop-Firm Challenge Simulator
+
+Can candidate trading bots pay for themselves by passing prop-firm evaluation challenges?
+The framework includes a challenge simulator (`tradingbot/utils/prop_challenge.py`) modelling
+multi-phase evaluations, daily and max loss limits, trailing drawdowns, and profit splits across
+presets like FTMO, Topstep, and The5ers.
+
+Run the historical walk-forward study (H1 leverage selection, H2 OOS evaluation, bootstrap paths):
+
+```bash
+uv run python scripts/onetime_prop_challenge_study.py
+```
+
+Forward paper challenges track daily via the `propsimlive` CronJob into `prop_challenge_sim`,
+benchmarking candidate sleeves against identical-leverage QQQ twin controls:
+
+| Sim | Preset | Lev | Target | Max Loss | Control Twin |
+|---|---|---|---|---|---|
+| `blend_ftmo_2step_100k_4x` | FTMO 100k | 4x | 10% / 5% | 10% static | `qqq_ftmo_2step_100k_4x` |
+| `blend_topstep_50k_2x` | Topstep 50k | 2x | 6% | 4% EOD trail | `qqq_topstep_50k_2x` |
+| `blend_the5ers_hs_100k_4x` | The5ers 100k | 4x | 10% / 5% | 10% static | `qqq_the5ers_hs_100k_4x` |
+
+See the [Prop-Firm Challenge Guide](docs/guides/prop-challenges.md) for full rules, intraday haircut adjustments, and backtest caveats.
+
 ## 🛠 System Architecture
 
 The system is designed to be lightweight and stateless. Each "Bot" is a containerized instance triggered by a schedule.
@@ -261,6 +285,10 @@ kubectl create secret generic tradingbot-secrets \
 bots:
   - name: rsibot
     schedule: '*/5 * * * 1-5' # Every 5 mins, Mon-Fri
+  - name: alphareport
+    schedule: '0 7 * * 6' # Weekly alpha vs QQQ scorecard (bot_alpha_report)
+  - name: propsimlive
+    schedule: '40 22 * * 1-5' # Daily forward paper prop-challenge replay (prop_challenge_sim)
 ```
 
 **3. Deploy**:
