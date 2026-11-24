@@ -256,6 +256,39 @@ class BotAlphaReport(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class PropChallengeSim(Base):
+    """
+    Daily snapshot of a forward paper prop-firm challenge (utils/prop_forward.py).
+
+    The `propsimlive` CronJob replays the live sleeve returns (portfolio_worth) since the
+    sim's start date through a firm's rules and leverage, and writes one row per sim per
+    day. `equity`, `limit_equity` and `target_equity` are in the current stage's units,
+    where 1.0 is that stage's starting balance. `status` is "running", "breached" or
+    "funded". The table is a history of how each sim evolved.
+    """
+
+    __tablename__ = "prop_challenge_sim"
+    __table_args__ = (UniqueConstraint("as_of", "sim_name", name="uq_prop_challenge_sim_asof_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    sim_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    preset: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    leverage: Mapped[float] = mapped_column(Float, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    stage: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    trading_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stage_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    limit_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cum_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payouts_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
 class StockNews(Base):
     """
     Stock news model for storing news articles per symbol from yfinance.

@@ -259,3 +259,38 @@ Historical rolling paths (step=5, horizon=252) shown as consistency check.
    and the fee. The `note` column lists what each preset does not model. Fees, targets and drawdown
    types change often, so check each firm's current terms before buying.
 
+
+## Reading these results (added by hand after the run)
+
+Figures below are H2 bootstrap EV per attempt for the C2 blend at the leverage chosen on H1,
+from three runs of the script: the base run in the tables above, `--intraday-haircut 1.25`
+and `--alpha-keep 0.5` (both printed to the terminal only).
+
+| Run | FTMO | The5ers | Topstep |
+|---|---|---|---|
+| Base | +$1,080 | +$752 | +$598 |
+| Zero-alpha control | +$172 | +$33 | +$281 |
+| Losing days 1.25x worse | -$360 | -$412 | +$209 |
+| Half the alpha | +$637 | +$360 | +$500 |
+
+- **The edge is thin.** The blend beats its zero-alpha control by about $900 on FTMO and $700 on
+  The5ers. A small intraday stress (losing days 25% worse) turns FTMO and The5ers negative, and
+  Topstep stays positive but below its QQQ twin.
+- **The edge is unproven live.** Since the sleeves started on 2026-09-21, TARegimeMultiAsset is
+  -4.5%, TSMOM -9.8% and GoldenButterfly -1.9% (the blend -4.9% against QQQ -12.2%). Run through the
+  same rules at the study's leverage from that date, every blend sim breaches within 33 trading days.
+- **Rules.** Topstep and FTMO presets were checked against the firms' own pages on 2026-11-24;
+  The5ers comes from search snippets only. Each preset's `note` lists what it does not model.
+
+## Forward paper sims (`propsimlive`)
+
+Since 2026-11-24 the `propsimlive` CronJob (22:40 UTC, Mon-Fri) replays the live sleeve returns from
+`portfolio_worth` through each preset's rules at the study's leverage, one row per sim per day in
+`prop_challenge_sim`. Every blend sim has a QQQ twin at the same leverage: a pass the twin also makes is
+volatility, not edge. Nothing trades. Judge it after at least one full challenge window, and read a
+pass as evidence only if the twin does not pass too.
+
+```sql
+select as_of, sim_name, stage, status, trading_days, equity, limit_equity, target_equity, cum_return
+from prop_challenge_sim where as_of = (select max(as_of) from prop_challenge_sim) order by sim_name;
+```

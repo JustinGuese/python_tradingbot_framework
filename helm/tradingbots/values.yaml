@@ -739,6 +739,14 @@ bots:
   # candidate. Exits 1 if Benchmark_QQQ is missing or stale (utils/alpha_report.py).
   schedule: "0 7 * * 6" # Saturdays 7:00 AM UTC
 
+- name: propsimlive
+  # Not a bot, nothing trades: forward paper prop-firm challenges. Replays the live C2 blend
+  # sleeves (and a QQQ twin per sim as the control) from portfolio_worth through FTMO, The5ers
+  # and Topstep rules at fixed leverage, one snapshot per sim per day into prop_challenge_sim.
+  # Started 2026-11-24 (PROPSIM_START overrides). A breach or pass is logged as a WARNING.
+  # Exits 1 if a source series is stale (utils/prop_forward.py, docs/backtests/prop-challenge-2026-11.md).
+  schedule: "40 22 * * 1-5" # 22:40 UTC Mon-Fri, after the 22:00 portfolio-worth job
+
 - name: corporateeventssnapshot
   # Not a bot: refreshes earnings dates (with before-open / after-close timing)
   # and ex-dividend dates into stock_earnings / dividend_events for the option

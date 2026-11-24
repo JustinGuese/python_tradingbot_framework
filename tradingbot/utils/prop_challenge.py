@@ -227,9 +227,21 @@ def lever(
     return L * r_arr - L * rf_daily - (L * financing_markup / 252.0)
 
 
-def run_phase(r: np.ndarray, rules: PhaseRules) -> tuple[str, int]:
+@dataclass(frozen=True)
+class PhaseWalk:
+    """State of one evaluation phase after walking the days it has had so far."""
+
+    result: str  # "pass" | "breach" | "timeout" | "running" (data ended with nothing decided)
+    days: int  # trading days walked
+    equity: float  # equity at the last walked day (1.0 = starting balance)
+    peak_eod: float  # highest end-of-day equity so far
+    limit: float | None  # equity level that breaches the max-loss rule today (None before day 1)
+    best_day: float  # best single-day profit so far, in starting-balance units
+
+
+def walk_phase(r: np.ndarray, rules: PhaseRules) -> PhaseWalk:
     """
-    Walk days starting equity 1.0.
+    Walk days starting equity 1.0 and return the full state, not just the verdict.
 
     Breach checked before target on same day (conservative ordering).
     Daily loss: equity_t - equity_{t-1} <= -daily_loss (in initial-balance units).
@@ -238,55 +250,39 @@ def run_phase(r: np.ndarray, rules: PhaseRules) -> tuple[str, int]:
       - eod_trailing: limit = min(peak_eod - max_loss, 1.0), equity_t <= limit
     Pass requires profit_target, min_days, and consistency rule (max daily profit <= consistency * total profit).
     If consistency fails, keep trading.
-    Timeout if max_days reached or path ends without pass or breach.
-
-    Returns:
-        (result, days_used) where result is 'pass', 'breach', or 'timeout'.
+    "timeout" if max_days is reached; "running" if the data ends with nothing decided.
     """
     r_arr = np.asarray(r, dtype=float)
-    if len(r_arr) == 0:
-        return ("timeout", 0)
-
     equity = 1.0
     peak_eod = 1.0
-    daily_profits: list[float] = []
+    limit: float | None = None
+    best_day = 0.0
 
     for t in range(len(r_arr)):
         day = t + 1
-        ret = float(r_arr[t])
         prior_equity = equity
-        equity = prior_equity * (1.0 + ret)
+        equity = prior_equity * (1.0 + float(r_arr[t]))
         daily_pnl = equity - prior_equity
-        daily_profits.append(daily_pnl)
+        best_day = max(best_day, daily_pnl)
 
         # 1. Breach checks (breach beats pass on the same day)
-        if rules.daily_loss is not None and daily_pnl <= -rules.daily_loss + 1e-12:
-            return ("breach", day)
-
         if rules.trailing == "static":
             limit = 1.0 - rules.max_loss
-            if equity <= limit + 1e-12:
-                return ("breach", day)
         elif rules.trailing == "eod_trailing":
             limit = min(peak_eod - rules.max_loss, 1.0)
-            if equity <= limit + 1e-12:
-                return ("breach", day)
         else:
             raise ValueError(f"Unknown trailing mode: {rules.trailing!r}")
+        daily_breach = rules.daily_loss is not None and daily_pnl <= -rules.daily_loss + 1e-12
+        if daily_breach or equity <= limit + 1e-12:
+            return PhaseWalk("breach", day, equity, peak_eod, limit, best_day)
 
         # 2. Pass checks
         total_profit = equity - 1.0
         target_reached = total_profit >= rules.profit_target - 1e-12
         min_days_reached = day >= rules.min_days
-
-        consistency_ok = True
-        if rules.consistency is not None:
-            max_daily_profit = max(daily_profits)
-            if max_daily_profit > rules.consistency * total_profit + 1e-12:
-                consistency_ok = False
-
+        consistency_ok = rules.consistency is None or best_day <= rules.consistency * total_profit + 1e-12
         if target_reached and min_days_reached and consistency_ok:
-            return ("pass", day)
+            return PhaseWalk("pass", day, equity, peak_eod, limit, best_day)
 
         # Update peak_eod for trailing limit
         if equity > peak_eod:
@@ -294,9 +290,19 @@ def run_phase(r: np.ndarray, rules: PhaseRules) -> tuple[str, int]:
 
         # 3. Timeout checks
         if rules.max_days is not None and day >= rules.max_days:
-            return ("timeout", day)
+            return PhaseWalk("timeout", day, equity, peak_eod, limit, best_day)
 
-    return ("timeout", len(r_arr))
+    return PhaseWalk("running", len(r_arr), equity, peak_eod, limit, best_day)
+
+
+def run_phase(r: np.ndarray, rules: PhaseRules) -> tuple[str, int]:
+    """
+    Verdict of one phase: ('pass' | 'breach' | 'timeout', days_used). See walk_phase for the rules.
+
+    A path that ends with nothing decided is a 'timeout'.
+    """
+    w = walk_phase(r, rules)
+    return ("timeout" if w.result == "running" else w.result, w.days)
 
 
 def run_funded(r: np.ndarray, preset: FirmPreset) -> tuple[float, int, bool]:
