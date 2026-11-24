@@ -92,6 +92,7 @@ nav:
       - Institutional 13F Signal: backtests/inst13f-2026-11.md
       - Hyperliquid Funding Carry: backtests/funding-carry-2026-11.md
       - Volatility-Managed QQQ: backtests/volmanaged-qqq-2026-11.md
+      - Prop-Firm Challenge Simulator: backtests/prop-challenge-2026-11.md
       - Sleeve Blend Parity: backtests/sleeveblend-parity-2026-11.md
       - Sleeve Blend Volatility Scaling: backtests/blend-volscale-2026-11.md
       - Retail Blend Study: backtests/retail-blend-2026-11.md
