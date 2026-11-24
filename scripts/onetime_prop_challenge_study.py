@@ -101,6 +101,7 @@ def build_markdown_doc(
     chosen: dict,
     n_obs: dict,
     intraday_haircut: float,
+    alpha_keep: float,
     start_date: str,
     end_date: str,
 ) -> str:
@@ -125,6 +126,7 @@ def build_markdown_doc(
         f"  H2 test (`{SPLIT}` to `{end_date}`) judged out-of-sample.",
         f"- **Intraday haircut:** `--intraday-haircut {intraday_haircut:.2f}` (multiplies negative daily",
         "  returns before breach checks to address intraday drawdown understatement from daily closes).",
+        f"- **Alpha kept:** `--alpha-keep {alpha_keep:.2f}` (fraction of each candidate's backtest alpha vs QQQ retained).",
         "",
         "### Number of Daily Observations",
         "",
@@ -232,9 +234,10 @@ def build_markdown_doc(
             "3. **Intraday Drawdown Caveat:** Daily close returns understate intraday drawdown swings. Breaches of daily-loss",
             "   or trailing limits may occur intraday before a daily close recovers. The `--intraday-haircut` multiplier",
             "   scales negative returns to stress-test breach rates.",
-            "4. **Rule Presets:** Presets are approximations assembled from third-party summaries of each firm's",
-            "   rules and were not checked against the firms' own terms. Each carries the note",
-            "   `VERIFY before buying`. Fees, targets and drawdown types change often.",
+            "4. **Rule Presets:** The Topstep and FTMO presets were checked against the firms' own pages on",
+            "   2026-11-24. The5ers comes only from search snippets of its FAQs, which conflict on the step-1 target",
+            "   and the fee. The `note` column lists what each preset does not model. Fees, targets and drawdown",
+            "   types change often, so check each firm's current terms before buying.",
             "",
         ]
     )
@@ -254,6 +257,12 @@ def main():
         type=float,
         default=1.0,
         help="Multiplier on negative daily returns before breach checks (default: 1.0)",
+    )
+    parser.add_argument(
+        "--alpha-keep",
+        type=float,
+        default=1.0,
+        help="Fraction of each candidate's backtest alpha vs QQQ kept (default 1.0; 0.5 halves it)",
     )
     args = parser.parse_args()
 
@@ -299,6 +308,14 @@ def main():
     r_cand_tsmom = r_cand_tsmom.reindex(common_idx).dropna()
     r_cand_ta = r_cand_ta.reindex(common_idx).dropna()
     r_qqq = r_qqq.reindex(common_idx).dropna()
+
+    # Live alpha is unproven: optionally shrink each candidate's alpha before simulating.
+    if args.alpha_keep != 1.0:
+        shrunk = {}
+        for name, series in (("c2", r_c2), ("tsmom", r_cand_tsmom), ("ta", r_cand_ta)):
+            st = alpha_stats(series, r_qqq)
+            shrunk[name] = series - (1.0 - args.alpha_keep) * st.alpha / 252.0 if st is not None else series
+        r_c2, r_cand_tsmom, r_cand_ta = shrunk["c2"], shrunk["tsmom"], shrunk["ta"]
 
     # Blend minus alpha: residual mean (alpha / 252) subtracted
     astats = alpha_stats(r_c2, r_qqq)
@@ -459,6 +476,7 @@ def main():
             chosen={"h2_summary": h2_summary},
             n_obs=n_obs,
             intraday_haircut=args.intraday_haircut,
+            alpha_keep=args.alpha_keep,
             start_date=start_date_str,
             end_date=end_date_str,
         )

@@ -7,6 +7,7 @@ Strictly tests the 5 scenarios specified in PLAN-propsim.md S2.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from tradingbot.utils.prop_challenge import (
     PRESETS,
@@ -14,6 +15,7 @@ from tradingbot.utils.prop_challenge import (
     block_bootstrap,
     evaluate,
     lever,
+    run_funded,
     run_phase,
 )
 
@@ -200,9 +202,9 @@ def test_lever_and_ev_accounting():
     assert stats_ftmo.p_breach == 0.0
     assert stats_ftmo.ev_per_attempt == -PRESETS["ftmo_2step_100k"].fee
 
-    # Preset with monthly fee (topstep_50k, fee = 49, monthly_fee = 49)
+    # Preset with monthly fee (topstep_50k, fee = 0, monthly_fee = 49)
     # 50 days = ceil(50 / 21) = 3 months -> 3 * 49 = 147
-    # ev_per_attempt = -49 - 147 = -196.0
+    # ev_per_attempt = -0 - 147 = -147.0
     stats_topstep = evaluate(paths_zero, PRESETS["topstep_50k"])
     assert stats_topstep.p_timeout == 1.0
     assert stats_topstep.p_pass == 0.0
@@ -219,3 +221,22 @@ def test_lever_and_ev_accounting():
 
     assert boot1.shape == (20, 30)
     np.testing.assert_array_equal(boot1, boot2)
+
+
+def test_funded_payout_cap_and_activation_fee():
+    """A payout request is capped; the rest of the profit stays in the account; activation is charged on pass."""
+    from dataclasses import replace
+
+    base = PRESETS["topstep_50k"]
+    preset = replace(base, payout_every_days=1, max_payout_request=1_000.0, profit_split=0.9)
+    # +4% on day 1 = $2,000 profit on a $50k account. Request capped at $1,000; trader gets 90% of it.
+    payout, days, _ = run_funded(np.array([0.04]), preset)
+    assert days == 1
+    assert payout == pytest.approx(900.0)
+
+    # A path that passes the combine on day 2 (needs 2 min days, best day < 55% of the 6% target) pays the
+    # activation fee in EV: all-pass paths give ev = -monthly - activation (no funded days left).
+    passing = np.array([[0.03, 0.03]])
+    stats = evaluate(passing, preset)
+    assert stats.p_pass == 1.0
+    assert stats.ev_per_attempt == pytest.approx(-preset.fee - preset.monthly_fee - preset.activation_fee)

@@ -13,6 +13,7 @@ to a QQQ buy-and-hold control and a zero-alpha blend control at the identical le
   H2 test (`2023-07-01` to `2026-11-23`) judged out-of-sample.
 - **Intraday haircut:** `--intraday-haircut 1.00` (multiplies negative daily
   returns before breach checks to address intraday drawdown understatement from daily closes).
+- **Alpha kept:** `--alpha-keep 1.00` (fraction of each candidate's backtest alpha vs QQQ retained).
 
 ### Number of Daily Observations
 
@@ -28,9 +29,9 @@ to a QQQ buy-and-hold control and a zero-alpha blend control at the identical le
 
 | Preset | Target (P1/P2) | Max Loss | Daily Loss | Trailing | Fee | Split | Note |
 |---|---|---|---|---|---|---|---|
-| `ftmo_2step_100k` | 10.0% / 5.0% | 10.0% | 5.0% | static | $540 | 80.0% | FTMO 2-step 100k challenge rules as of 2026. VERIFY before buying. |
-| `topstep_50k` | 6.0% / — | 4.0% | None | eod_trailing | $49 | 90.0% | Topstep 50k rules as of 2026. Monthly fee 49 USD. VERIFY before buying. |
-| `the5ers_hs_100k` | 8.0% / — | 10.0% | 5.0% | static | $495 | 80.0% | The 5ers High Stakes 100k rules as of 2026. VERIFY before buying. |
+| `ftmo_2step_100k` | 10.0% / 5.0% | 10.0% | 5.0% | static | $540 | 80.0% | FTMO 2-step 100k, matched against ftmo.com/en/2-step-challenge on 2026-11-24: targets 10%/5%, 5% daily, 10% max loss, 4 min days, unlimited time, fee refunded at first reward. Split is 80% (up to 90% per FTMO). Fee shown is the list price in EUR treated as USD. NOT modelled: the 14-day minimum before the first reward and the CFD instrument limits. VERIFY before buying. |
+| `topstep_50k` | 6.0% / — | 4.0% | None | eod_trailing | $0 | 90.0% | Topstep 50k Combine, read from help.topstep.com on 2026-11-24: target $3,000, end-of-day trailing $2,000 loss limit locking at the start balance, best day under 55% of target, 2 min days, $49/month, $149 activation on the Express account, 90% split, $2,000 cap per payout request. NOT modelled: the optional daily loss limit, the loss limit dropping to $0 after the first payout, the 40% consistency objective and 5-winning-day payout gate on the funded account, the $125 minimum payout, and the undocumented VPS policy. VERIFY before buying. |
+| `the5ers_hs_100k` | 10.0% / 5.0% | 10.0% | 5.0% | static | $545 | 80.0% | The5ers High Stakes 100k, from search snippets of the5ers.com FAQs on 2026-11-24 (pages could not be fetched): two steps, unlimited time, 10% max loss, 5% daily, payout cap $4,000. Sources conflict on the step-1 target (8% or 10%; 10% used) and the fee ($545 from one promo). Minimum-days rule is three profitable days of 0.5%, approximated as 3 trading days. VERIFY before buying. |
 
 ## Out-of-Sample Results (H2: Chosen Leverage from H1)
 
@@ -39,15 +40,15 @@ The chosen leverage is evaluated below on out-of-sample H2 paths.
 
 | Candidate | Preset | Chosen Lev | H2 P(Pass) | H2 P(Breach) | H2 P(Timeout) | H2 EV/Att (Boot) | H2 EV/Att (Hist) | QQQ EV at Lev | Zero-Alpha EV at Lev | Verdict vs QQQ | Verdict vs Zero-Alpha |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| C2 blend | `ftmo_2step_100k` | 4x | 29.3% | 70.1% | 0.6% | $1,065 | $1,293 | -$111 | $165 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| C2 blend | `topstep_50k` | 2x | 38.3% | 61.7% | 0.0% | $614 | $1,435 | $694 | $286 | `no edge over QQQ control` | `positive EV (unverified rules)` |
-| C2 blend | `the5ers_hs_100k` | 4x | 53.8% | 46.1% | 0.0% | $2,855 | $3,341 | $265 | $1,369 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| TSMOM | `ftmo_2step_100k` | 3x | 35.6% | 64.2% | 0.2% | $2,079 | $2,795 | $213 | -$153 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| TSMOM | `topstep_50k` | 6x | 34.4% | 65.6% | 0.0% | $853 | $602 | $849 | $479 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| TSMOM | `the5ers_hs_100k` | 2x | 60.8% | 37.3% | 1.9% | $3,401 | $4,016 | $3,038 | $89 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 25.1% | 74.9% | 0.0% | $811 | $2,799 | -$462 | $66 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
-| TARegimeMultiAsset | `topstep_50k` | 5x | 33.8% | 66.2% | 0.0% | $585 | $550 | $834 | $473 | `no edge over QQQ control` | `positive EV (unverified rules)` |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 48.1% | 51.5% | 0.4% | $2,009 | $2,193 | $265 | $1,369 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| C2 blend | `ftmo_2step_100k` | 4x | 29.3% | 70.0% | 0.6% | $1,080 | $1,290 | -$111 | $172 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| C2 blend | `topstep_50k` | 2x | 38.4% | 61.6% | 0.0% | $598 | $1,283 | $759 | $281 | `no edge over QQQ control` | `positive EV (unverified rules)` |
+| C2 blend | `the5ers_hs_100k` | 4x | 30.1% | 69.2% | 0.6% | $752 | $849 | -$468 | $33 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| TSMOM | `ftmo_2step_100k` | 3x | 35.6% | 64.2% | 0.2% | $2,079 | $2,795 | $213 | -$149 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| TSMOM | `topstep_50k` | 6x | 37.4% | 62.6% | 0.0% | $665 | $487 | $1,144 | $388 | `no edge over QQQ control` | `positive EV (unverified rules)` |
+| TSMOM | `the5ers_hs_100k` | 2x | 35.3% | 57.8% | 6.9% | $1,031 | $406 | $231 | -$468 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 25.3% | 74.7% | 0.0% | $805 | $2,791 | -$462 | $71 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
+| TARegimeMultiAsset | `topstep_50k` | 5x | 34.9% | 65.1% | 0.0% | $568 | $550 | $1,138 | $406 | `no edge over QQQ control` | `positive EV (unverified rules)` |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 24.6% | 73.6% | 1.7% | $310 | $345 | -$468 | $33 | `positive EV (unverified rules)` | `positive EV (unverified rules)` |
 
 ## Full Leverage Grid (H1: Fit / Selection Window)
 
@@ -56,191 +57,191 @@ Historical rolling paths (step=5, horizon=252) shown as consistency check.
 
 | Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |
 |---|---|---|---|---|---|---|
-| C2 blend | `ftmo_2step_100k` | 1x | 0.6% | 4.0% | -$535 | -$540 |
-| C2 blend | `ftmo_2step_100k` | 2x | 14.4% | 37.0% | -$165 | -$109 |
-| C2 blend | `ftmo_2step_100k` | 3x | 29.7% | 55.9% | $823 | $961 |
-| C2 blend | `ftmo_2step_100k` | 4x | 31.1% | 66.7% | $1,269 | $1,102 |
-| C2 blend | `ftmo_2step_100k` | 5x | 28.6% | 71.2% | $1,214 | $527 |
-| C2 blend | `ftmo_2step_100k` | 6x | 24.8% | 75.2% | $689 | $725 |
-| C2 blend | `topstep_50k` | 1x | 38.6% | 48.4% | $96 | $142 |
-| C2 blend | `topstep_50k` | 2x | 42.1% | 57.9% | $789 | $991 |
-| C2 blend | `topstep_50k` | 3x | 36.5% | 63.5% | $584 | $860 |
-| C2 blend | `topstep_50k` | 4x | 38.5% | 61.5% | $684 | $1,449 |
-| C2 blend | `topstep_50k` | 5x | 39.7% | 60.3% | $744 | $1,547 |
-| C2 blend | `topstep_50k` | 6x | 41.2% | 58.8% | $778 | $896 |
-| C2 blend | `the5ers_hs_100k` | 1x | 15.7% | 4.0% | -$258 | -$254 |
-| C2 blend | `the5ers_hs_100k` | 2x | 45.7% | 30.0% | $1,222 | $1,337 |
-| C2 blend | `the5ers_hs_100k` | 3x | 57.6% | 38.0% | $2,919 | $3,369 |
-| C2 blend | `the5ers_hs_100k` | 4x | 58.6% | 41.0% | $3,193 | $3,596 |
-| C2 blend | `the5ers_hs_100k` | 5x | 57.0% | 42.9% | $2,906 | $2,830 |
-| C2 blend | `the5ers_hs_100k` | 6x | 53.5% | 46.5% | $2,042 | $2,787 |
+| C2 blend | `ftmo_2step_100k` | 1x | 0.6% | 4.1% | -$535 | -$540 |
+| C2 blend | `ftmo_2step_100k` | 2x | 14.4% | 37.2% | -$170 | -$109 |
+| C2 blend | `ftmo_2step_100k` | 3x | 29.5% | 56.0% | $807 | $961 |
+| C2 blend | `ftmo_2step_100k` | 4x | 31.0% | 66.8% | $1,251 | $1,102 |
+| C2 blend | `ftmo_2step_100k` | 5x | 28.4% | 71.4% | $1,202 | $527 |
+| C2 blend | `ftmo_2step_100k` | 6x | 24.7% | 75.3% | $683 | $725 |
+| C2 blend | `topstep_50k` | 1x | 38.4% | 48.5% | $85 | $133 |
+| C2 blend | `topstep_50k` | 2x | 42.2% | 57.8% | $768 | $960 |
+| C2 blend | `topstep_50k` | 3x | 36.6% | 63.4% | $568 | $835 |
+| C2 blend | `topstep_50k` | 4x | 39.0% | 61.0% | $661 | $1,425 |
+| C2 blend | `topstep_50k` | 5x | 40.2% | 59.8% | $734 | $1,594 |
+| C2 blend | `topstep_50k` | 6x | 41.7% | 58.3% | $761 | $943 |
+| C2 blend | `the5ers_hs_100k` | 1x | 0.6% | 4.1% | -$540 | -$545 |
+| C2 blend | `the5ers_hs_100k` | 2x | 14.4% | 37.2% | -$186 | -$113 |
+| C2 blend | `the5ers_hs_100k` | 3x | 29.5% | 56.0% | $688 | $907 |
+| C2 blend | `the5ers_hs_100k` | 4x | 31.2% | 66.7% | $914 | $889 |
+| C2 blend | `the5ers_hs_100k` | 5x | 28.5% | 71.3% | $706 | $237 |
+| C2 blend | `the5ers_hs_100k` | 6x | 25.0% | 75.0% | $189 | $404 |
 | TSMOM | `ftmo_2step_100k` | 1x | 8.1% | 19.9% | -$404 | -$484 |
 | TSMOM | `ftmo_2step_100k` | 2x | 28.5% | 63.6% | $769 | $1,049 |
 | TSMOM | `ftmo_2step_100k` | 3x | 26.4% | 73.5% | $832 | $722 |
 | TSMOM | `ftmo_2step_100k` | 4x | 21.8% | 78.2% | $266 | -$20 |
 | TSMOM | `ftmo_2step_100k` | 5x | 21.0% | 79.0% | $130 | $670 |
 | TSMOM | `ftmo_2step_100k` | 6x | 21.2% | 78.8% | -$112 | $908 |
-| TSMOM | `topstep_50k` | 1x | 37.6% | 62.3% | $459 | $303 |
-| TSMOM | `topstep_50k` | 2x | 34.0% | 66.0% | $455 | $1,099 |
-| TSMOM | `topstep_50k` | 3x | 36.6% | 63.4% | $595 | $1,677 |
-| TSMOM | `topstep_50k` | 4x | 37.4% | 62.6% | $725 | $1,076 |
-| TSMOM | `topstep_50k` | 5x | 37.8% | 62.2% | $832 | $1,344 |
-| TSMOM | `topstep_50k` | 6x | 36.1% | 63.9% | $875 | $1,220 |
-| TSMOM | `the5ers_hs_100k` | 1x | 38.1% | 17.6% | $573 | $483 |
-| TSMOM | `the5ers_hs_100k` | 2x | 55.8% | 41.7% | $2,578 | $3,523 |
-| TSMOM | `the5ers_hs_100k` | 3x | 53.4% | 46.6% | $2,274 | $2,889 |
-| TSMOM | `the5ers_hs_100k` | 4x | 47.1% | 52.9% | $1,293 | $2,159 |
-| TSMOM | `the5ers_hs_100k` | 5x | 47.3% | 52.7% | $970 | $2,520 |
-| TSMOM | `the5ers_hs_100k` | 6x | 48.3% | 51.7% | $650 | $3,209 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 1x | 2.1% | 3.4% | -$510 | -$525 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 2x | 16.6% | 37.9% | $32 | $22 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 3x | 28.3% | 57.7% | $995 | $1,380 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 4x | 32.0% | 63.9% | $1,248 | $2,491 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 5x | 29.3% | 70.1% | $978 | $421 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 29.1% | 70.9% | $1,266 | $606 |
-| TARegimeMultiAsset | `topstep_50k` | 1x | 38.1% | 45.6% | $164 | $89 |
-| TARegimeMultiAsset | `topstep_50k` | 2x | 41.2% | 58.6% | $708 | $824 |
-| TARegimeMultiAsset | `topstep_50k` | 3x | 41.7% | 58.3% | $857 | $1,268 |
-| TARegimeMultiAsset | `topstep_50k` | 4x | 42.3% | 57.7% | $938 | $852 |
-| TARegimeMultiAsset | `topstep_50k` | 5x | 41.3% | 58.7% | $1,034 | $975 |
-| TARegimeMultiAsset | `topstep_50k` | 6x | 39.0% | 61.0% | $873 | $728 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 1x | 20.3% | 3.4% | -$81 | $110 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 2x | 44.2% | 30.7% | $1,434 | $1,347 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 3x | 54.9% | 39.3% | $2,997 | $3,003 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 58.8% | 40.0% | $3,258 | $4,124 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 5x | 55.3% | 44.6% | $2,642 | $1,885 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 6x | 55.3% | 44.7% | $2,914 | $2,170 |
+| TSMOM | `topstep_50k` | 1x | 37.6% | 62.3% | $450 | $280 |
+| TSMOM | `topstep_50k` | 2x | 34.1% | 65.9% | $448 | $991 |
+| TSMOM | `topstep_50k` | 3x | 36.9% | 63.1% | $570 | $1,601 |
+| TSMOM | `topstep_50k` | 4x | 39.1% | 60.9% | $717 | $1,045 |
+| TSMOM | `topstep_50k` | 5x | 40.2% | 59.8% | $861 | $1,309 |
+| TSMOM | `topstep_50k` | 6x | 38.9% | 61.1% | $872 | $1,020 |
+| TSMOM | `the5ers_hs_100k` | 1x | 8.1% | 19.9% | -$412 | -$489 |
+| TSMOM | `the5ers_hs_100k` | 2x | 28.6% | 63.6% | $606 | $951 |
+| TSMOM | `the5ers_hs_100k` | 3x | 26.7% | 73.2% | $460 | $480 |
+| TSMOM | `the5ers_hs_100k` | 4x | 22.0% | 78.0% | -$109 | -$318 |
+| TSMOM | `the5ers_hs_100k` | 5x | 21.7% | 78.3% | -$285 | -$244 |
+| TSMOM | `the5ers_hs_100k` | 6x | 22.3% | 77.7% | -$408 | -$132 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 1x | 2.1% | 3.4% | -$511 | -$525 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 2x | 16.4% | 38.3% | $20 | $22 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 3x | 27.9% | 58.1% | $970 | $1,380 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 4x | 31.6% | 64.2% | $1,215 | $2,491 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 5x | 29.0% | 70.4% | $956 | $421 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 29.0% | 71.0% | $1,240 | $606 |
+| TARegimeMultiAsset | `topstep_50k` | 1x | 37.6% | 45.9% | $149 | $100 |
+| TARegimeMultiAsset | `topstep_50k` | 2x | 40.9% | 59.0% | $705 | $789 |
+| TARegimeMultiAsset | `topstep_50k` | 3x | 41.6% | 58.4% | $858 | $1,249 |
+| TARegimeMultiAsset | `topstep_50k` | 4x | 41.8% | 58.2% | $899 | $817 |
+| TARegimeMultiAsset | `topstep_50k` | 5x | 42.1% | 57.9% | $1,065 | $1,138 |
+| TARegimeMultiAsset | `topstep_50k` | 6x | 39.9% | 60.1% | $923 | $857 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 1x | 2.1% | 3.4% | -$516 | -$530 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 2x | 16.4% | 38.3% | -$23 | $18 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 3x | 28.0% | 58.0% | $769 | $1,344 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 32.5% | 63.4% | $856 | $2,323 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 5x | 29.3% | 70.2% | $537 | $363 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 6x | 29.3% | 70.7% | $544 | $369 |
 | QQQ | `ftmo_2step_100k` | 1x | 47.7% | 52.1% | $4,614 | $1,686 |
 | QQQ | `ftmo_2step_100k` | 2x | 32.2% | 67.8% | $1,225 | $1,410 |
 | QQQ | `ftmo_2step_100k` | 3x | 21.7% | 78.3% | -$3 | $859 |
 | QQQ | `ftmo_2step_100k` | 4x | 18.3% | 81.7% | -$216 | $1,050 |
 | QQQ | `ftmo_2step_100k` | 5x | 15.8% | 84.2% | -$373 | -$330 |
 | QQQ | `ftmo_2step_100k` | 6x | 12.2% | 87.8% | -$505 | -$540 |
-| QQQ | `topstep_50k` | 1x | 48.7% | 51.3% | $1,242 | $1,042 |
-| QQQ | `topstep_50k` | 2x | 37.9% | 62.1% | $768 | $761 |
-| QQQ | `topstep_50k` | 3x | 35.2% | 64.8% | $742 | $852 |
-| QQQ | `topstep_50k` | 4x | 33.3% | 66.7% | $804 | $965 |
-| QQQ | `topstep_50k` | 5x | 32.1% | 67.9% | $907 | $1,173 |
-| QQQ | `topstep_50k` | 6x | 31.0% | 69.0% | $898 | $1,192 |
-| QQQ | `the5ers_hs_100k` | 1x | 69.2% | 30.8% | $7,425 | $5,090 |
-| QQQ | `the5ers_hs_100k` | 2x | 55.6% | 44.4% | $2,832 | $2,870 |
-| QQQ | `the5ers_hs_100k` | 3x | 49.8% | 50.2% | $667 | $2,045 |
-| QQQ | `the5ers_hs_100k` | 4x | 50.5% | 49.5% | $346 | $2,399 |
-| QQQ | `the5ers_hs_100k` | 5x | 52.4% | 47.6% | -$77 | $64 |
-| QQQ | `the5ers_hs_100k` | 6x | 51.7% | 48.3% | -$389 | -$495 |
-| blend minus alpha | `ftmo_2step_100k` | 1x | 0.1% | 9.3% | -$540 | -$540 |
-| blend minus alpha | `ftmo_2step_100k` | 2x | 5.4% | 49.6% | -$434 | -$490 |
-| blend minus alpha | `ftmo_2step_100k` | 3x | 14.8% | 70.0% | -$63 | -$60 |
-| blend minus alpha | `ftmo_2step_100k` | 4x | 17.3% | 80.6% | $141 | $143 |
-| blend minus alpha | `ftmo_2step_100k` | 5x | 17.6% | 82.2% | $205 | -$195 |
-| blend minus alpha | `ftmo_2step_100k` | 6x | 16.3% | 83.7% | $67 | -$282 |
-| blend minus alpha | `topstep_50k` | 1x | 21.3% | 63.9% | -$194 | -$166 |
-| blend minus alpha | `topstep_50k` | 2x | 29.4% | 70.5% | $311 | $348 |
-| blend minus alpha | `topstep_50k` | 3x | 28.4% | 71.6% | $298 | $464 |
-| blend minus alpha | `topstep_50k` | 4x | 32.1% | 67.9% | $396 | $641 |
-| blend minus alpha | `topstep_50k` | 5x | 33.7% | 66.3% | $461 | $457 |
-| blend minus alpha | `topstep_50k` | 6x | 33.7% | 66.3% | $421 | $576 |
-| blend minus alpha | `the5ers_hs_100k` | 1x | 6.1% | 9.2% | -$421 | -$456 |
-| blend minus alpha | `the5ers_hs_100k` | 2x | 26.9% | 44.2% | $196 | $331 |
-| blend minus alpha | `the5ers_hs_100k` | 3x | 39.7% | 54.0% | $1,059 | $1,065 |
-| blend minus alpha | `the5ers_hs_100k` | 4x | 44.4% | 54.8% | $1,321 | $1,227 |
-| blend minus alpha | `the5ers_hs_100k` | 5x | 45.1% | 54.9% | $1,351 | $1,029 |
-| blend minus alpha | `the5ers_hs_100k` | 6x | 44.6% | 55.4% | $931 | $921 |
+| QQQ | `topstep_50k` | 1x | 49.3% | 50.7% | $1,208 | $967 |
+| QQQ | `topstep_50k` | 2x | 39.3% | 60.7% | $761 | $709 |
+| QQQ | `topstep_50k` | 3x | 37.0% | 63.0% | $825 | $940 |
+| QQQ | `topstep_50k` | 4x | 35.3% | 64.7% | $869 | $1,126 |
+| QQQ | `topstep_50k` | 5x | 35.1% | 64.9% | $1,014 | $1,064 |
+| QQQ | `topstep_50k` | 6x | 33.7% | 66.3% | $1,037 | $1,022 |
+| QQQ | `the5ers_hs_100k` | 1x | 47.7% | 52.1% | $3,386 | $1,576 |
+| QQQ | `the5ers_hs_100k` | 2x | 32.9% | 67.1% | $95 | $377 |
+| QQQ | `the5ers_hs_100k` | 3x | 23.5% | 76.5% | -$386 | -$37 |
+| QQQ | `the5ers_hs_100k` | 4x | 21.8% | 78.2% | -$473 | -$155 |
+| QQQ | `the5ers_hs_100k` | 5x | 19.8% | 80.2% | -$517 | -$503 |
+| QQQ | `the5ers_hs_100k` | 6x | 16.8% | 83.2% | -$541 | -$545 |
+| blend minus alpha | `ftmo_2step_100k` | 1x | 0.1% | 9.4% | -$540 | -$540 |
+| blend minus alpha | `ftmo_2step_100k` | 2x | 5.3% | 49.8% | -$436 | -$490 |
+| blend minus alpha | `ftmo_2step_100k` | 3x | 14.6% | 70.4% | -$70 | -$79 |
+| blend minus alpha | `ftmo_2step_100k` | 4x | 17.0% | 80.7% | $127 | $141 |
+| blend minus alpha | `ftmo_2step_100k` | 5x | 17.4% | 82.4% | $193 | -$196 |
+| blend minus alpha | `ftmo_2step_100k` | 6x | 16.1% | 83.9% | $59 | -$283 |
+| blend minus alpha | `topstep_50k` | 1x | 21.0% | 64.2% | -$179 | -$151 |
+| blend minus alpha | `topstep_50k` | 2x | 29.4% | 70.6% | $313 | $338 |
+| blend minus alpha | `topstep_50k` | 3x | 28.3% | 71.7% | $298 | $450 |
+| blend minus alpha | `topstep_50k` | 4x | 32.3% | 67.7% | $378 | $629 |
+| blend minus alpha | `topstep_50k` | 5x | 34.4% | 65.6% | $456 | $521 |
+| blend minus alpha | `topstep_50k` | 6x | 34.7% | 65.3% | $410 | $598 |
+| blend minus alpha | `the5ers_hs_100k` | 1x | 0.1% | 9.4% | -$545 | -$545 |
+| blend minus alpha | `the5ers_hs_100k` | 2x | 5.3% | 49.8% | -$444 | -$495 |
+| blend minus alpha | `the5ers_hs_100k` | 3x | 14.6% | 70.4% | -$113 | -$93 |
+| blend minus alpha | `the5ers_hs_100k` | 4x | 17.1% | 80.6% | $16 | -$24 |
+| blend minus alpha | `the5ers_hs_100k` | 5x | 17.5% | 82.3% | $24 | -$324 |
+| blend minus alpha | `the5ers_hs_100k` | 6x | 16.3% | 83.7% | -$158 | -$347 |
 
 ## Full Leverage Grid (H2: Out-of-Sample Window)
 
 | Candidate / Control | Preset | Lev | P(Pass) Boot | P(Breach) Boot | EV/Att Boot | EV/Att Hist |
 |---|---|---|---|---|---|---|
-| C2 blend | `ftmo_2step_100k` | 1x | 0.5% | 4.9% | -$538 | -$540 |
-| C2 blend | `ftmo_2step_100k` | 2x | 13.5% | 51.0% | -$243 | -$520 |
-| C2 blend | `ftmo_2step_100k` | 3x | 26.1% | 67.1% | $519 | $289 |
-| C2 blend | `ftmo_2step_100k` | 4x | 29.3% | 70.1% | $1,065 | $1,293 |
-| C2 blend | `ftmo_2step_100k` | 5x | 29.3% | 70.6% | $1,142 | $3,234 |
-| C2 blend | `ftmo_2step_100k` | 6x | 27.7% | 72.3% | $613 | $624 |
-| C2 blend | `topstep_50k` | 1x | 34.9% | 58.2% | $98 | $254 |
-| C2 blend | `topstep_50k` | 2x | 38.3% | 61.7% | $614 | $1,435 |
-| C2 blend | `topstep_50k` | 3x | 40.0% | 60.0% | $792 | $1,075 |
-| C2 blend | `topstep_50k` | 4x | 39.9% | 60.1% | $713 | $1,096 |
-| C2 blend | `topstep_50k` | 5x | 38.1% | 61.9% | $687 | $875 |
-| C2 blend | `topstep_50k` | 6x | 37.7% | 62.3% | $693 | $799 |
-| C2 blend | `the5ers_hs_100k` | 1x | 15.8% | 4.8% | -$279 | -$104 |
-| C2 blend | `the5ers_hs_100k` | 2x | 44.6% | 37.3% | $917 | $789 |
-| C2 blend | `the5ers_hs_100k` | 3x | 53.0% | 45.0% | $2,183 | $1,683 |
-| C2 blend | `the5ers_hs_100k` | 4x | 53.8% | 46.1% | $2,855 | $3,341 |
-| C2 blend | `the5ers_hs_100k` | 5x | 53.6% | 46.4% | $2,883 | $4,240 |
-| C2 blend | `the5ers_hs_100k` | 6x | 51.2% | 48.8% | $2,056 | $3,223 |
+| C2 blend | `ftmo_2step_100k` | 1x | 0.5% | 4.7% | -$538 | -$540 |
+| C2 blend | `ftmo_2step_100k` | 2x | 13.9% | 50.7% | -$233 | -$520 |
+| C2 blend | `ftmo_2step_100k` | 3x | 26.6% | 66.7% | $542 | $289 |
+| C2 blend | `ftmo_2step_100k` | 4x | 29.3% | 70.0% | $1,080 | $1,290 |
+| C2 blend | `ftmo_2step_100k` | 5x | 29.3% | 70.6% | $1,159 | $3,226 |
+| C2 blend | `ftmo_2step_100k` | 6x | 27.7% | 72.3% | $616 | $624 |
+| C2 blend | `topstep_50k` | 1x | 35.3% | 57.7% | $101 | $247 |
+| C2 blend | `topstep_50k` | 2x | 38.4% | 61.6% | $598 | $1,283 |
+| C2 blend | `topstep_50k` | 3x | 40.5% | 59.5% | $740 | $1,031 |
+| C2 blend | `topstep_50k` | 4x | 40.1% | 59.9% | $658 | $1,072 |
+| C2 blend | `topstep_50k` | 5x | 38.6% | 61.4% | $610 | $778 |
+| C2 blend | `topstep_50k` | 6x | 39.0% | 61.0% | $624 | $609 |
+| C2 blend | `the5ers_hs_100k` | 1x | 0.5% | 4.7% | -$543 | -$545 |
+| C2 blend | `the5ers_hs_100k` | 2x | 13.9% | 50.7% | -$250 | -$525 |
+| C2 blend | `the5ers_hs_100k` | 3x | 26.6% | 66.7% | $412 | $138 |
+| C2 blend | `the5ers_hs_100k` | 4x | 30.1% | 69.2% | $752 | $849 |
+| C2 blend | `the5ers_hs_100k` | 5x | 30.4% | 69.5% | $606 | $1,130 |
+| C2 blend | `the5ers_hs_100k` | 6x | 28.6% | 71.4% | $113 | -$42 |
 | TSMOM | `ftmo_2step_100k` | 1x | 11.6% | 17.2% | -$324 | $53 |
 | TSMOM | `ftmo_2step_100k` | 2x | 35.3% | 57.8% | $1,272 | $1,737 |
 | TSMOM | `ftmo_2step_100k` | 3x | 35.6% | 64.2% | $2,079 | $2,795 |
 | TSMOM | `ftmo_2step_100k` | 4x | 28.5% | 71.5% | $1,084 | $672 |
 | TSMOM | `ftmo_2step_100k` | 5x | 24.1% | 75.9% | $352 | $239 |
 | TSMOM | `ftmo_2step_100k` | 6x | 20.8% | 79.2% | -$98 | $240 |
-| TSMOM | `topstep_50k` | 1x | 38.8% | 61.2% | $576 | $1,028 |
-| TSMOM | `topstep_50k` | 2x | 37.9% | 62.1% | $720 | $313 |
-| TSMOM | `topstep_50k` | 3x | 38.5% | 61.5% | $746 | $727 |
-| TSMOM | `topstep_50k` | 4x | 36.8% | 63.2% | $826 | $746 |
-| TSMOM | `topstep_50k` | 5x | 35.8% | 64.2% | $788 | $628 |
-| TSMOM | `topstep_50k` | 6x | 34.4% | 65.6% | $853 | $602 |
-| TSMOM | `the5ers_hs_100k` | 1x | 44.4% | 15.4% | $922 | $2,095 |
-| TSMOM | `the5ers_hs_100k` | 2x | 60.8% | 37.3% | $3,401 | $4,016 |
-| TSMOM | `the5ers_hs_100k` | 3x | 59.1% | 40.9% | $4,281 | $5,852 |
-| TSMOM | `the5ers_hs_100k` | 4x | 51.4% | 48.6% | $2,619 | $2,941 |
-| TSMOM | `the5ers_hs_100k` | 5x | 47.8% | 52.2% | $1,399 | $2,258 |
-| TSMOM | `the5ers_hs_100k` | 6x | 46.4% | 53.6% | $645 | $1,895 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 1x | 0.1% | 8.5% | -$539 | -$540 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 2x | 9.3% | 44.0% | -$324 | -$109 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 3x | 18.9% | 71.1% | $63 | $45 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 4x | 23.5% | 74.9% | $505 | $393 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 5x | 25.7% | 74.2% | $785 | $1,565 |
-| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 25.1% | 74.9% | $811 | $2,799 |
-| TARegimeMultiAsset | `topstep_50k` | 1x | 27.4% | 59.9% | -$88 | $44 |
-| TARegimeMultiAsset | `topstep_50k` | 2x | 35.8% | 64.2% | $516 | $844 |
-| TARegimeMultiAsset | `topstep_50k` | 3x | 36.9% | 63.1% | $747 | $1,678 |
-| TARegimeMultiAsset | `topstep_50k` | 4x | 33.8% | 66.2% | $566 | $936 |
-| TARegimeMultiAsset | `topstep_50k` | 5x | 33.8% | 66.2% | $585 | $550 |
-| TARegimeMultiAsset | `topstep_50k` | 6x | 32.7% | 67.3% | $549 | $693 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 1x | 8.8% | 8.5% | -$385 | -$279 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 2x | 36.3% | 37.7% | $680 | $1,345 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 3x | 45.1% | 50.8% | $1,375 | $1,055 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 48.1% | 51.5% | $2,009 | $2,193 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 5x | 47.4% | 52.6% | $2,386 | $3,047 |
-| TARegimeMultiAsset | `the5ers_hs_100k` | 6x | 45.9% | 54.1% | $2,266 | $3,821 |
+| TSMOM | `topstep_50k` | 1x | 38.8% | 61.2% | $565 | $978 |
+| TSMOM | `topstep_50k` | 2x | 37.9% | 62.1% | $678 | $294 |
+| TSMOM | `topstep_50k` | 3x | 39.1% | 60.9% | $694 | $706 |
+| TSMOM | `topstep_50k` | 4x | 38.6% | 61.4% | $737 | $670 |
+| TSMOM | `topstep_50k` | 5x | 38.2% | 61.8% | $636 | $525 |
+| TSMOM | `topstep_50k` | 6x | 37.4% | 62.6% | $665 | $487 |
+| TSMOM | `the5ers_hs_100k` | 1x | 11.6% | 17.2% | -$332 | $49 |
+| TSMOM | `the5ers_hs_100k` | 2x | 35.3% | 57.8% | $1,031 | $406 |
+| TSMOM | `the5ers_hs_100k` | 3x | 36.7% | 63.1% | $1,397 | $1,065 |
+| TSMOM | `the5ers_hs_100k` | 4x | 29.2% | 70.8% | $253 | -$22 |
+| TSMOM | `the5ers_hs_100k` | 5x | 25.1% | 74.9% | -$188 | -$154 |
+| TSMOM | `the5ers_hs_100k` | 6x | 22.7% | 77.3% | -$401 | -$71 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 1x | 0.1% | 7.5% | -$539 | -$540 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 2x | 9.9% | 42.1% | -$312 | -$109 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 3x | 19.3% | 70.3% | $88 | $45 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 4x | 23.8% | 74.5% | $531 | $387 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 5x | 25.8% | 74.1% | $802 | $1,551 |
+| TARegimeMultiAsset | `ftmo_2step_100k` | 6x | 25.3% | 74.7% | $805 | $2,791 |
+| TARegimeMultiAsset | `topstep_50k` | 1x | 27.9% | 59.1% | -$71 | $53 |
+| TARegimeMultiAsset | `topstep_50k` | 2x | 36.2% | 63.8% | $508 | $783 |
+| TARegimeMultiAsset | `topstep_50k` | 3x | 37.6% | 62.4% | $723 | $1,491 |
+| TARegimeMultiAsset | `topstep_50k` | 4x | 34.8% | 65.2% | $539 | $906 |
+| TARegimeMultiAsset | `topstep_50k` | 5x | 34.9% | 65.1% | $568 | $550 |
+| TARegimeMultiAsset | `topstep_50k` | 6x | 33.9% | 66.1% | $537 | $550 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 1x | 0.1% | 7.5% | -$544 | -$545 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 2x | 9.9% | 42.1% | -$326 | -$124 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 3x | 19.7% | 69.9% | $19 | -$114 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 4x | 24.6% | 73.6% | $310 | $345 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 5x | 26.5% | 73.3% | $436 | $1,018 |
+| TARegimeMultiAsset | `the5ers_hs_100k` | 6x | 26.4% | 73.6% | $259 | $1,569 |
 | QQQ | `ftmo_2step_100k` | 1x | 39.8% | 57.4% | $2,794 | $944 |
 | QQQ | `ftmo_2step_100k` | 2x | 26.2% | 73.8% | $1,323 | $1,339 |
 | QQQ | `ftmo_2step_100k` | 3x | 20.8% | 79.2% | $213 | $201 |
 | QQQ | `ftmo_2step_100k` | 4x | 20.6% | 79.4% | -$111 | -$259 |
 | QQQ | `ftmo_2step_100k` | 5x | 17.1% | 82.9% | -$334 | -$540 |
 | QQQ | `ftmo_2step_100k` | 6x | 12.9% | 87.1% | -$462 | -$540 |
-| QQQ | `topstep_50k` | 1x | 37.5% | 62.5% | $847 | $1,048 |
-| QQQ | `topstep_50k` | 2x | 31.6% | 68.4% | $694 | $510 |
-| QQQ | `topstep_50k` | 3x | 30.3% | 69.7% | $656 | $377 |
-| QQQ | `topstep_50k` | 4x | 29.7% | 70.3% | $756 | $442 |
-| QQQ | `topstep_50k` | 5x | 28.3% | 71.7% | $834 | $414 |
-| QQQ | `topstep_50k` | 6x | 27.9% | 72.1% | $849 | $481 |
-| QQQ | `the5ers_hs_100k` | 1x | 61.0% | 38.5% | $5,394 | $3,489 |
-| QQQ | `the5ers_hs_100k` | 2x | 49.3% | 50.7% | $3,038 | $3,015 |
-| QQQ | `the5ers_hs_100k` | 3x | 41.9% | 58.1% | $1,164 | $1,000 |
-| QQQ | `the5ers_hs_100k` | 4x | 41.1% | 58.9% | $265 | $142 |
-| QQQ | `the5ers_hs_100k` | 5x | 42.0% | 58.0% | -$20 | $298 |
-| QQQ | `the5ers_hs_100k` | 6x | 42.9% | 57.1% | -$408 | -$495 |
-| blend minus alpha | `ftmo_2step_100k` | 1x | 0.1% | 12.2% | -$540 | -$540 |
-| blend minus alpha | `ftmo_2step_100k` | 2x | 5.7% | 64.0% | -$461 | -$540 |
-| blend minus alpha | `ftmo_2step_100k` | 3x | 14.3% | 79.4% | -$153 | -$395 |
-| blend minus alpha | `ftmo_2step_100k` | 4x | 19.3% | 80.0% | $165 | $70 |
-| blend minus alpha | `ftmo_2step_100k` | 5x | 21.1% | 78.9% | $265 | $1,444 |
-| blend minus alpha | `ftmo_2step_100k` | 6x | 20.5% | 79.5% | $66 | -$167 |
-| blend minus alpha | `topstep_50k` | 1x | 20.5% | 72.0% | -$148 | -$94 |
-| blend minus alpha | `topstep_50k` | 2x | 29.5% | 70.5% | $286 | $715 |
-| blend minus alpha | `topstep_50k` | 3x | 33.0% | 67.0% | $461 | $733 |
-| blend minus alpha | `topstep_50k` | 4x | 32.0% | 68.0% | $408 | $441 |
-| blend minus alpha | `topstep_50k` | 5x | 32.7% | 67.3% | $473 | $328 |
-| blend minus alpha | `topstep_50k` | 6x | 31.7% | 68.3% | $479 | $311 |
-| blend minus alpha | `the5ers_hs_100k` | 1x | 6.6% | 12.2% | -$436 | -$443 |
-| blend minus alpha | `the5ers_hs_100k` | 2x | 28.5% | 53.2% | $89 | -$111 |
-| blend minus alpha | `the5ers_hs_100k` | 3x | 40.0% | 57.5% | $839 | $664 |
-| blend minus alpha | `the5ers_hs_100k` | 4x | 43.7% | 56.2% | $1,369 | $1,493 |
-| blend minus alpha | `the5ers_hs_100k` | 5x | 44.6% | 55.3% | $1,450 | $2,339 |
-| blend minus alpha | `the5ers_hs_100k` | 6x | 45.0% | 55.0% | $1,097 | $1,924 |
+| QQQ | `topstep_50k` | 1x | 37.8% | 62.2% | $844 | $1,036 |
+| QQQ | `topstep_50k` | 2x | 32.7% | 67.3% | $759 | $580 |
+| QQQ | `topstep_50k` | 3x | 31.7% | 68.3% | $788 | $434 |
+| QQQ | `topstep_50k` | 4x | 31.6% | 68.4% | $1,059 | $602 |
+| QQQ | `topstep_50k` | 5x | 30.6% | 69.4% | $1,138 | $617 |
+| QQQ | `topstep_50k` | 6x | 30.5% | 69.5% | $1,144 | $673 |
+| QQQ | `the5ers_hs_100k` | 1x | 39.8% | 57.4% | $2,223 | $851 |
+| QQQ | `the5ers_hs_100k` | 2x | 26.5% | 73.5% | $231 | $813 |
+| QQQ | `the5ers_hs_100k` | 3x | 21.1% | 78.9% | -$354 | -$245 |
+| QQQ | `the5ers_hs_100k` | 4x | 23.7% | 76.3% | -$468 | -$452 |
+| QQQ | `the5ers_hs_100k` | 5x | 20.5% | 79.5% | -$515 | -$545 |
+| QQQ | `the5ers_hs_100k` | 6x | 17.2% | 82.8% | -$531 | -$545 |
+| blend minus alpha | `ftmo_2step_100k` | 1x | 0.1% | 11.9% | -$540 | -$540 |
+| blend minus alpha | `ftmo_2step_100k` | 2x | 5.8% | 63.7% | -$459 | -$540 |
+| blend minus alpha | `ftmo_2step_100k` | 3x | 14.5% | 79.2% | -$149 | -$396 |
+| blend minus alpha | `ftmo_2step_100k` | 4x | 19.2% | 80.0% | $172 | $66 |
+| blend minus alpha | `ftmo_2step_100k` | 5x | 21.0% | 79.0% | $262 | $381 |
+| blend minus alpha | `ftmo_2step_100k` | 6x | 20.7% | 79.3% | $71 | -$168 |
+| blend minus alpha | `topstep_50k` | 1x | 20.7% | 71.9% | -$129 | -$80 |
+| blend minus alpha | `topstep_50k` | 2x | 29.5% | 70.5% | $281 | $596 |
+| blend minus alpha | `topstep_50k` | 3x | 33.2% | 66.8% | $429 | $706 |
+| blend minus alpha | `topstep_50k` | 4x | 32.6% | 67.4% | $370 | $466 |
+| blend minus alpha | `topstep_50k` | 5x | 33.6% | 66.4% | $406 | $371 |
+| blend minus alpha | `topstep_50k` | 6x | 33.3% | 66.7% | $388 | $291 |
+| blend minus alpha | `the5ers_hs_100k` | 1x | 0.1% | 11.9% | -$545 | -$545 |
+| blend minus alpha | `the5ers_hs_100k` | 2x | 5.8% | 63.7% | -$468 | -$545 |
+| blend minus alpha | `the5ers_hs_100k` | 3x | 14.5% | 79.2% | -$193 | -$401 |
+| blend minus alpha | `the5ers_hs_100k` | 4x | 20.2% | 79.1% | $33 | $50 |
+| blend minus alpha | `the5ers_hs_100k` | 5x | 22.0% | 78.0% | $45 | $311 |
+| blend minus alpha | `the5ers_hs_100k` | 6x | 22.0% | 78.0% | -$166 | -$328 |
 
 ## Methodology & Intraday Caveat
 
@@ -253,32 +254,8 @@ Historical rolling paths (step=5, horizon=252) shown as consistency check.
 3. **Intraday Drawdown Caveat:** Daily close returns understate intraday drawdown swings. Breaches of daily-loss
    or trailing limits may occur intraday before a daily close recovers. The `--intraday-haircut` multiplier
    scales negative returns to stress-test breach rates.
-4. **Rule Presets:** Presets are approximations assembled from third-party summaries of each firm's
-   rules and were not checked against the firms' own terms. Each carries the note
-   `VERIFY before buying`. Fees, targets and drawdown types change often.
+4. **Rule Presets:** The Topstep and FTMO presets were checked against the firms' own pages on
+   2026-11-24. The5ers comes only from search snippets of its FAQs, which conflict on the step-1 target
+   and the fee. The `note` column lists what each preset does not model. Fees, targets and drawdown
+   types change often, so check each firm's current terms before buying.
 
-
-## Reading these results (added by hand after the run)
-
-The tables above come from the script at `--intraday-haircut 1.0`. A second run at 1.5 was
-printed to the terminal only; the figures quoted below are from that run.
-
-- **The zero-alpha control also shows positive EV** on The5ers (+$1,369 at 4x, H2 bootstrap)
-  and FTMO (+$165). A trader with no edge should not profit from a challenge, so the preset
-  rules are too generous in absolute terms: unlimited time, no spreads or commissions, daily
-  closes only, and a fee refund. Only the *gap* to the zero-alpha control carries information.
-  That gap is about +$1,500 for the C2 blend on The5ers and about +$900 on FTMO.
-- **The result is fragile to intraday drawdown.** At `--intraday-haircut 1.5` the C2 blend's EV
-  is negative on FTMO (-$518) and The5ers (-$341) and is no better than the zero-alpha control.
-  Scaling every losing day by 1.5 also cuts the mean return, so this stress is harsher than
-  real intraday noise. The truth sits between the two runs.
-- **Topstep rows should not be read as futures results.** The sleeves are ETFs, and a real
-  futures bot would need micro-futures proxies for each sleeve. The Topstep numbers only
-  show what the rule shape does to this return stream.
-- **The edge itself is unproven live.** The blend's backtest alpha is +3.5%/yr at t 2.02, and
-  the live sleeves are roughly flat since September. A haircut on the alpha itself has not been
-  run.
-- **The rule presets are unverified.** Check each firm's own terms before relying on any row.
-
-None of this establishes a business. The simulator shows that any positive EV depends on the
-intraday drawdown assumption, on the rules matching the presets, and on the backtest alpha holding live.
