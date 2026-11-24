@@ -15,7 +15,7 @@ On paper, this sounds like an asymmetric bet: risk a few hundred dollars in fees
 In practice, prop firm risk limits act as severe absorbing barriers:
 - Maximum drawdowns of 4% to 10% leave very little cushion when trading with leverage.
 - Daily loss limits (often 5%) can be triggered by short-term market volatility or single-day shocks.
-- Trailing drawdown rules ratchets the liquidation threshold upwards as equity rises, locking in losses at the peak.
+- End-of-day trailing drawdown rules ratchet the liquidation threshold up as equity rises, so a give-back from a peak can breach the account.
 
 To evaluate whether candidate bot return streams yield positive expected value (EV) after fees, the framework implements a pure numpy/pandas simulation engine in `tradingbot/utils/prop_challenge.py`.
 
@@ -25,7 +25,7 @@ Can an automated trading bot pay for itself by buying prop-firm challenges?
 **The verdict is not proven.** As detailed in the [Prop-Firm Challenge Simulator Study (2026-11)](../backtests/prop-challenge-2026-11.md):
 - In backtested simulations, the edge of candidate bots over a synthetic zero-alpha control or a simple QQQ buy-and-hold twin is narrow.
 - Daily-close simulations understate intraday drawdown swings; stress-testing losing days by a modest 25% flips headline expected values negative.
-- The return streams tested have negative out-of-sample live alpha since sleeve deployment in September 2026, meaning live bots would have breached challenges rapidly.
+- The live sleeves lost money since they started on 2026-09-21 (the blend -4.9% against QQQ -12.2%). Run through the same rules at the study's leverage from that date, every blend sim breaches within 33 trading days.
 
 ---
 
