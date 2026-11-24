@@ -103,6 +103,7 @@ def run(spec: BrokerSpec) -> int:
         # Driving it unconditionally is why the ABC declares the lifecycle at all.
         broker.connect()
         copier.sync()
+        broker.finish_sync(config.dry_run)
     except Exception as e:
         logger.error(f"Error during sync: {e}", exc_info=True)
         exit_code = 1
@@ -114,7 +115,8 @@ def run(spec: BrokerSpec) -> int:
         # no equity history at all despite equity_recorder being broker-agnostic.
         # It is in `finally` because a failed sync is exactly when the track
         # record most needs a datapoint. record_live_equity never raises.
-        record_live_equity(broker, config.bot_weights)
+        if spec.record_equity:
+            record_live_equity(broker, config.bot_weights)
         broker.disconnect()
 
     return exit_code

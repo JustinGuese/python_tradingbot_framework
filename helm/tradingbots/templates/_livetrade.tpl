@@ -33,6 +33,9 @@ metadata:
     meta.helm.sh/release-namespace: {{ $.Release.Namespace }}
 spec:
   schedule: {{ .schedule | quote }}
+{{- if .suspend }}
+  suspend: true
+{{- end }}
   # Skip a schedule the controller is late for instead of running it whenever it
   # catches up. Unsuspending a CronJob makes Kubernetes immediately fire every
   # missed schedule, and a livetrade catch-up run submits orders at a moment

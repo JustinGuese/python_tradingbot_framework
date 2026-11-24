@@ -20,7 +20,8 @@
     "additionalDirectories": [
       "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt/sy/tests",
       "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/agy-wt-inst/integ/tradingbot/utils",
-      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/info"
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git/info",
+      "/home/jguese/code/tradingbot/python_tradingbot_framework/.git"
     ]
   }
 }

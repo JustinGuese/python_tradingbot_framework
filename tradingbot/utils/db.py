@@ -1026,6 +1026,22 @@ class LiveEquity(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
 
 
+class ManualPortfolio(Base):
+    """
+    Virtual portfolio state for manual rebalance / notification copiers.
+
+    Tracks the assumed cash and holdings for a manual account (e.g. Robinhood/Schwab)
+    where trades are signaled via Telegram and assumed executed by the user.
+    """
+
+    __tablename__ = "manual_portfolio"
+
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    cash: Mapped[float] = mapped_column(Float, nullable=False)
+    positions: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False)
+
+
 class Inst13fFiling(Base):
     """
     SEC Form 13F filing metadata.

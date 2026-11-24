@@ -1,0 +1,24 @@
+{{- if .Values.liveTrade.manual.enabled }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-manual" "schedule" .Values.liveTrade.manual.schedule "module" "tradingbot.livetrade_manual" "suspend" .Values.liveTrade.manual.suspend) }}
+{{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
+            # Telegram credentials (from secret)
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: TELEGRAM_BOT_TOKEN
+                  optional: true
+            - name: TELEGRAM_CHAT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: TELEGRAM_CHAT_ID
+                  optional: true
+            # Manual portfolio seed equity & settle delay
+            - name: LIVETRADE_MANUAL_EQUITY_USD
+              value: {{ default "50000" .Values.liveTrade.manual.manualEquityUsd | quote }}
+            - name: LIVETRADE_SETTLE_DELAY_SECONDS
+              value: "0"
+{{- include "tradingbots.livetrade.configEnv" (dict "root" $ "cfg" .Values.liveTrade.manual) }}
+          restartPolicy: OnFailure
+{{- end }}

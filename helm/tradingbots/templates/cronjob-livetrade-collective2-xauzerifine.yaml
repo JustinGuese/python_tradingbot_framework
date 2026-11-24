@@ -5,7 +5,7 @@
 {{- if and .Values.liveTrade.collective2.enabled (eq (toString .Values.liveTrade.collective2XauZerifine.systemId) (toString .Values.liveTrade.collective2.systemId)) }}
 {{- fail "liveTrade.collective2XauZerifine.systemId equals liveTrade.collective2.systemId while BOTH are enabled — two copiers on one strategy would liquidate each other's positions every run. Disable liveTrade.collective2.enabled to hand the strategy over, or give this instance its own StrategyId." }}
 {{- end }}
-{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-collective2-xauzerifine" "schedule" .Values.liveTrade.collective2XauZerifine.schedule "module" "tradingbot.livetrade_collective2") }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-collective2-xauzerifine" "schedule" .Values.liveTrade.collective2XauZerifine.schedule "module" "tradingbot.livetrade_collective2" "suspend" .Values.liveTrade.collective2XauZerifine.suspend) }}
 {{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
             # Collective2 credentials (from secret)
             - name: COLLECTIVE2_API_KEY
