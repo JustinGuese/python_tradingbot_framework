@@ -44,6 +44,8 @@ class FirmPreset:
     financing_markup: float  # annual cost on notional ABOVE excess return (CFD swap markup; 0 for futures)
     note: str  # source/date of rules + "VERIFY before buying"
     monthly_fee: float = 0.0  # USD charged per started 21-day block during evaluation
+    activation_fee: float = 0.0  # USD charged once when the evaluation is passed (e.g. Topstep XFA)
+    max_payout_request: float | None = None  # gross USD cap per payout request; remainder stays in the account
 
 
 PRESETS: dict[str, FirmPreset] = {
@@ -84,7 +86,12 @@ PRESETS: dict[str, FirmPreset] = {
         payout_every_days=21,
         fee_refund_on_first_payout=True,
         financing_markup=0.02,
-        note="FTMO 2-step 100k challenge rules as of 2026. VERIFY before buying.",
+        note=(
+            "FTMO 2-step 100k, matched against ftmo.com/en/2-step-challenge on 2026-11-24: targets 10%/5%, 5% daily, "
+            "10% max loss, 4 min days, unlimited time, fee refunded at first reward. Split is 80% (up to 90% "
+            "per FTMO). Fee shown is the list price in EUR treated as USD. NOT modelled: the 14-day minimum before "
+            "the first reward and the CFD instrument limits. VERIFY before buying."
+        ),
         monthly_fee=0.0,
     ),
     "topstep_50k": FirmPreset(
@@ -96,8 +103,8 @@ PRESETS: dict[str, FirmPreset] = {
                 trailing="eod_trailing",
                 daily_loss=None,
                 max_days=None,
-                min_days=0,
-                consistency=0.5,
+                min_days=2,
+                consistency=0.55,
             ),
         ),
         funded=PhaseRules(
@@ -109,25 +116,43 @@ PRESETS: dict[str, FirmPreset] = {
             min_days=0,
             consistency=None,
         ),
-        fee=49.0,
+        fee=0.0,
         account_size=50_000.0,
         profit_split=0.9,
         payout_every_days=5,
         fee_refund_on_first_payout=False,
         financing_markup=0.0,
-        note="Topstep 50k rules as of 2026. Monthly fee 49 USD. VERIFY before buying.",
+        note=(
+            "Topstep 50k Combine, read from help.topstep.com on 2026-11-24: target $3,000, end-of-day trailing "
+            "$2,000 loss limit locking at the start balance, best day under 55% of target, 2 min days, $49/month, "
+            "$149 activation on the Express account, 90% split, $2,000 cap per payout request. NOT modelled: the "
+            "optional daily loss limit, the loss limit dropping to $0 after the first payout, the 40% consistency "
+            "objective and 5-winning-day payout gate on the funded account, the $125 minimum payout, and the "
+            "undocumented VPS policy. VERIFY before buying."
+        ),
         monthly_fee=49.0,
+        activation_fee=149.0,
+        max_payout_request=2_000.0,
     ),
     "the5ers_hs_100k": FirmPreset(
         name="the5ers_hs_100k",
         phases=(
             PhaseRules(
-                profit_target=0.08,
+                profit_target=0.10,
                 max_loss=0.10,
                 trailing="static",
                 daily_loss=0.05,
                 max_days=None,
-                min_days=0,
+                min_days=3,
+                consistency=None,
+            ),
+            PhaseRules(
+                profit_target=0.05,
+                max_loss=0.10,
+                trailing="static",
+                daily_loss=0.05,
+                max_days=None,
+                min_days=3,
                 consistency=None,
             ),
         ),
@@ -140,14 +165,20 @@ PRESETS: dict[str, FirmPreset] = {
             min_days=0,
             consistency=None,
         ),
-        fee=495.0,
+        fee=545.0,
         account_size=100_000.0,
         profit_split=0.8,
         payout_every_days=21,
         fee_refund_on_first_payout=True,
         financing_markup=0.02,
-        note="The 5ers High Stakes 100k rules as of 2026. VERIFY before buying.",
+        note=(
+            "The5ers High Stakes 100k, from search snippets of the5ers.com FAQs on 2026-11-24 (pages could not "
+            "be fetched): two steps, unlimited time, 10% max loss, 5% daily, payout cap $4,000. Sources conflict "
+            "on the step-1 target (8% or 10%; 10% used) and the fee ($545 from one promo). Minimum-days rule is "
+            "three profitable days of 0.5%, approximated as 3 trading days. VERIFY before buying."
+        ),
         monthly_fee=0.0,
+        max_payout_request=4_000.0,
     ),
 }
 
@@ -320,14 +351,14 @@ def run_funded(r: np.ndarray, preset: FirmPreset) -> tuple[float, int, bool]:
 
         # Payout check every payout_every_days
         if preset.payout_every_days > 0 and funded_days % preset.payout_every_days == 0 and equity > 1.0:
-            profit = equity - 1.0
-            payout = profit * preset.account_size * preset.profit_split
-            total_payout_usd += payout
+            profit_usd = (equity - 1.0) * preset.account_size
+            gross_usd = profit_usd if preset.max_payout_request is None else min(profit_usd, preset.max_payout_request)
+            total_payout_usd += gross_usd * preset.profit_split
             if preset.fee_refund_on_first_payout and not refund_paid:
                 refund_paid = True
-            # Reset equity and peak to 1.0 on withdrawal
-            equity = 1.0
-            peak_eod = 1.0
+            # Withdraw the requested amount; any profit above the cap stays in the account.
+            equity -= gross_usd / preset.account_size
+            peak_eod = equity
 
     return (total_payout_usd, funded_days, refund_paid)
 
@@ -480,7 +511,9 @@ def evaluate(paths: np.ndarray, preset: FirmPreset) -> ChallengeStats:
     else:
         mean_monthly_fee = 0.0
 
-    ev_per_attempt = float(-preset.fee + mean_payouts + p_refund * preset.fee - mean_monthly_fee)
+    ev_per_attempt = float(
+        -preset.fee + mean_payouts + p_refund * preset.fee - mean_monthly_fee - p_pass * preset.activation_fee
+    )
 
     return ChallengeStats(
         p_pass=p_pass,
