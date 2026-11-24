@@ -1,5 +1,5 @@
 {{- if .Values.liveTrade.manual.enabled }}
-{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-manual" "schedule" .Values.liveTrade.manual.schedule "module" "tradingbot.livetrade_manual" "suspend" .Values.liveTrade.manual.suspend) }}
+{{- include "tradingbots.livetrade.header" (dict "root" $ "name" "livetrade-collective2-manual" "schedule" .Values.liveTrade.manual.schedule "module" "tradingbot.livetrade_manual" "suspend" .Values.liveTrade.manual.suspend) }}
 {{- include "tradingbots.livetrade.commonEnv" (dict "root" $) }}
             # Telegram credentials (from secret)
             - name: TELEGRAM_BOT_TOKEN
