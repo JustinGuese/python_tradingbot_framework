@@ -157,13 +157,15 @@ def test_telegram_failure_does_not_persist_and_sanitizes_token(db_session):
     broker.place_order("SPY", quantity=10, side="BUY")
 
     # Simulate httpx error containing token in URL
-    with patch.object(
-        httpx.Client,
-        "post",
-        side_effect=httpx.ConnectError(f"Failed to connect to https://api.telegram.org/bot{token}/sendMessage"),
+    with (
+        patch.object(
+            httpx.Client,
+            "post",
+            side_effect=httpx.ConnectError(f"Failed to connect to https://api.telegram.org/bot{token}/sendMessage"),
+        ),
+        pytest.raises(RuntimeError) as exc_info,
     ):
-        with pytest.raises(RuntimeError) as exc_info:
-            broker.finish_sync(dry_run=False)
+        broker.finish_sync(dry_run=False)
 
     # Exception text does NOT contain the token
     exc_message = str(exc_info.value)
