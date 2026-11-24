@@ -910,9 +910,10 @@ liveTrade:
   # of it would have been near-invisible at this cadence. QQQ/TQQQ are plain ETFs and
   # need no symbol_map override (unlike ^XAU, which required ^XAU -> GDX).
   collective2XauZerifine:
-    # NOTE: Orders currently fail with error 1020 ("paid Trade Leader plan required").
-    # Collective2 requires an active paid Trade Leader subscription to accept submitted signals.
-    # Kept ENABLED per user decision; trades will execute once the subscription is active.
+    # SUSPENDED: Collective2 requires an active paid Trade Leader subscription to submit signals
+    # (orders fail with error 1020). Suspended until the plan is upgraded, so the CronJob
+    # remains deployed in Kubernetes without firing daily failed runs.
+    suspend: true
     enabled: true
     # Moved from 21:50 to the 15:15 UTC execution slot: the copier now refuses to submit outside
     # the US session window, and the 21:xx bot runs still produce the targets the night before.
@@ -1057,6 +1058,17 @@ liveTrade:
     # liquidates the old blend legs (target-state sync). Unmapped/untradeable names drop to cash, see
     # docs/backtests/retail-venue-coverage-2026-11.md.
     botWeights: '{"InstitutionalFlowBot": 1.0}'
+
+  # Manual (Telegram) copier — runs target-weight calculation against a virtual
+  # portfolio ($50,000 seed) and sends a Telegram message listing trades to execute by hand.
+  # Mid-session execution slot at 15:20 UTC (5 min after C2 slot, within US market hours).
+  manual:
+    enabled: true
+    schedule: "20 15 * * 1-5" # 3:20 PM UTC
+    manualEquityUsd: "50000"
+    minOrderUsd: "500"
+    botWeights: '{"TARegimeMultiAssetBot": 0.39,"TSMOMTrendBot": 0.24,"GoldenButterflyMomBot": 0.37}'
+    dryRun: "false"
 
 # telegram monitor
 telegramMonitor:

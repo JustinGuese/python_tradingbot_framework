@@ -47,6 +47,9 @@ class LiveBroker(ABC):
     def disconnect(self) -> None:  # noqa: B027
         """Close any session opened by connect(). No-op by default."""
 
+    def finish_sync(self, dry_run: bool) -> None:  # noqa: B027
+        """Called by runner after copier.sync() succeeded. No-op by default."""
+
     def is_tradeable(self, yf_symbol: str) -> bool:
         """Whether this broker can trade the symbol at all.
 

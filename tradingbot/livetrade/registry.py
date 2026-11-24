@@ -170,6 +170,14 @@ def _build_mt5_mql5() -> LiveBroker:
     )
 
 
+def _build_manual() -> LiveBroker:
+    from tradingbot.livetrade.manual import ManualBroker
+
+    token, chat_id = _require("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+    logger.info("Initializing Manual (Telegram) copier")
+    return ManualBroker(telegram_token=token, telegram_chat_id=chat_id)
+
+
 # --------------------------------------------------------------------------- #
 # Spec
 # --------------------------------------------------------------------------- #
@@ -190,6 +198,7 @@ class BrokerSpec:
     default_min_order_usd: str = "50"
     default_dry_run: str = "true"
     default_portfolio_fraction: str = "1.0"
+    record_equity: bool = True
 
     def check_required_env(self) -> None:
         """Raise ConfigError if any required credential is unset."""
@@ -275,5 +284,14 @@ REGISTRY: dict[str, BrokerSpec] = {
         required_env=("MT5_MQL5_LOGIN", "MT5_MQL5_PASSWORD", "MT5_MQL5_SERVER"),
         default_bot_weights='{"TARegimeMultiAssetBot": 0.39, "TSMOMTrendBot": 0.24, "GoldenButterflyMomBot": 0.37}',
         default_dry_run="false",
+    ),
+    "manual": BrokerSpec(
+        key="manual",
+        logger_name="livetrade_manual",
+        build=_build_manual,
+        required_env=("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+        default_bot_weights='{"TARegimeMultiAssetBot": 0.39, "TSMOMTrendBot": 0.24, "GoldenButterflyMomBot": 0.37}',
+        default_dry_run="false",
+        record_equity=False,
     ),
 }

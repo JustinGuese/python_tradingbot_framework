@@ -104,6 +104,9 @@ If you have $100,000 in your live account and configure:
 | `DARWINEX_PASSWORD` | Your Darwinex DXtrade master password. |
 | `DARWINEX_ACCOUNT_ID` | Optional: Specific Darwinex account ID to use. |
 | `DARWINEX_DEMO` | `true` for demo/paper account, `false` for live account (default: `true`). |
+| `TELEGRAM_BOT_TOKEN` | Bot API token for Telegram trade alerts (Manual copier). |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID for trade notifications (Manual copier). |
+| `LIVETRADE_MANUAL_EQUITY_USD` | Virtual portfolio starting equity in USD for the manual copier (default: `50000`). |
 | `LIVETRADE_BOT_WEIGHTS` | JSON: `{"botname": 0.6, "otherbot": 0.4}`. Weights are normalized to 1.0. |
 | `LIVETRADE_MIN_ORDER_USD` | Skip trades smaller than this amount (default: $50). |
 | `LIVETRADE_DRY_RUN` | `true`: Logs orders without sending them. **Always start here.** |
@@ -516,6 +519,36 @@ python -m tradingbot.livetrade_mt5_mql5
 
 ---
 
+## 📱 Manual (Telegram) Copier
+
+The manual copier reconciles strategy target allocations without submitting orders to an external brokerage API. Instead of executing trades automatically, it sends a Telegram notification listing the exact whole-share `BUY` and `SELL` trades the user must place manually in their brokerage account.
+
+### 1. How It Works
+- **Virtual Book:** Tracks an assumed portfolio (cash and whole-share positions) in PostgreSQL table `manual_portfolio`. On the first run, the virtual portfolio seeds with `LIVETRADE_MANUAL_EQUITY_USD` (default `$50,000`, matching model accounts) and 0 positions.
+- **Whole-Share Quantities:** `BUY` and `SELL` quantities are floored to whole shares. Orders that round to 0 shares are skipped. Full liquidations sell the exact held quantity.
+- **Silent on No Change:** If allocations have not changed (or calculated trades fall below `LIVETRADE_MIN_ORDER_USD`), no Telegram message is sent and no database write occurs.
+- **Notify-Then-Persist Ordering:** State is saved to the database only *after* the Telegram message successfully sends via httpx. If Telegram delivery fails, the runner raises a sanitized error, leaving database state unchanged so the next run retries the notification.
+- **No Live Equity Record:** Virtual portfolios do not record rows in `live_equity` (`record_equity: false`).
+- **US Tradeable Universe:** Like the Collective2 copier, trades are restricted to US stocks/ETFs, with idle capital parked in the cash proxy (`SHV`).
+
+### 2. Configuration & Credentials
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot token from @BotFather. Never logged or exposed. | **Required** |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID for alert delivery. | **Required** |
+| `LIVETRADE_MANUAL_EQUITY_USD` | Starting cash for the virtual portfolio seed. | `50000` |
+| `LIVETRADE_MIN_ORDER_USD` | Minimum order notional threshold (in values.yaml: `$500`). | `500` |
+| `LIVETRADE_DRY_RUN` | When `true`, suppresses sending Telegram alerts and persisting state. | `false` |
+
+### 3. Local Testing
+
+```bash
+uv run python -m tradingbot.livetrade_manual
+```
+
+---
+
 ## 🧠 Numerai Signals
 
 The framework submits daily tournament predictions to **Numerai Signals**.
@@ -593,9 +626,10 @@ The table below summarizes all supported live-trading, signal-publishing, and to
 | `interactiveBrokers` | Paper (DU) / Live | `0 15 * * 1-5` | 15:00 UTC | Mid-session slot, TWS socket API (`ib_async`), marketable limit orders, C2 blend (0.5 portfolio fraction) | Enabled (Paper) |
 | `etoro` | Demo / Real | `5 15 * * 1-5` | 15:05 UTC | Mid-session slot, Public REST API, C2 blend with asset substitutions (PDBC, long FX, SHV) | Enabled (Demo) |
 | `darwinex` | Demo / Real | `40 21 * * 1-5` | 21:40 UTC | DXtrade REST API (forex/CFDs only, lacks US ETFs) | Disabled |
-| `collective2XauZerifine` | Signal Provider | `50 21 * * 1-5` | 21:50 UTC | C2 Strategy 155809898, low-beta multi-asset blend (error 1020 pending paid Trade Leader plan) | Enabled |
+| `collective2XauZerifine` | Signal Provider | `15 15 * * 1-5` | 15:15 UTC | C2 Strategy 158349932, low-beta blend (suspended: error 1020 pending paid plan) | Suspended |
 | `hyperliquid` | Perps Vault | `5 0 * * *` | 00:05 UTC | Hyperliquid perps vault copier (`AdaptiveMeanReversionBTCBot`), always-open crypto market | Disabled |
 | `mt5Mql5` | Signal Provider | `10 15 * * 1-5` | 15:10 UTC | Mid-session slot, MT5 via Wine bridge, US session execution, C2 blend | Enabled (Demo) |
+| `manual` | Manual Copier | `20 15 * * 1-5` | 15:20 UTC | Telegram alerts for manual rebalancing, virtual portfolio ($50k model) | Enabled |
 | `numerai` | Tournament Signals | `0 22 * * 1-5` | 22:00 UTC | Numerai Signals 12-1 momentum tournament submission (unstaked) | Enabled |
 
 ---
