@@ -249,6 +249,11 @@ def test_decide_gexstraddle_no_reentry_same_session():
     actions = decide_gexstraddle(market, holdings_reentry, rules, "SPY")
     assert actions == []
 
+    # Flat book (opened_on is None once closed), but the trade log shows an entry today
+    holdings_flat = SyntheticHoldings(underlyings_held=set(), opened_date=None)
+    assert decide_gexstraddle(market, holdings_flat, rules, "SPY", entered_today=True) == []
+    assert any(isinstance(a, Open) for a in decide_gexstraddle(market, holdings_flat, rules, "SPY"))
+
 
 # ------------------------------------------------------------------
 # Acceptance Test 4: Exits

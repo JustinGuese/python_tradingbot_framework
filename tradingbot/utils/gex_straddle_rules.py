@@ -134,8 +134,12 @@ def decide_gexstraddle(
     holdings: Holdings,
     rules: GexStraddleRules,
     underlying: str = "SPY",
+    entered_today: bool = False,
 ) -> list[Action]:
     """Pure decision function for OptionGexStraddleBot.
+
+    `entered_today` must come from the trade log: once flat, `holdings.opened_on` is None, so it
+    cannot tell that a ticket was already opened and closed (take-profit) earlier this session.
 
     - Exits open position if:
         * pnl_pct >= rules.take_profit (take profit, default +100%)
@@ -177,7 +181,7 @@ def decide_gexstraddle(
         return []
 
     opened = holdings.opened_on(underlying)
-    if opened == market.today:
+    if opened == market.today or entered_today:
         logger.info("%s: already entered earlier today (%s); no re-entry", underlying, market.today)
         return []
 

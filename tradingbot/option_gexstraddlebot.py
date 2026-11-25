@@ -18,8 +18,10 @@ Schedule: */5 14-20 * * 1-5 (covers EST/EDT trading hours; decide gates by NY ti
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import ClassVar
 
+from tradingbot.utils.db import Trade, get_db_session
 from tradingbot.utils.gex_straddle_rules import GexStraddleRules, decide_gexstraddle
 from tradingbot.utils.option_decide import Action, Holdings, Market
 from tradingbot.utils.option_strategy_bot import OptionStrategyBot
@@ -41,8 +43,27 @@ class OptionGexStraddleBot(OptionStrategyBot):
     def __init__(self, **kwargs):
         super().__init__("option_GexStraddleBot", symbol=UNDERLYING, interval="1d", period="1mo", **kwargs)
 
+    def _entered_today(self, today: date) -> bool:
+        """True if this bot bought any SPY option today (a flat book cannot say so via opened_on)."""
+        since = today - timedelta(days=1)
+        with get_db_session() as session:
+            stamps = [
+                ts
+                for (ts,) in session.query(Trade.timestamp)
+                .filter(
+                    Trade.bot_name == self.bot_name,
+                    Trade.isBuy.is_(True),
+                    Trade.symbol.like(f"{UNDERLYING}%"),
+                    Trade.timestamp >= since,
+                )
+                .all()
+            ]
+        return any(ts is not None and ts.date() == today for ts in stamps)
+
     def decide(self, market: Market, holdings: Holdings) -> list[Action]:
-        return decide_gexstraddle(market, holdings, self.RULES, UNDERLYING)
+        return decide_gexstraddle(
+            market, holdings, self.RULES, UNDERLYING, entered_today=self._entered_today(market.today)
+        )
 
 
 # Module-level alias for inspection / test discovery
