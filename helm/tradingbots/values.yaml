@@ -634,6 +634,15 @@ bots:
 - name: option_fomcvolbot
   schedule: "10 16 * * 1-5" # long SPY iron fly (5% wings) held across the FOMC announcement, <=5% risk
   # Live paper. Inconclusive: real-quote n=21 long fly +3.55% per trade, t 1.30, CI [-1.7, 9.0].
+- name: option_preearningsstraddlebot
+  schedule: "30 19 * * 1-5"
+  # Live paper. UNPROVEN: no backtest.
+- name: option_skewbwbbot
+  schedule: "20 16 * * 1-5"
+  # Live paper. UNPROVEN: no backtest.
+- name: option_gexstraddlebot
+  schedule: "*/5 14-20 * * 1-5"
+  # Live paper. UNPROVEN: no backtest.
 - name: optionimpliedsignalbot
   schedule: "15 16 * * 1-5" # long top-5 names by option-implied composite signal, weekly rebalance
   # Live paper. Unproven: vs QQQ alpha +17.9% t 2.46, but vs the equal-weight universe +4.5% t 0.66
