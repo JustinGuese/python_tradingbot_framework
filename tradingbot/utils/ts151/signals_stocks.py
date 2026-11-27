@@ -18,6 +18,7 @@ from sklearn.neighbors import KNeighborsClassifier
 
 from tradingbot.utils.cs_neutral_book import compute_residual_momentum as _cs_residual_momentum
 from tradingbot.utils.ts151.common import (
+    is_live_as_of,
     ols_beta,
     pivot_levels,
     replay_state,
@@ -42,16 +43,20 @@ def check_sec_fundamentals_staleness(
     as_of: Any,
     max_age_days: int = 450,
     min_pct: float = 0.5,
-) -> None:
+) -> bool:
     """Validate that SEC fundamentals data is present and not stale.
 
-    Raises RuntimeError if table is empty or fewer than 50% of the universe
-    has a filing within 450 days of as_of.
+    Raises RuntimeError on live run if table is empty or fewer than min_pct
+    of the universe has a filing within max_age_days of as_of.
+    Returns False on historical bar if not OK.
+    Returns True if OK.
     """
     if fundamentals is None or fundamentals.empty:
-        raise RuntimeError(
-            "SEC fundamentals data missing (table ts151_sec_fundamentals is empty)"
-        )
+        if is_live_as_of(as_of):
+            raise RuntimeError(
+                "SEC fundamentals data missing (table ts151_sec_fundamentals is empty)"
+            )
+        return False
 
     as_of_ts = pd.to_datetime(as_of).tz_localize(None).normalize()
     cutoff_ts = as_of_ts - pd.Timedelta(days=max_age_days)
@@ -64,53 +69,69 @@ def check_sec_fundamentals_staleness(
 
     target_universe = set(universe)
     if not target_universe:
-        return
+        return True
 
     covered_in_universe = covered_tickers.intersection(target_universe)
     pct = len(covered_in_universe) / len(target_universe)
     if pct < min_pct:
-        raise RuntimeError(
-            f"SEC fundamentals data stale or insufficient coverage: only {pct:.1%} of universe "
-            f"has a filing within {max_age_days} days of {as_of_ts.strftime('%Y-%m-%d')} (threshold {min_pct:.0%})"
-        )
+        if is_live_as_of(as_of):
+            raise RuntimeError(
+                f"SEC fundamentals data stale or insufficient coverage: only {pct:.1%} of universe "
+                f"has a filing within {max_age_days} days of {as_of_ts.strftime('%Y-%m-%d')} (threshold {min_pct:.0%})"
+            )
+        return False
+    return True
 
 
 def check_vol_surface_staleness(
     vol_frame: pd.DataFrame,
     as_of: Any,
     max_lag_days: int = 14,
-) -> None:
+) -> bool:
     """Validate that vol_surface data is present and not stale.
 
-    Raises RuntimeError if table is empty or newest snapshot is older than max_lag_days.
+    Raises RuntimeError on live run if table is empty or newest snapshot is older than max_lag_days.
+    Returns False on historical bar if not OK.
+    Returns True if OK.
     """
     if vol_frame is None or vol_frame.empty:
-        raise RuntimeError("vol_surface data missing (table vol_surface is empty)")
+        if is_live_as_of(as_of):
+            raise RuntimeError("vol_surface data missing (table vol_surface is empty)")
+        return False
 
     as_of_ts = pd.to_datetime(as_of).tz_localize(None).normalize()
     snap_dates = pd.to_datetime(vol_frame["snapshot_date"]).dt.tz_localize(None).dt.normalize()
     valid_snaps = snap_dates[snap_dates <= as_of_ts]
     if valid_snaps.empty:
-        raise RuntimeError(f"vol_surface has no snapshots on or before {as_of_ts.strftime('%Y-%m-%d')}")
+        if is_live_as_of(as_of):
+            raise RuntimeError(f"vol_surface has no snapshots on or before {as_of_ts.strftime('%Y-%m-%d')}")
+        return False
 
     newest = valid_snaps.max()
     lag = (as_of_ts - newest).days
     if lag > max_lag_days:
-        raise RuntimeError(
-            f"vol_surface data stale: newest snapshot is {newest.strftime('%Y-%m-%d')}, "
-            f"{lag} days before as_of {as_of_ts.strftime('%Y-%m-%d')} (threshold {max_lag_days} days)"
-        )
+        if is_live_as_of(as_of):
+            raise RuntimeError(
+                f"vol_surface data stale: newest snapshot is {newest.strftime('%Y-%m-%d')}, "
+                f"{lag} days before as_of {as_of_ts.strftime('%Y-%m-%d')} (threshold {max_lag_days} days)"
+            )
+        return False
+    return True
 
 
 def check_merger_heartbeat(
     merger_events: pd.DataFrame,
     as_of: Any,
     max_lag_days: int = 3,
-) -> None:
+) -> bool:
     """Validate that ts151_merger_events contains an active _HEARTBEAT.
 
-    Raises RuntimeError if missing or older than max_lag_days.
+    Skipped entirely on historical bars (returns True).
+    Raises RuntimeError on live run if missing or older than max_lag_days.
     """
+    if not is_live_as_of(as_of):
+        return True
+
     if merger_events is None or merger_events.empty:
         raise RuntimeError("Merger data missing (table ts151_merger_events is empty)")
 
@@ -131,6 +152,7 @@ def check_merger_heartbeat(
             f"Merger data stale: newest _HEARTBEAT is {newest_hb.strftime('%Y-%m-%d')}, "
             f"{lag} days before as_of {as_of_ts.strftime('%Y-%m-%d')} (threshold {max_lag_days} days)"
         )
+    return True
 
 
 # ---------------------------------------------------------------------------

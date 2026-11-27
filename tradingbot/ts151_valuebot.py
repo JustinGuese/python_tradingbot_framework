@@ -81,7 +81,8 @@ class TS151ValueBot(TS151Bot):
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:
         fundamentals = self._get_fundamentals()
-        check_sec_fundamentals_staleness(fundamentals, ctx.universe, ctx.as_of)
+        if not check_sec_fundamentals_staleness(fundamentals, ctx.universe, ctx.as_of):
+            return None
         return compute_value_weights(
             fundamentals=fundamentals,
             closes_row=ctx.closes.iloc[-1],

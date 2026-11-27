@@ -16,6 +16,22 @@ from scipy.optimize import minimize
 from tradingbot.utils.quantsmd_common import period_rolled
 
 
+def is_live_as_of(as_of: Any, max_days: int = 5) -> bool:
+    """Return True if as_of is within max_days calendar days of now (UTC)."""
+    if as_of is None:
+        return False
+    try:
+        as_of_ts = pd.to_datetime(as_of)
+        if hasattr(as_of_ts, "tzinfo") and as_of_ts.tzinfo is not None:
+            as_of_ts = as_of_ts.tz_convert("UTC").tz_localize(None)
+        as_of_ts = as_of_ts.normalize()
+    except Exception:
+        return False
+
+    now_ts = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    return abs((now_ts - as_of_ts).days) <= max_days
+
+
 def rebalance_due(index: pd.Index, freq: str) -> bool:
     """Return True if a portfolio rebalance is due at the current bar.
 

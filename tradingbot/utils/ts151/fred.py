@@ -33,6 +33,7 @@ def fred_series(
     start: str = "1990-01-01",
     cache_dir: Path | str | None = None,
     refresh: bool = False,
+    max_staleness_days: int | None = None,
 ) -> pd.Series:
     """Download or load cached public series from FRED with publication lag applied.
 
@@ -40,6 +41,8 @@ def fred_series(
     - Parses values as floats; "." is treated as NaN.
     - Applies publication lag by shifting the DatetimeIndex forward by `lag_days` calendar days.
     - Raises on fetch failure (no synthetic data fallback).
+    - Checks staleness against today: <= 5 days median gap is daily (max 10 days staleness),
+      else monthly (max 75 days staleness), overridable via max_staleness_days.
     """
     if lag_days is None:
         lag_days = default_lag(series_id)
@@ -53,8 +56,17 @@ def fred_series(
         try:
             cached = pd.read_pickle(cache_file)
             if isinstance(cached, pd.Series) and not cached.empty:
-                raw_series = cached
-                logger.debug("Loaded FRED series %s from cache %s", series_id, cache_file)
+                c_dates = pd.Series(cached.index).sort_values()
+                c_diffs = c_dates.diff().dt.days.dropna()
+                c_is_daily = (float(c_diffs.median()) if not c_diffs.empty else 1.0) <= 5.0
+                c_allowed = max_staleness_days if max_staleness_days is not None else (10 if c_is_daily else 75)
+                c_today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+                c_newest = cached.index.max()
+                if hasattr(c_newest, "tzinfo") and c_newest.tzinfo is not None:
+                    c_newest = c_newest.tz_convert("UTC").tz_localize(None)
+                if (c_today - c_newest.normalize()).days <= c_allowed:
+                    raw_series = cached
+                    logger.debug("Loaded FRED series %s from cache %s", series_id, cache_file)
         except Exception as exc:
             logger.warning("Failed reading FRED cache from %s: %s", cache_file, exc)
 
@@ -94,6 +106,26 @@ def fred_series(
             logger.debug("Saved FRED series %s to cache %s", series_id, cache_file)
         except Exception as exc:
             logger.warning("Could not write FRED cache to %s: %s", cache_file, exc)
+
+    # Staleness check on raw observations
+    raw_dates = pd.Series(raw_series.index).sort_values()
+    diffs = raw_dates.diff().dt.days.dropna()
+    median_gap = float(diffs.median()) if not diffs.empty else 1.0
+    is_daily = median_gap <= 5.0
+
+    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    newest_obs_date = raw_series.index.max()
+    if hasattr(newest_obs_date, "tzinfo") and newest_obs_date.tzinfo is not None:
+        newest_obs_date = newest_obs_date.tz_convert("UTC").tz_localize(None)
+    newest_obs_date = newest_obs_date.normalize()
+
+    allowed_staleness = max_staleness_days if max_staleness_days is not None else (10 if is_daily else 75)
+    staleness_days = (today - newest_obs_date).days
+    if staleness_days > allowed_staleness:
+        raise RuntimeError(
+            f"FRED series {series_id} is stale: newest raw observation is {newest_obs_date.strftime('%Y-%m-%d')}, "
+            f"{staleness_days} days old relative to today (threshold {allowed_staleness} days)"
+        )
 
     # Filter start date
     if start is not None:

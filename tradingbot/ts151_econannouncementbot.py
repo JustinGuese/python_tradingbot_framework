@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, Iterable
 
 from tradingbot.utils.ts151.base import Ctx, TS151Bot
+from tradingbot.utils.ts151.common import is_live_as_of
 from tradingbot.utils.ts151.signals_macro import econ_announcement_weights
 
 
@@ -58,21 +59,26 @@ class TS151EconAnnouncementBot(TS151Bot):
         )
         self._events_cache = None
 
-    def _get_events(self):
+    def _get_events(self, as_of: Any = None):
         if self._events_cache is None:
-            try:
-                from tradingbot.utils.macro_calendar import macro_events_frame
+            from tradingbot.utils.macro_calendar import macro_events_frame
 
-                df = macro_events_frame(kinds=self.kinds)
-                self._events_cache = df["event_date"].tolist() if not df.empty else []
-            except Exception:
-                self._events_cache = []
+            df = macro_events_frame(kinds=self.kinds)
+            self._events_cache = df["event_date"].tolist() if not df.empty else []
+
+        if not self._events_cache:
+            if is_live_as_of(as_of):
+                raise RuntimeError("macro_events empty")
+            return None
+
         return self._events_cache
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:
         event_dates = getattr(ctx, "macro_events", None)
         if event_dates is None:
-            event_dates = self._get_events()
+            event_dates = self._get_events(as_of=ctx.as_of)
+        if event_dates is None:
+            return None
 
         return econ_announcement_weights(
             as_of=ctx.as_of,

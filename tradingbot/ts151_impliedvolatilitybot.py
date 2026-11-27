@@ -102,7 +102,8 @@ class TS151ImpliedVolatilityBot(TS151Bot):
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:
         vol_frame = self._get_vol_surface()
-        check_vol_surface_staleness(vol_frame, ctx.as_of)
+        if not check_vol_surface_staleness(vol_frame, ctx.as_of):
+            return None
         return compute_implied_volatility_weights(
             vol_frame=vol_frame,
             universe=ctx.universe,

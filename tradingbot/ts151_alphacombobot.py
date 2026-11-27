@@ -85,7 +85,8 @@ class TS151AlphaComboBot(TS151Bot):
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:
         fundamentals = self._get_fundamentals()
-        check_sec_fundamentals_staleness(fundamentals, ctx.universe, ctx.as_of)
+        if not check_sec_fundamentals_staleness(fundamentals, ctx.universe, ctx.as_of):
+            return None
         return compute_alphacombo_weights(
             closes=ctx.closes,
             fundamentals=fundamentals,

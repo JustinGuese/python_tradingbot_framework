@@ -209,7 +209,7 @@ def test_signals_merger_arb():
 
 def test_staleness_checkers():
     """Verify that staleness checkers raise RuntimeError when thresholds are violated."""
-    as_of = pd.Timestamp("2026-05-01")
+    as_of = pd.Timestamp.now(tz="UTC")
 
     # Empty fundamentals
     with pytest.raises(RuntimeError, match="SEC fundamentals data missing"):

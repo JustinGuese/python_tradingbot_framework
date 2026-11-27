@@ -1,6 +1,8 @@
 """Kakushadze & Serur (2018) §3.16: Merger Arbitrage.
 
-Dynamic universe: target tickers from merger announcements in ts151_merger_events within last `hold=120` days plus SPY.
+When universe is None (default for live trading), the universe is dynamically constructed from target tickers
+with filed_at within ceil(hold * 7 / 5) + 10 calendar days of now, plus SPY.
+For backtests, pass universe= explicitly.
 Long each target from first bar after filed_at for `hold` bars. Equal weight, capped at `max_weight=0.1`.
 Defaults: hold=120, max_weight=0.1.
 Proxy: Announced cash/stock deals from EDGAR merger filings (SC TO-T, SC 14D9, DEFM14A, PREM14A).
@@ -8,6 +10,7 @@ Proxy: Announced cash/stock deals from EDGAR merger filings (SC TO-T, SC 14D9, D
 
 from __future__ import annotations
 
+import math
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -65,14 +68,20 @@ class TS151MergerArbBot(TS151Bot):
 
         # Dynamically build universe from DB if not provided
         if universe is None:
-            try:
-                events = load_merger_events()
-                self._merger_events_cache = events
-                non_hb = events[events["accession"] != "_HEARTBEAT"]
-                raw_tickers = [t for t in non_hb["ticker"].dropna().unique() if t]
-                dyn_universe = tuple(dict.fromkeys(raw_tickers + ["SPY"]))
-            except Exception:
-                dyn_universe = ("SPY",)
+            events = load_merger_events()
+            self._merger_events_cache = events
+            non_hb = events[events["accession"] != "_HEARTBEAT"]
+            if not non_hb.empty and "filed_at" in non_hb.columns:
+                lookback_days = math.ceil(hold * 7 / 5) + 10
+                now = pd.Timestamp.now(tz="UTC")
+                cutoff = now - pd.Timedelta(days=lookback_days)
+                filed_dates = pd.to_datetime(non_hb["filed_at"])
+                cutoff_cmp = cutoff if filed_dates.dt.tz is not None else cutoff.tz_localize(None)
+                recent = non_hb[filed_dates >= cutoff_cmp]
+                raw_tickers = [t for t in recent["ticker"].dropna().unique() if t]
+            else:
+                raw_tickers = []
+            dyn_universe = tuple(dict.fromkeys(raw_tickers + ["SPY"]))
         else:
             dyn_universe = universe
 
@@ -95,7 +104,8 @@ class TS151MergerArbBot(TS151Bot):
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:
         events = self._get_events()
-        check_merger_heartbeat(events, ctx.as_of)
+        if not check_merger_heartbeat(events, ctx.as_of):
+            return None
         return compute_merger_arb_weights(
             merger_events=events,
             as_of=ctx.as_of,

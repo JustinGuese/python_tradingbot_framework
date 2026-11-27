@@ -103,6 +103,7 @@ def _mock_load_cot(codes=None):
 
 
 def _mock_load_merger_events(start=None):
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
     return pd.DataFrame([
         {
             "accession": "_HEARTBEAT",
@@ -110,8 +111,8 @@ def _mock_load_merger_events(start=None):
             "ticker": "_HB",
             "company_name": "Heartbeat",
             "form": "8-K",
-            "filed_at": pd.to_datetime("2024-04-01"),
-            "created_at": pd.to_datetime("2024-04-01"),
+            "filed_at": now,
+            "created_at": now,
         },
         {
             "accession": "0001-23-456",
@@ -119,8 +120,8 @@ def _mock_load_merger_events(start=None):
             "ticker": "AAPL",
             "company_name": "Apple",
             "form": "SC 13D",
-            "filed_at": pd.to_datetime("2024-03-15"),
-            "created_at": pd.to_datetime("2024-03-15"),
+            "filed_at": now - pd.Timedelta(days=5),
+            "created_at": now - pd.Timedelta(days=5),
         },
     ])
 
@@ -140,6 +141,7 @@ def _mock_db_session():
 
 
 # Pre-patch loaders before module imports
+_real_fred_series = fred.fred_series
 data_api.load_fundamentals = _mock_load_fundamentals
 data_api.load_cot = _mock_load_cot
 data_api.load_merger_events = _mock_load_merger_events
@@ -545,3 +547,80 @@ def test_backtestability_sector_momentum_and_low_vol():
     # Verify that the long/short run held a negative position at some bar
     short_trades = [tr for tr in res_vol["trades"] if tr["side"] == "short"]
     assert len(short_trades) > 0, "LowVolatilityBot long/short backtest did not execute any short positions"
+
+
+# ---------------------------------------------------------------------------
+# S151 Review Fix Tests
+# ---------------------------------------------------------------------------
+
+
+def test_value_bot_staleness_historical_vs_live():
+    """(a) Value bot on historical as_of with empty fundamentals returns None and does not raise; same with as_of=now raises."""
+    from tradingbot.ts151_valuebot import TS151ValueBot
+
+    bot = TS151ValueBot(universe=("AAPL", "MSFT"))
+    bot._fundamentals_cache = pd.DataFrame()
+
+    hist_as_of = pd.Timestamp("2020-01-01")
+    ctx_hist = Ctx(
+        closes=pd.DataFrame({"AAPL": [100.0], "MSFT": [200.0]}, index=[hist_as_of]),
+        datas={},
+        as_of=hist_as_of,
+        universe=["AAPL", "MSFT"],
+        bot=bot,
+    )
+    res_hist = bot.signal(ctx_hist)
+    assert res_hist is None
+
+    live_as_of = pd.Timestamp.now(tz="UTC")
+    ctx_live = Ctx(
+        closes=pd.DataFrame({"AAPL": [100.0], "MSFT": [200.0]}, index=[live_as_of]),
+        datas={},
+        as_of=live_as_of,
+        universe=["AAPL", "MSFT"],
+        bot=bot,
+    )
+    with pytest.raises(RuntimeError):
+        bot.signal(ctx_live)
+
+
+def test_roll_yield_bot_historical_does_not_call_download(monkeypatch):
+    """(b) Roll-yield bot on a historical as_of returns None without calling yf.download."""
+    from tradingbot.ts151_rollyieldbot import TS151RollYieldBot
+    import yfinance as yf
+
+    mock_download = MagicMock()
+    monkeypatch.setattr(yf, "download", mock_download)
+
+    bot = TS151RollYieldBot()
+    hist_as_of = pd.Timestamp("2020-01-01")
+    ctx_hist = Ctx(
+        closes=pd.DataFrame({"USO": [50.0]}, index=[hist_as_of]),
+        datas={},
+        as_of=hist_as_of,
+        universe=list(bot.universe_list),
+        bot=bot,
+    )
+    res = bot.signal(ctx_hist)
+    assert res is None
+    mock_download.assert_not_called()
+
+
+def test_fred_series_raises_on_stale_series(monkeypatch):
+    """(c) fred_series raises on a daily series whose last observation is 30 days old."""
+    import requests
+
+    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    dates = pd.date_range(end=today - pd.Timedelta(days=30), periods=20, freq="D")
+    csv_lines = ["DATE,DGS10"] + [f"{d.strftime('%Y-%m-%d')},4.25" for d in dates]
+    csv_text = "\n".join(csv_lines)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = csv_text
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: mock_resp)
+
+    with pytest.raises(RuntimeError, match="stale"):
+        _real_fred_series("DGS10", cache_dir="/tmp/nonexistent_test_fred_cache", refresh=True)
+

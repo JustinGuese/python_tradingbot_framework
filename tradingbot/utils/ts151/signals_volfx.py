@@ -363,8 +363,7 @@ def fx_carry_signal(
         try:
             rates = load_fred_rates(lag_days=lag_days, daily_index=ctx.closes.index)
         except Exception as exc:
-            logger.warning("Failed loading FRED rates for fx_carry_signal: %s", exc)
-            return None
+            raise RuntimeError(f"Failed loading FRED rates for fx_carry_signal: {exc}") from exc
 
     if rates.empty or "USD" not in rates.columns:
         return None
@@ -417,8 +416,7 @@ def dollar_carry_signal(
         try:
             rates = load_fred_rates(lag_days=lag_days, daily_index=ctx.closes.index)
         except Exception as exc:
-            logger.warning("Failed loading FRED rates for dollar_carry_signal: %s", exc)
-            return None
+            raise RuntimeError(f"Failed loading FRED rates for dollar_carry_signal: {exc}") from exc
 
     if rates.empty or "USD" not in rates.columns:
         return None
@@ -497,8 +495,7 @@ def fx_mom_carry_signal(
         try:
             rates = load_fred_rates(lag_days=lag_days, daily_index=ctx.closes.index)
         except Exception as exc:
-            logger.warning("Failed loading FRED rates for fx_mom_carry_signal: %s", exc)
-            return None
+            raise RuntimeError(f"Failed loading FRED rates for fx_mom_carry_signal: {exc}") from exc
 
     if rates.empty or "USD" not in rates.columns:
         return None

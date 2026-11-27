@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 import yfinance as yf
 
 from tradingbot.utils.ts151.base import Ctx, TS151Bot
+from tradingbot.utils.ts151.common import is_live_as_of
 from tradingbot.utils.ts151.signals_commod import roll_yield_scores, topk_bottomk
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,9 @@ class TS151RollYieldBot(TS151Bot):
 
         Returns None during backtesting since individual futures contracts are forward-only.
         """
+        if not is_live_as_of(ctx.as_of):
+            return None
+
         # When running in backtest or when network/live quotes unavailable, return None
         try:
             contracts = fetch_live_contracts()
