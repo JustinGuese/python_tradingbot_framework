@@ -12,27 +12,26 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradingbot.utils.botclass import Bot
-from tradingbot.utils.ts151.base import Ctx
-from tradingbot.utils.ts151 import signals_rates
-from tradingbot.ts151_bulletsbot import TS151BulletsBot
 from tradingbot.ts151_barbellsbot import TS151BarbellsBot
-from tradingbot.ts151_laddersbot import TS151LaddersBot
-from tradingbot.ts151_immunizationbot import TS151ImmunizationBot
-from tradingbot.ts151_ddbutterflybot import TS151DdButterflyBot
-from tradingbot.ts151_fiftyfiftybutterflybot import TS151FiftyFiftyButterflyBot
-from tradingbot.ts151_regressionbutterflybot import TS151RegressionButterflyBot
-from tradingbot.ts151_lowriskbondbot import TS151LowRiskBondBot
-from tradingbot.ts151_bondvaluebot import TS151BondValueBot
 from tradingbot.ts151_bondcarrybot import TS151BondCarryBot
-from tradingbot.ts151_rollingdownbot import TS151RollingDownBot
-from tradingbot.ts151_curvespreadbot import TS151CurveSpreadBot
-from tradingbot.ts151_munibot import TS151MuniBot
+from tradingbot.ts151_bondvaluebot import TS151BondValueBot
 from tradingbot.ts151_breakevenbot import TS151BreakevenBot
-from tradingbot.ts151_mbsbot import TS151MbsBot
+from tradingbot.ts151_bulletsbot import TS151BulletsBot
 from tradingbot.ts151_convertiblearbbot import TS151ConvertibleArbBot
+from tradingbot.ts151_curvespreadbot import TS151CurveSpreadBot
+from tradingbot.ts151_ddbutterflybot import TS151DdButterflyBot
 from tradingbot.ts151_distresseddebtbot import TS151DistressedDebtBot
+from tradingbot.ts151_fiftyfiftybutterflybot import TS151FiftyFiftyButterflyBot
 from tradingbot.ts151_globalfixedincomebot import TS151GlobalFixedIncomeBot
+from tradingbot.ts151_immunizationbot import TS151ImmunizationBot
+from tradingbot.ts151_laddersbot import TS151LaddersBot
+from tradingbot.ts151_lowriskbondbot import TS151LowRiskBondBot
+from tradingbot.ts151_mbsbot import TS151MbsBot
+from tradingbot.ts151_munibot import TS151MuniBot
+from tradingbot.ts151_regressionbutterflybot import TS151RegressionButterflyBot
+from tradingbot.ts151_rollingdownbot import TS151RollingDownBot
+from tradingbot.utils.botclass import Bot
+from tradingbot.utils.ts151 import signals_rates
 
 
 @pytest.fixture
@@ -118,7 +117,6 @@ def test_regression_butterfly():
     w0_y = pd.Series(np.cumsum(np.random.randn(300) * 0.01) + 2.0, index=dates)
     w1_y = pd.Series(np.cumsum(np.random.randn(300) * 0.01) + 4.0, index=dates)
     body_y = 0.6 * w0_y + 0.4 * w1_y + pd.Series(np.random.randn(300) * 0.001, index=dates)
-    spread = body_y - 0.5 * (w0_y + w1_y)
 
     w = signals_rates.regression_butterfly_weights(body_y, w0_y, w1_y, window=252)
     assert w is not None
@@ -177,7 +175,7 @@ def test_bond_carry_and_rolling_down():
     rd_w = signals_rates.rolling_down_weights(yields, gross=1.0)
     assert rd_w is not None
     assert len(rd_w) == 1
-    assert list(rd_w.values())[0] == 1.0
+    assert next(iter(rd_w.values())) == 1.0
 
 
 def test_curve_spread_signal():

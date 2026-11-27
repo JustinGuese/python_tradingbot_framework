@@ -164,11 +164,13 @@ def test_signals_channel_and_pivot():
 
     # Pivot point
     datas = {
-        "SPY": pd.DataFrame({
-            "high": [105.0, 106.0],
-            "low": [95.0, 96.0],
-            "close": [100.0, 104.0],  # previous C = 100.0, current close = 104 > C
-        })
+        "SPY": pd.DataFrame(
+            {
+                "high": [105.0, 106.0],
+                "low": [95.0, 96.0],
+                "close": [100.0, 104.0],  # previous C = 100.0, current close = 104 > C
+            }
+        )
     }
     w_pivot = compute_support_resistance_weights(datas, ticker="SPY", gross=1.0)
     assert w_pivot == {"SPY": 1.0}
@@ -177,28 +179,30 @@ def test_signals_channel_and_pivot():
 def test_signals_merger_arb():
     """Verify merger arb signal allocates equal weight to recent merger targets."""
     as_of = pd.Timestamp("2026-05-01")
-    events = pd.DataFrame([
-        {
-            "accession": "acc1",
-            "ticker": "TARGET1",
-            "filed_at": pd.Timestamp("2026-04-15"),
-        },
-        {
-            "accession": "acc2",
-            "ticker": "TARGET2",
-            "filed_at": pd.Timestamp("2026-04-20"),
-        },
-        {
-            "accession": "acc3",
-            "ticker": "OLD_TARGET",
-            "filed_at": pd.Timestamp("2025-01-01"),  # older than 120 days
-        },
-        {
-            "accession": "_HEARTBEAT",
-            "ticker": None,
-            "filed_at": pd.Timestamp("2026-04-30"),
-        },
-    ])
+    events = pd.DataFrame(
+        [
+            {
+                "accession": "acc1",
+                "ticker": "TARGET1",
+                "filed_at": pd.Timestamp("2026-04-15"),
+            },
+            {
+                "accession": "acc2",
+                "ticker": "TARGET2",
+                "filed_at": pd.Timestamp("2026-04-20"),
+            },
+            {
+                "accession": "acc3",
+                "ticker": "OLD_TARGET",
+                "filed_at": pd.Timestamp("2025-01-01"),  # older than 120 days
+            },
+            {
+                "accession": "_HEARTBEAT",
+                "ticker": None,
+                "filed_at": pd.Timestamp("2026-04-30"),
+            },
+        ]
+    )
 
     w = compute_merger_arb_weights(events, as_of=as_of, hold_bars=120, max_weight=0.1)
     assert "TARGET1" in w and "TARGET2" in w

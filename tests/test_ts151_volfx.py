@@ -13,9 +13,6 @@ Tests §6.5, 7.2, 7.3, 7.6, 8.1-8.4:
 
 from __future__ import annotations
 
-import math
-from unittest.mock import patch
-
 import numpy as np
 import pandas as pd
 import pytest

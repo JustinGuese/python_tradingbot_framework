@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -23,7 +22,6 @@ import pandas as pd
 from tradingbot.utils.ts151 import universes
 from tradingbot.utils.ts151.base import Ctx
 from tradingbot.utils.ts151.common import (
-    ibs as calc_ibs,
     inverse_vol,
     rebalance_due,
     replay_state,
@@ -179,7 +177,7 @@ def rsquared_rotation(
         return None
 
     # Step 1: select frac lowest R^2
-    n_keep = max(k, int(round(len(stats) * frac)))
+    n_keep = max(k, round(len(stats) * frac))
     sorted_by_r2 = sorted(stats.items(), key=lambda item: item[1][0])
     candidates = dict(sorted_by_r2[:n_keep])
 
@@ -227,12 +225,12 @@ def ibs_reversal(
 
         valid_any = True
         h = df[cols["high"]].astype(float)
-        l = df[cols["low"]].astype(float)
+        lo = df[cols["low"]].astype(float)
         c = df[cols["close"]].astype(float)
 
-        hl = h - l
+        hl = h - lo
         denom = hl.replace(0.0, np.nan)
-        ibs_series = (c - l) / denom
+        ibs_series = (c - lo) / denom
         ibs_series = ibs_series.fillna(0.5)
 
         long_enter = ibs_series < low
@@ -271,17 +269,13 @@ def leveraged_pair_rebalance(
     if pairs is None:
         # Match from LEVERAGED_PAIRS or pair consecutive universe members
         active_pairs = [
-            p
-            for p in universes.LEVERAGED_PAIRS
-            if p[0] in ctx.closes.columns and p[1] in ctx.closes.columns
+            p for p in universes.LEVERAGED_PAIRS if p[0] in ctx.closes.columns and p[1] in ctx.closes.columns
         ]
         if not active_pairs and len(ctx.universe) >= 2:
             u = [s for s in ctx.universe if s in ctx.closes.columns]
             active_pairs = [(u[i], u[i + 1]) for i in range(0, len(u) - 1, 2)]
     else:
-        active_pairs = [
-            p for p in pairs if p[0] in ctx.closes.columns and p[1] in ctx.closes.columns
-        ]
+        active_pairs = [p for p in pairs if p[0] in ctx.closes.columns and p[1] in ctx.closes.columns]
 
     if not active_pairs or ctx.closes.empty:
         return None
@@ -321,7 +315,7 @@ def leveraged_pair_rebalance(
             t_last = t
 
     # Check if current bar triggered a rebalance
-    is_rebalance_bar = (t_last == num_bars - 1)
+    is_rebalance_bar = t_last == num_bars - 1
     if not is_rebalance_bar:
         return None
 

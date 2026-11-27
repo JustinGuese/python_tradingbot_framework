@@ -81,7 +81,7 @@ class TS151MergerArbBot(TS151Bot):
                 raw_tickers = [t for t in recent["ticker"].dropna().unique() if t]
             else:
                 raw_tickers = []
-            dyn_universe = tuple(dict.fromkeys(raw_tickers + ["SPY"]))
+            dyn_universe = tuple(dict.fromkeys([*raw_tickers, "SPY"]))
         else:
             dyn_universe = universe
 

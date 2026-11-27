@@ -76,7 +76,7 @@ def fetch_live_contracts() -> dict[str, tuple[float, float, float]]:
     all_tickers = [t for list_t in candidate_tickers.values() for t in list_t]
     try:
         data = yf.download(all_tickers, period="5d", progress=False)
-        closes = data["Close"] if "Close" in data else data
+        closes = data.get("Close", data)
     except Exception as exc:
         logger.warning("Failed to fetch live futures quotes from yfinance: %s", exc)
         return {}
@@ -100,9 +100,7 @@ def fetch_live_contracts() -> dict[str, tuple[float, float, float]]:
                 resolved[etf] = (f1, f2, float(m_apart))
 
     if len(resolved) < 4:
-        raise RuntimeError(
-            f"Fewer than 4 commodities resolved live contract quotes (resolved {len(resolved)})"
-        )
+        raise RuntimeError(f"Fewer than 4 commodities resolved live contract quotes (resolved {len(resolved)})")
 
     return resolved
 

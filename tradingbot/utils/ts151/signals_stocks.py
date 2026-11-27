@@ -20,7 +20,6 @@ from tradingbot.utils.cs_neutral_book import compute_residual_momentum as _cs_re
 from tradingbot.utils.ts151.common import (
     is_live_as_of,
     ols_beta,
-    pivot_levels,
     replay_state,
     topk_bottomk,
     trailing_return,
@@ -53,9 +52,7 @@ def check_sec_fundamentals_staleness(
     """
     if fundamentals is None or fundamentals.empty:
         if is_live_as_of(as_of):
-            raise RuntimeError(
-                "SEC fundamentals data missing (table ts151_sec_fundamentals is empty)"
-            )
+            raise RuntimeError("SEC fundamentals data missing (table ts151_sec_fundamentals is empty)")
         return False
 
     as_of_ts = pd.to_datetime(as_of).tz_localize(None).normalize()
@@ -264,7 +261,11 @@ def compute_value_scores(
             continue
 
         eq = latest.loc[ticker, "StockholdersEquity"] if "StockholdersEquity" in latest.columns else np.nan
-        sh = latest.loc[ticker, "EntityCommonStockSharesOutstanding"] if "EntityCommonStockSharesOutstanding" in latest.columns else np.nan
+        sh = (
+            latest.loc[ticker, "EntityCommonStockSharesOutstanding"]
+            if "EntityCommonStockSharesOutstanding" in latest.columns
+            else np.nan
+        )
         px = closes_row.get(ticker)
 
         if pd.isna(eq) or pd.isna(sh) or pd.isna(px):
@@ -418,7 +419,8 @@ def compute_multifactor_weights(
 
     # Align across tickers with data
     common_tickers = [
-        t for t in closes.columns
+        t
+        for t in closes.columns
         if t in mom.index and not pd.isna(mom[t]) and t in lowvol.index and not pd.isna(lowvol[t])
     ]
     if len(common_tickers) < 2:
@@ -678,8 +680,7 @@ def compute_weighted_regression_weights(
     vols = daily_rets.std()
 
     valid_tickers = [
-        t for t in closes.columns
-        if not pd.isna(rets_5.get(t)) and not pd.isna(vols.get(t)) and vols.get(t) > 0.0
+        t for t in closes.columns if not pd.isna(rets_5.get(t)) and not pd.isna(vols.get(t)) and vols.get(t) > 0.0
     ]
     if len(valid_tickers) < 2:
         return None
@@ -991,13 +992,15 @@ def compute_knn_weights(
         sma21 = c / c.rolling(21).mean()
         sma63 = c / c.rolling(63).mean()
 
-        features = pd.DataFrame({
-            "r1": r1,
-            "r5": r5,
-            "r21": r21,
-            "sma21": sma21,
-            "sma63": sma63,
-        })
+        features = pd.DataFrame(
+            {
+                "r1": r1,
+                "r5": r5,
+                "r21": r21,
+                "sma21": sma21,
+                "sma63": sma63,
+            }
+        )
 
         # Forward return label
         fwd_ret = c.shift(-horizon) / c - 1.0
@@ -1009,8 +1012,8 @@ def compute_knn_weights(
         if eval_features.isna().any(axis=1).iloc[0]:
             continue
 
-        train_X = features.iloc[-(train + horizon):-horizon]
-        train_y = label.iloc[-(train + horizon):-horizon]
+        train_X = features.iloc[-(train + horizon) : -horizon]
+        train_y = label.iloc[-(train + horizon) : -horizon]
 
         valid_mask = (~train_X.isna().any(axis=1)) & (~train_y.isna())
         train_X_clean = train_X[valid_mask]
@@ -1091,7 +1094,7 @@ def compute_statarb_weights(
 
             theta = a / (1.0 - b)
             var_xi = np.var(x_curr - (a + b * x_prev))
-            sigma_eq = math.sqrt(var_xi / (1.0 - b ** 2))
+            sigma_eq = math.sqrt(var_xi / (1.0 - b**2))
             if sigma_eq <= 0.0 or math.isnan(sigma_eq):
                 continue
 
@@ -1168,7 +1171,8 @@ def compute_alphacombo_weights(
 
     # Align common tickers
     common = [
-        t for t in closes.columns
+        t
+        for t in closes.columns
         if not pd.isna(mom_score.get(t)) and not pd.isna(rev_score.get(t)) and not pd.isna(vol_score.get(t))
     ]
     if len(common) < 2:
@@ -1186,7 +1190,7 @@ def compute_alphacombo_weights(
 
     for bar_idx in range(-train, 0, 21):
         c_sub = closes.iloc[:bar_idx]
-        ret_next = rets_daily.iloc[bar_idx:bar_idx + 21].sum()
+        ret_next = rets_daily.iloc[bar_idx : bar_idx + 21].sum()
 
         m_sub = trailing_return(c_sub, window=252, skip=21)
         r_sub = -((c_sub.iloc[-1] / c_sub.iloc[-6]) - 1.0)
@@ -1213,16 +1217,13 @@ def compute_alphacombo_weights(
         means = np.mean(arr, axis=0)
         vars_ = np.var(arr, axis=0)
         weights_alpha = []
-        for m, v in zip(means, vars_):
+        for m, v in zip(means, vars_, strict=False):
             if v > 0:
                 weights_alpha.append(max(0.0, float(m / v)))
             else:
                 weights_alpha.append(1.0)
         total_w = sum(weights_alpha)
-        if total_w > 0:
-            weights_alpha = [w / total_w for w in weights_alpha]
-        else:
-            weights_alpha = [0.25, 0.25, 0.25, 0.25]
+        weights_alpha = [w / total_w for w in weights_alpha] if total_w > 0 else [0.25, 0.25, 0.25, 0.25]
     else:
         weights_alpha = [0.25, 0.25, 0.25, 0.25]
 
@@ -1281,8 +1282,16 @@ def compute_distress_weights(
         ni = latest.loc[ticker, "NetIncomeLoss"] if "NetIncomeLoss" in latest.columns else np.nan
         ta = latest.loc[ticker, "Assets"] if "Assets" in latest.columns else np.nan
         tl = latest.loc[ticker, "Liabilities"] if "Liabilities" in latest.columns else np.nan
-        cash = latest.loc[ticker, "CashAndCashEquivalentsAtCarryingValue"] if "CashAndCashEquivalentsAtCarryingValue" in latest.columns else np.nan
-        sh = latest.loc[ticker, "EntityCommonStockSharesOutstanding"] if "EntityCommonStockSharesOutstanding" in latest.columns else np.nan
+        cash = (
+            latest.loc[ticker, "CashAndCashEquivalentsAtCarryingValue"]
+            if "CashAndCashEquivalentsAtCarryingValue" in latest.columns
+            else np.nan
+        )
+        sh = (
+            latest.loc[ticker, "EntityCommonStockSharesOutstanding"]
+            if "EntityCommonStockSharesOutstanding" in latest.columns
+            else np.nan
+        )
         px = c_now.get(ticker)
 
         if pd.isna(ta) or ta <= 0.0 or pd.isna(px) or px <= 0.0:

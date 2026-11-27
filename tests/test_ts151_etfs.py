@@ -19,6 +19,8 @@ Tests:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -30,7 +32,7 @@ from tradingbot.ts151_multiassettrendbot import TS151MultiAssetTrendBot
 from tradingbot.ts151_rsquaredbot import TS151RSquaredBot
 from tradingbot.ts151_sectormomentumbot import TS151SectorMomentumBot
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.ts151 import signals_etfs, universes
+from tradingbot.utils.ts151 import signals_etfs
 from tradingbot.utils.ts151.base import Ctx
 
 
@@ -164,9 +166,7 @@ def test_rsquared_rotation_signal():
 
     # Among frac=0.5 (2 lowest R^2), S2 and S3 have lowest correlation to SPY.
     # Between S2 and S3, S2 has much higher alpha.
-    w = signals_etfs.rsquared_rotation(
-        ctx, window=100, frac=0.5, k=1, benchmark="SPY", gross=1.0
-    )
+    w = signals_etfs.rsquared_rotation(ctx, window=100, frac=0.5, k=1, benchmark="SPY", gross=1.0)
     assert w is not None
     assert "S2" in w
     assert pytest.approx(w["S2"], rel=1e-4) == 1.0
@@ -244,9 +244,7 @@ def test_leveraged_pair_rebalance_signal():
     ctx = _make_ctx(data, dates=dates, universe=["TQQQ", "SQQQ"])
 
     # On final day, drift between legs > band (0.1) triggers rebalance
-    w = signals_etfs.leveraged_pair_rebalance(
-        ctx, pairs=[("TQQQ", "SQQQ")], band=0.1, gross=1.0
-    )
+    w = signals_etfs.leveraged_pair_rebalance(ctx, pairs=[("TQQQ", "SQQQ")], band=0.1, gross=1.0)
     assert w is not None
     assert set(w.keys()) == {"TQQQ", "SQQQ"}
     assert pytest.approx(w["TQQQ"], rel=1e-4) == -0.5
@@ -254,12 +252,8 @@ def test_leveraged_pair_rebalance_signal():
 
     # Test 2: intermediate bar with no monthly roll and small drift (< band) returns None (hold)
     data_small_drift = {"TQQQ": [100.0] * 19 + [101.0], "SQQQ": [100.0] * 20}
-    ctx_nodrift = _make_ctx(
-        data_small_drift, dates=dates, universe=["TQQQ", "SQQQ"]
-    )
-    w_none = signals_etfs.leveraged_pair_rebalance(
-        ctx_nodrift, pairs=[("TQQQ", "SQQQ")], band=0.1
-    )
+    ctx_nodrift = _make_ctx(data_small_drift, dates=dates, universe=["TQQQ", "SQQQ"])
+    w_none = signals_etfs.leveraged_pair_rebalance(ctx_nodrift, pairs=[("TQQQ", "SQQQ")], band=0.1)
     assert w_none is None
 
 

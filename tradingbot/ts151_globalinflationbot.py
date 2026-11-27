@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 from tradingbot.utils.ts151 import fred
 from tradingbot.utils.ts151.base import Ctx, TS151Bot

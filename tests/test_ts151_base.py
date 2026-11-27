@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.ts151 import common, data_api, fred, universes
+from tradingbot.utils.ts151 import common, data_api, universes
 from tradingbot.utils.ts151.base import Ctx, TS151Bot
 
 
@@ -243,7 +243,7 @@ def test_constructor_kwargs_and_defaults(patch_bot_init):
     assert bot.params["rebalance"] == "W"
 
     # Shortable set when ALLOW_SHORT and not long_only
-    assert bot.SHORTABLE == tuple(bot.universe_list)
+    assert tuple(bot.universe_list) == bot.SHORTABLE
 
 
 # ------------------------------------------------------------------
@@ -281,28 +281,37 @@ def test_replay_state_exact_match():
         assert res == expected_states[k - 1], f"Failed at bar index {k - 1}"
 
     # Explicit check at mid bar (bar 5 -> index 4: short entered)
-    assert common.replay_state(
-        long_enter[:5],
-        long_exit[:5],
-        short_enter[:5],
-        short_exit[:5],
-    ) == -1
+    assert (
+        common.replay_state(
+            long_enter[:5],
+            long_exit[:5],
+            short_enter[:5],
+            short_exit[:5],
+        )
+        == -1
+    )
 
     # Explicit check at mid bar after long exit (bar 4 -> index 3: long exited)
-    assert common.replay_state(
-        long_enter[:4],
-        long_exit[:4],
-        short_enter[:4],
-        short_exit[:4],
-    ) == 0
+    assert (
+        common.replay_state(
+            long_enter[:4],
+            long_exit[:4],
+            short_enter[:4],
+            short_exit[:4],
+        )
+        == 0
+    )
 
     # Explicit check at final bar
-    assert common.replay_state(
-        long_enter,
-        long_exit,
-        short_enter,
-        short_exit,
-    ) == -1
+    assert (
+        common.replay_state(
+            long_enter,
+            long_exit,
+            short_enter,
+            short_exit,
+        )
+        == -1
+    )
 
 
 # ------------------------------------------------------------------
@@ -329,7 +338,10 @@ def test_common_helpers():
     # inverse_vol
     idx = pd.date_range("2026-01-01", periods=10)
     closes = pd.DataFrame(
-        {"A": [10, 11, 10, 11, 10, 11, 10, 11, 10, 11], "B": [10, 10.1, 10.2, 10.1, 10.2, 10.1, 10.2, 10.1, 10.2, 10.1]},
+        {
+            "A": [10, 11, 10, 11, 10, 11, 10, 11, 10, 11],
+            "B": [10, 10.1, 10.2, 10.1, 10.2, 10.1, 10.2, 10.1, 10.2, 10.1],
+        },
         index=idx,
     )
     iv = common.inverse_vol(closes, window=5)
@@ -346,9 +358,7 @@ def test_common_helpers():
     durations = {"IEF": 7.5, "SHY": 1.9, "TLT": 17.0}
     butterfly = common.dv01_neutral("IEF", ("SHY", "TLT"), durations)
     net_dv01 = (
-        butterfly["IEF"] * durations["IEF"]
-        + butterfly["SHY"] * durations["SHY"]
-        + butterfly["TLT"] * durations["TLT"]
+        butterfly["IEF"] * durations["IEF"] + butterfly["SHY"] * durations["SHY"] + butterfly["TLT"] * durations["TLT"]
     )
     assert pytest.approx(net_dv01, 1e-6) == 0.0
 

@@ -48,10 +48,7 @@ def verify_cot_market_names(records: Sequence[dict[str, Any]]) -> None:
         if expected_word:
             mname = str(r.get("market_name", "")).upper()
             if expected_word not in mname:
-                raise ValueError(
-                    f"CFTC market name mismatch for code {code}: "
-                    f"expected '{expected_word}' in '{mname}'"
-                )
+                raise ValueError(f"CFTC market name mismatch for code {code}: expected '{expected_word}' in '{mname}'")
 
 
 def fetch_cot_records(

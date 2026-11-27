@@ -1360,4 +1360,3 @@ class MergerEvent(Base):
     form: Mapped[str] = mapped_column(String, nullable=False)
     filed_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
-

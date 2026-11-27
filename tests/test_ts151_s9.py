@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
-from unittest.mock import MagicMock, patch
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,7 +16,6 @@ from tradingbot.ts151_realestatediversitybot import TS151RealEstateDiversityBot
 from tradingbot.ts151_realestateinflationbot import TS151RealEstateInflationBot
 from tradingbot.ts151_realestatemomentumbot import TS151RealEstateMomentumBot
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.ts151.base import Ctx
 from tradingbot.utils.ts151.signals_macro import (
     crypto_ann_weights,
     crypto_sentiment_weights,
@@ -62,7 +58,7 @@ def test_bot_contract_and_param_grid(bot_cls):
     defaults = getattr(bot_cls, "DEFAULTS", {})
     param_grid = getattr(bot_cls, "param_grid", {})
     assert param_grid is not None, f"{bot_cls.__name__} has no param_grid"
-    for k in defaults.keys():
+    for k in defaults:
         assert k in param_grid, f"{bot_cls.__name__}: key {k!r} from DEFAULTS missing in param_grid"
 
     # Instantiate bot and test attributes
@@ -88,7 +84,7 @@ def test_real_estate_diversity():
     w = real_estate_diversity_weights(closes, window=252, min_weight=0.05, max_weight=0.5, max_vol=0.25)
     assert len(w) == len(reits)
     assert pytest.approx(sum(w.values()), 1e-4) == 1.0
-    for ticker, weight in w.items():
+    for weight in w.values():
         assert 0.049 <= weight <= 0.501
 
     # Test vol cap scaling down
@@ -256,7 +252,7 @@ def test_global_inflation():
 
     w = global_inflation_weights(closes, as_of=dates[-1], cpi_series=cpi_high, threshold=3.0, window=36)
     assert pytest.approx(sum(w.values()), 1e-4) == 1.0
-    for k in w.keys():
+    for k in w:
         assert k in ("TIP", "GLD", "DBC", "VNQ", "XLE")
 
     # Low stable inflation -> defaults to 60/40 benchmark

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
-from tradingbot.utils.universes import SP100, SP500, SP500_SECTOR
+from tradingbot.utils.universes import SP100, SP500
 
 # Core ETF / Index universes
 SECTORS: tuple[str, ...] = ("XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY")
@@ -157,8 +156,7 @@ def resolve(name_or_seq: str | Sequence[str]) -> tuple[str, ...]:
         if key in _NAMED_UNIVERSES:
             return _NAMED_UNIVERSES[key]
         raise ValueError(
-            f"Unknown universe name {name_or_seq!r}; known names are: "
-            f"{', '.join(sorted(_NAMED_UNIVERSES.keys()))}"
+            f"Unknown universe name {name_or_seq!r}; known names are: {', '.join(sorted(_NAMED_UNIVERSES.keys()))}"
         )
 
     if isinstance(name_or_seq, (tuple, list, set)):

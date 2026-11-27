@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
-from typing import Any, Iterable, Mapping
 import urllib.request
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -27,7 +28,6 @@ from scipy.optimize import minimize
 from sklearn.neural_network import MLPClassifier
 
 from tradingbot.utils.quantsmd_common import erc_weights
-from tradingbot.utils.ts151 import fred
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +75,7 @@ def real_estate_diversity_weights(
         return float(0.5 * w @ cov @ w)
 
     res = minimize(objective, w0, bounds=bounds, constraints=constraints, method="SLSQP")
-    if not res.success or np.any(np.isnan(res.x)):
-        w_opt = w0
-    else:
-        w_opt = res.x
+    w_opt = w0 if not res.success or np.any(np.isnan(res.x)) else res.x
 
     # Normalize sum to 1.0
     w_sum = np.sum(w_opt)
@@ -124,14 +121,14 @@ def intra_asset_div_weights(
     try:
         w = erc_weights(cov)
         if w is None or len(w) != n or np.any(np.isnan(w)):
-            return {c: 1.0 / n for c in valid_cols}
+            return dict.fromkeys(valid_cols, 1.0 / n)
         w_sum = np.sum(w)
         if w_sum > 0:
             w = w / w_sum
         return {valid_cols[i]: float(w[i]) for i in range(n) if w[i] > 1e-6}
     except Exception as exc:
         logger.warning("erc_weights failed: %s; falling back to 1/N", exc)
-        return {c: 1.0 / n for c in valid_cols}
+        return dict.fromkeys(valid_cols, 1.0 / n)
 
 
 # -------------------------------------------------------------------------

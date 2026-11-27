@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -320,9 +318,7 @@ def fx_ma_signal(
     if len(ctx.closes) < slow:
         return None
 
-    valid_symbols = [
-        sym for sym in ctx.universe if sym in ctx.closes.columns and len(ctx.closes[sym].dropna()) >= slow
-    ]
+    valid_symbols = [sym for sym in ctx.universe if sym in ctx.closes.columns and len(ctx.closes[sym].dropna()) >= slow]
     if not valid_symbols:
         return None
 
@@ -369,7 +365,7 @@ def fx_carry_signal(
         return None
 
     if ctx.as_of is not None:
-        sub_rates = rates.loc[:ctx.as_of]
+        sub_rates = rates.loc[: ctx.as_of]
         if sub_rates.empty:
             return None
         current_rates = sub_rates.iloc[-1]
@@ -422,7 +418,7 @@ def dollar_carry_signal(
         return None
 
     if ctx.as_of is not None:
-        sub_rates = rates.loc[:ctx.as_of]
+        sub_rates = rates.loc[: ctx.as_of]
         if sub_rates.empty:
             return None
         current_rates = sub_rates.iloc[-1]
@@ -501,7 +497,7 @@ def fx_mom_carry_signal(
         return None
 
     if ctx.as_of is not None:
-        sub_rates = rates.loc[:ctx.as_of]
+        sub_rates = rates.loc[: ctx.as_of]
         if sub_rates.empty:
             return None
         current_rates = sub_rates.iloc[-1]

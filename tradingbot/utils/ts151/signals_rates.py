@@ -35,7 +35,6 @@ import pandas as pd
 from tradingbot.utils.ts151 import universes
 from tradingbot.utils.ts151.common import dv01_neutral, ols_beta, replay_state, topk_bottomk, trailing_return, zscore
 
-
 # ------------------------------------------------------------------
 # §5.2 Bullet Portfolio
 # ------------------------------------------------------------------
@@ -103,7 +102,7 @@ def ladder_weights(
     if not u:
         return {}
     w = float(gross / len(u))
-    return {sym: w for sym in u}
+    return dict.fromkeys(u, w)
 
 
 # ------------------------------------------------------------------
@@ -430,7 +429,7 @@ def low_risk_bond_weights(
     if len(vols) < 2:
         return None
 
-    num_select = max(1, int(round(len(vols) * frac)))
+    num_select = max(1, round(len(vols) * frac))
     if len(vols) < 2 * num_select:
         return None
 

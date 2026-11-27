@@ -6,7 +6,6 @@ All functions are pure numpy/pandas operations. No database queries and no netwo
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 import pandas as pd

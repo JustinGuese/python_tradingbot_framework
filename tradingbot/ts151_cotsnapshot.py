@@ -45,7 +45,9 @@ def main() -> None:
     if args.codes:
         codes = [c.strip() for c in args.codes.split(",") if c.strip()]
 
-    logger.info("Starting CFTC COT snapshot job (backfill=%s, days=%d, codes=%s)", args.backfill, args.days, codes or "ALL")
+    logger.info(
+        "Starting CFTC COT snapshot job (backfill=%s, days=%d, codes=%s)", args.backfill, args.days, codes or "ALL"
+    )
     try:
         count = refresh_cot(codes=codes, backfill=args.backfill, days=args.days)
         logger.info("COT snapshot completed successfully (%d records upserted).", count)

@@ -12,10 +12,8 @@ import logging
 import re
 import urllib.error
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
-
-import pandas as pd
 
 from tradingbot.utils.buyback_scan import (
     TokenBucket,
@@ -169,10 +167,7 @@ def resolve_filing_target(
         # Fetch filing header to parse SUBJECT-COMPANY CIK
         cik = cand["cik"]
         acc_no_dashes = accession.replace("-", "")
-        header_url = (
-            f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/"
-            f"{accession}-index-headers.html"
-        )
+        header_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{accession}-index-headers.html"
         try:
             header_bytes = fetch_edgar_bytes(header_url, rate_limiter=rate_limiter, max_retries=1)
             header_text = header_bytes.decode("latin1")
@@ -370,11 +365,7 @@ def scan_mergers(
     If backfill_year is specified or table has no non-heartbeat rows, auto-backfills.
     """
     with get_db_session() as session:
-        real_events_count = (
-            session.query(MergerEvent)
-            .filter(MergerEvent.accession != "_HEARTBEAT")
-            .count()
-        )
+        real_events_count = session.query(MergerEvent).filter(MergerEvent.accession != "_HEARTBEAT").count()
 
     start_year = backfill_year
     if start_year is None and real_events_count == 0:

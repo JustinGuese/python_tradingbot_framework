@@ -9,11 +9,9 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
-from datetime import date
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import text
 
 from tradingbot.utils.buyback_scan import TokenBucket, fetch_edgar_bytes, load_sec_ticker_to_cik
 from tradingbot.utils.db import SecFundamental, get_db_session
@@ -38,9 +36,7 @@ US_GAAP_TAGS: tuple[str, ...] = (
 REVENUE_PRIMARY_TAG = "Revenues"
 REVENUE_FALLBACK_TAG = "RevenueFromContractWithCustomerExcludingAssessedTax"
 
-DEI_TAGS: tuple[str, ...] = (
-    "EntityCommonStockSharesOutstanding",
-)
+DEI_TAGS: tuple[str, ...] = ("EntityCommonStockSharesOutstanding",)
 
 
 def fetch_company_facts(
@@ -131,10 +127,7 @@ def parse_company_facts(
     # If fallback concept exists, add missing (unit, period_end, filed, form) combinations under tag 'Revenues'
     if REVENUE_FALLBACK_TAG in us_gaap:
         fallback_records = _extract_concept_units(us_gaap[REVENUE_FALLBACK_TAG], REVENUE_PRIMARY_TAG)
-        existing_keys = {
-            (r["unit"], r["period_end"], r["filed"], r["form"])
-            for r in revenue_records
-        }
+        existing_keys = {(r["unit"], r["period_end"], r["filed"], r["form"]) for r in revenue_records}
         for fb in fallback_records:
             fb_key = (fb["unit"], fb["period_end"], fb["filed"], fb["form"])
             if fb_key not in existing_keys:
@@ -228,10 +221,7 @@ def refresh_sec_fundamentals(
     Default universe is SP500 ∪ SP100.
     Returns (successful_tickers_count, failed_tickers_count).
     """
-    if tickers is None:
-        target_universe = sorted(set(SP500) | set(SP100))
-    else:
-        target_universe = list(tickers)
+    target_universe = sorted(set(SP500) | set(SP100)) if tickers is None else list(tickers)
 
     logger.info("Starting SEC fundamentals refresh for %d tickers", len(target_universe))
     cik_map = load_sec_ticker_to_cik(rate_limiter=rate_limiter)

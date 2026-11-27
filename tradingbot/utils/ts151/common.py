@@ -75,10 +75,7 @@ def topk_bottomk(
 
     Returns {} if scores has insufficient valid elements.
     """
-    if isinstance(scores, dict):
-        s = pd.Series(scores, dtype=float)
-    else:
-        s = scores.astype(float)
+    s = pd.Series(scores, dtype=float) if isinstance(scores, dict) else scores.astype(float)
 
     valid = s.dropna()
     valid = valid[np.isfinite(valid)]
@@ -87,10 +84,7 @@ def topk_bottomk(
     if num_assets == 0:
         return {}
 
-    if isinstance(k, float):
-        n = max(1, int(round(num_assets * k)))
-    else:
-        n = int(k)
+    n = max(1, round(num_assets * k)) if isinstance(k, float) else int(k)
 
     if n <= 0:
         return {}
@@ -130,10 +124,7 @@ def rank_weights(
     Total gross leverage equals `gross`, and net weight equals 0.0.
     Returns {} if fewer than 2 valid scores exist or all ranks are identical.
     """
-    if isinstance(scores, dict):
-        s = pd.Series(scores, dtype=float)
-    else:
-        s = scores.astype(float)
+    s = pd.Series(scores, dtype=float) if isinstance(scores, dict) else scores.astype(float)
 
     valid = s.dropna()
     valid = valid[np.isfinite(valid)]
@@ -235,15 +226,15 @@ def ibs(row: pd.Series | dict[str, Any]) -> float:
     return (close - low) / (high - low)
 
 
-def pivot_levels(h: float, l: float, c: float) -> tuple[float, float, float]:
+def pivot_levels(h: float, lo: float, c: float) -> tuple[float, float, float]:
     """Compute classic floor-trader pivot levels: Center (C), Resistance (R), Support (S).
 
-    C = (h + l + c) / 3
-    R = 2 * C - l
+    C = (h + lo + c) / 3
+    R = 2 * C - lo
     S = 2 * C - h
     """
-    center = (float(h) + float(l) + float(c)) / 3.0
-    resistance = 2.0 * center - float(l)
+    center = (float(h) + float(lo) + float(c)) / 3.0
+    resistance = 2.0 * center - float(lo)
     support = 2.0 * center - float(h)
     return center, resistance, support
 

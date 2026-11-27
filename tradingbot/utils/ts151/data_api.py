@@ -6,7 +6,6 @@ Reads are bulk from PostgreSQL; bots cache the frame in memory and filter by `as
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime
 from typing import Any
 
 import pandas as pd

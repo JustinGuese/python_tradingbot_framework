@@ -88,16 +88,18 @@ class TS151ImpliedVolatilityBot(TS151Bot):
                         columns=["underlying", "snapshot_date", "atm_iv_30", "iv_25c_30", "iv_25p_30"]
                     )
                 else:
-                    self._vol_surface_cache = pd.DataFrame([
-                        {
-                            "underlying": r.underlying,
-                            "snapshot_date": r.snapshot_date,
-                            "atm_iv_30": r.atm_iv_30,
-                            "iv_25c_30": r.iv_25c_30,
-                            "iv_25p_30": r.iv_25p_30,
-                        }
-                        for r in rows
-                    ])
+                    self._vol_surface_cache = pd.DataFrame(
+                        [
+                            {
+                                "underlying": r.underlying,
+                                "snapshot_date": r.snapshot_date,
+                                "atm_iv_30": r.atm_iv_30,
+                                "iv_25c_30": r.iv_25c_30,
+                                "iv_25p_30": r.iv_25p_30,
+                            }
+                            for r in rows
+                        ]
+                    )
         return self._vol_surface_cache
 
     def signal(self, ctx: Ctx) -> dict[str, float] | None:

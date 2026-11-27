@@ -22,7 +22,6 @@ import glob
 import importlib
 import inspect
 import math
-import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -33,10 +32,12 @@ import pandas as pd
 import pytest
 import yaml
 
+import tradingbot.utils.db as db_mod
+import tradingbot.utils.fx_carry as fx_carry
 from tradingbot.utils.botclass import Bot
-from tradingbot.utils.ts151 import common, data_api, fred, signals_commod, signals_macro
+from tradingbot.utils.ts151 import common, data_api, fred, signals_macro
 from tradingbot.utils.ts151.base import Ctx, TS151Bot
-from tradingbot.utils.universes import SP500, SP500_SECTOR
+from tradingbot.utils.universes import SP500
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALUES_YAML_PATH = REPO_ROOT / "helm" / "tradingbots" / "values.yaml"
@@ -66,18 +67,20 @@ def _mock_load_fundamentals(tickers=None, tags=None):
     for t in t_list:
         for tag in tag_list:
             for p_end, filed in [("2023-09-30", "2023-11-05"), ("2023-12-31", "2024-02-15")]:
-                rows.append({
-                    "cik": 1000,
-                    "ticker": t,
-                    "tag": tag,
-                    "unit": "USD",
-                    "period_end": pd.to_datetime(p_end),
-                    "filed": pd.to_datetime(filed),
-                    "value": 100.0,
-                    "form": "10-Q",
-                    "fy": 2023,
-                    "fp": "Q3",
-                })
+                rows.append(
+                    {
+                        "cik": 1000,
+                        "ticker": t,
+                        "tag": tag,
+                        "unit": "USD",
+                        "period_end": pd.to_datetime(p_end),
+                        "filed": pd.to_datetime(filed),
+                        "value": 100.0,
+                        "form": "10-Q",
+                        "fy": 2023,
+                        "fp": "Q3",
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -85,45 +88,49 @@ def _mock_load_cot(codes=None):
     from tradingbot.utils.ts151.universes import COT_CODES
 
     rows = []
-    for m_code in (codes or list(COT_CODES.values())):
+    for m_code in codes or list(COT_CODES.values()):
         for d in pd.date_range("2023-01-01", "2024-04-01", freq="W-TUE"):
-            rows.append({
-                "market_code": m_code,
-                "report_date": d,
-                "market_name": "Test",
-                "open_interest": 100000.0,
-                "comm_long": 40000.0,
-                "comm_short": 30000.0,
-                "noncomm_long": 20000.0,
-                "noncomm_short": 10000.0,
-                "nonrep_long": 5000.0,
-                "nonrep_short": 5000.0,
-            })
+            rows.append(
+                {
+                    "market_code": m_code,
+                    "report_date": d,
+                    "market_name": "Test",
+                    "open_interest": 100000.0,
+                    "comm_long": 40000.0,
+                    "comm_short": 30000.0,
+                    "noncomm_long": 20000.0,
+                    "noncomm_short": 10000.0,
+                    "nonrep_long": 5000.0,
+                    "nonrep_short": 5000.0,
+                }
+            )
     return pd.DataFrame(rows)
 
 
 def _mock_load_merger_events(start=None):
     now = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
-    return pd.DataFrame([
-        {
-            "accession": "_HEARTBEAT",
-            "cik": 0,
-            "ticker": "_HB",
-            "company_name": "Heartbeat",
-            "form": "8-K",
-            "filed_at": now,
-            "created_at": now,
-        },
-        {
-            "accession": "0001-23-456",
-            "cik": 1000,
-            "ticker": "AAPL",
-            "company_name": "Apple",
-            "form": "SC 13D",
-            "filed_at": now - pd.Timedelta(days=5),
-            "created_at": now - pd.Timedelta(days=5),
-        },
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "accession": "_HEARTBEAT",
+                "cik": 0,
+                "ticker": "_HB",
+                "company_name": "Heartbeat",
+                "form": "8-K",
+                "filed_at": now,
+                "created_at": now,
+            },
+            {
+                "accession": "0001-23-456",
+                "cik": 1000,
+                "ticker": "AAPL",
+                "company_name": "Apple",
+                "form": "SC 13D",
+                "filed_at": now - pd.Timedelta(days=5),
+                "created_at": now - pd.Timedelta(days=5),
+            },
+        ]
+    )
 
 
 def _mock_fred_series(series_id, lag_days=None, start="1990-01-01", **kwargs):
@@ -132,7 +139,7 @@ def _mock_fred_series(series_id, lag_days=None, start="1990-01-01", **kwargs):
 
 def _mock_load_fred_rates(lag_days=25, **kwargs):
     cols = ["EUR", "GBP", "AUD", "NZD", "JPY", "CAD", "CHF", "NOK", "SEK", "USD"]
-    return pd.DataFrame({c: 0.04 for c in cols}, index=DATES_1500)
+    return pd.DataFrame(dict.fromkeys(cols, 0.04), index=DATES_1500)
 
 
 @contextmanager
@@ -149,10 +156,8 @@ data_api.get_db_session = _mock_db_session
 fred.fred_series = _mock_fred_series
 signals_macro.fetch_crypto_fng = lambda **kwargs: pd.Series(50.0, index=DATES_1500)
 
-import tradingbot.utils.fx_carry as fx_carry
 fx_carry.load_fred_rates = _mock_load_fred_rates
 
-import tradingbot.utils.db as db_mod
 db_mod.get_db_session = _mock_db_session
 
 # Pre-discover all bot classes for test parametrization
@@ -194,28 +199,31 @@ def patch_all_external_dependencies(monkeypatch):
 
     # 6. Patch 9.1 roll yield live contract fetcher to return None (backtest mode)
     import tradingbot.ts151_rollyieldbot as ryb
+
     monkeypatch.setattr(ryb, "fetch_live_contracts", lambda: None)
 
     # 7. Patch implied volatility bot surface cache loader
     import tradingbot.ts151_impliedvolatilitybot as ivb
 
     def _mock_get_vol_surface(self):
-        return pd.DataFrame([
-            {
-                "underlying": t,
-                "snapshot_date": pd.to_datetime("2024-04-01"),
-                "atm_iv_30": 0.20 + 0.005 * i,
-                "iv_25c_30": 0.21,
-                "iv_25p_30": 0.22,
-            }
-            for i, t in enumerate(self.universe_list)
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "underlying": t,
+                    "snapshot_date": pd.to_datetime("2024-04-01"),
+                    "atm_iv_30": 0.20 + 0.005 * i,
+                    "iv_25c_30": 0.21,
+                    "iv_25p_30": 0.22,
+                }
+                for i, t in enumerate(self.universe_list)
+            ]
+        )
 
     monkeypatch.setattr(ivb.TS151ImpliedVolatilityBot, "_get_vol_surface", _mock_get_vol_surface)
     monkeypatch.setattr(ivb, "get_db_session", _mock_db_session)
 
     # 8. Ensure bot module local references are also patched
-    for stem, cls in DISCOVERED_BOTS:
+    for _stem, cls in DISCOVERED_BOTS:
         mod = inspect.getmodule(cls)
         if mod is not None:
             if hasattr(mod, "load_fundamentals"):
@@ -295,9 +303,7 @@ def test_bot_target_weights_smoke(stem: str, bot_cls: type[TS151Bot]):
     """
     # Use universe override <= 20 names for stock bots
     raw_u = getattr(bot_cls, "DEFAULT_UNIVERSE", None)
-    is_stock_bot = raw_u in ("sp500", "sp100") or (
-        isinstance(raw_u, (list, tuple)) and len(raw_u) > 20
-    )
+    is_stock_bot = raw_u in ("sp500", "sp100") or (isinstance(raw_u, (list, tuple)) and len(raw_u) > 20)
     kwargs: dict[str, Any] = {"universe": STOCK_UNIVERSE} if is_stock_bot else {}
 
     bot = bot_cls(**kwargs)
@@ -328,9 +334,9 @@ def test_bot_target_weights_smoke(stem: str, bot_cls: type[TS151Bot]):
     if weights is not None:
         assert isinstance(weights, dict), f"{bot_cls.__name__}: targetWeights returned {type(weights)}"
         allowed_keys = set(bot.tickers) | {"SHV"}
-        assert set(weights.keys()).issubset(
-            allowed_keys
-        ), f"{bot_cls.__name__}: returned keys {set(weights.keys()) - allowed_keys} not in universe"
+        assert set(weights.keys()).issubset(allowed_keys), (
+            f"{bot_cls.__name__}: returned keys {set(weights.keys()) - allowed_keys} not in universe"
+        )
 
         for k, v in weights.items():
             assert np.isfinite(v), f"{bot_cls.__name__}: non-finite weight for {k}: {v}"
@@ -359,27 +365,57 @@ def test_signal_ibs_hysteresis():
 
     # Bar 0: IBS = 0.5 (neutral) -> flat ({})
     df0 = pd.DataFrame({"high": highs[:1], "low": lows[:1], "close": closes[:1]}, index=dates[:1])
-    ctx0 = Ctx(closes=pd.DataFrame({"ETF": closes[:1]}, index=dates[:1]), datas={"ETF": df0}, as_of=dates[0], universe=("ETF",), bot=None)
+    ctx0 = Ctx(
+        closes=pd.DataFrame({"ETF": closes[:1]}, index=dates[:1]),
+        datas={"ETF": df0},
+        as_of=dates[0],
+        universe=("ETF",),
+        bot=None,
+    )
     assert ibs_reversal(ctx0, low=0.2, high=0.8) == {}
 
     # Bar 1: IBS = 0.1 (<0.2) -> enters long
     df1 = pd.DataFrame({"high": highs[:2], "low": lows[:2], "close": closes[:2]}, index=dates[:2])
-    ctx1 = Ctx(closes=pd.DataFrame({"ETF": closes[:2]}, index=dates[:2]), datas={"ETF": df1}, as_of=dates[1], universe=("ETF",), bot=None)
+    ctx1 = Ctx(
+        closes=pd.DataFrame({"ETF": closes[:2]}, index=dates[:2]),
+        datas={"ETF": df1},
+        as_of=dates[1],
+        universe=("ETF",),
+        bot=None,
+    )
     assert ibs_reversal(ctx1, low=0.2, high=0.8) == {"ETF": 1.0}
 
     # Bar 2: IBS = 0.5 (between 0.2 and 0.8) -> holds long
     df2 = pd.DataFrame({"high": highs[:3], "low": lows[:3], "close": closes[:3]}, index=dates[:3])
-    ctx2 = Ctx(closes=pd.DataFrame({"ETF": closes[:3]}, index=dates[:3]), datas={"ETF": df2}, as_of=dates[2], universe=("ETF",), bot=None)
+    ctx2 = Ctx(
+        closes=pd.DataFrame({"ETF": closes[:3]}, index=dates[:3]),
+        datas={"ETF": df2},
+        as_of=dates[2],
+        universe=("ETF",),
+        bot=None,
+    )
     assert ibs_reversal(ctx2, low=0.2, high=0.8) == {"ETF": 1.0}
 
     # Bar 3: IBS = 0.9 (>0.8) -> exits to flat
     df3 = pd.DataFrame({"high": highs[:4], "low": lows[:4], "close": closes[:4]}, index=dates[:4])
-    ctx3 = Ctx(closes=pd.DataFrame({"ETF": closes[:4]}, index=dates[:4]), datas={"ETF": df3}, as_of=dates[3], universe=("ETF",), bot=None)
+    ctx3 = Ctx(
+        closes=pd.DataFrame({"ETF": closes[:4]}, index=dates[:4]),
+        datas={"ETF": df3},
+        as_of=dates[3],
+        universe=("ETF",),
+        bot=None,
+    )
     assert ibs_reversal(ctx3, low=0.2, high=0.8) == {}
 
     # Bar 4: IBS = 0.5 (between 0.2 and 0.8) -> remains flat
     df4 = pd.DataFrame({"high": highs[:5], "low": lows[:5], "close": closes[:5]}, index=dates[:5])
-    ctx4 = Ctx(closes=pd.DataFrame({"ETF": closes[:5]}, index=dates[:5]), datas={"ETF": df4}, as_of=dates[4], universe=("ETF",), bot=None)
+    ctx4 = Ctx(
+        closes=pd.DataFrame({"ETF": closes[:5]}, index=dates[:5]),
+        datas={"ETF": df4},
+        as_of=dates[4],
+        universe=("ETF",),
+        bot=None,
+    )
     assert ibs_reversal(ctx4, low=0.2, high=0.8) == {}
 
 
@@ -465,7 +501,7 @@ def test_signal_knn_no_future_lookahead():
 
     assert weights is not None
     assert all(np.isfinite(v) for v in weights.values())
-    assert all(k in universe for k in weights.keys())
+    assert all(k in universe for k in weights)
 
 
 # ---------------------------------------------------------------------------
@@ -586,8 +622,9 @@ def test_value_bot_staleness_historical_vs_live():
 
 def test_roll_yield_bot_historical_does_not_call_download(monkeypatch):
     """(b) Roll-yield bot on a historical as_of returns None without calling yf.download."""
-    from tradingbot.ts151_rollyieldbot import TS151RollYieldBot
     import yfinance as yf
+
+    from tradingbot.ts151_rollyieldbot import TS151RollYieldBot
 
     mock_download = MagicMock()
     monkeypatch.setattr(yf, "download", mock_download)
@@ -623,4 +660,3 @@ def test_fred_series_raises_on_stale_series(monkeypatch):
 
     with pytest.raises(RuntimeError, match="stale"):
         _real_fred_series("DGS10", cache_dir="/tmp/nonexistent_test_fred_cache", refresh=True)
-

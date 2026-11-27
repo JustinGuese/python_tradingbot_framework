@@ -43,7 +43,13 @@ def main() -> None:
         sys.exit(0)
 
     fail_ratio = fail_count / total
-    logger.info("Summary: %d total, %d succeeded, %d failed (failure ratio: %.2f%%)", total, success_count, fail_count, fail_ratio * 100)
+    logger.info(
+        "Summary: %d total, %d succeeded, %d failed (failure ratio: %.2f%%)",
+        total,
+        success_count,
+        fail_count,
+        fail_ratio * 100,
+    )
 
     if fail_ratio > 0.20:
         logger.error("Failure ratio %.2f%% exceeded maximum allowed threshold (20%%)", fail_ratio * 100)

@@ -6,7 +6,6 @@ Tests pure signals in signals_commod.py and bot classes in tradingbot/.
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -55,8 +54,8 @@ def test_roll_yield():
 
 def test_roll_yield_scores():
     quotes = {
-        "USO": (80.0, 78.0, 1.0),   # backwardation: high roll yield
-        "UNG": (3.0, 3.5, 1.0),     # contango: low roll yield
+        "USO": (80.0, 78.0, 1.0),  # backwardation: high roll yield
+        "UNG": (3.0, 3.5, 1.0),  # contango: low roll yield
         "GLD": (200.0, 201.0, 2.0),
     }
     scores = signals_commod.roll_yield_scores(quotes)
@@ -69,43 +68,49 @@ def test_hedging_pressure_signal():
     records = []
     # Commodity A (code 001): commercial hedgers heavily short -> low HP -> buy
     for d in dates:
-        records.append({
-            "market_code": "001",
-            "report_date": d,
-            "comm_long": 10.0,
-            "comm_short": 90.0,
-        })
+        records.append(
+            {
+                "market_code": "001",
+                "report_date": d,
+                "comm_long": 10.0,
+                "comm_short": 90.0,
+            }
+        )
     # Commodity B (code 002): commercial hedgers heavily long -> high HP -> sell
     for d in dates:
-        records.append({
-            "market_code": "002",
-            "report_date": d,
-            "comm_long": 90.0,
-            "comm_short": 10.0,
-        })
+        records.append(
+            {
+                "market_code": "002",
+                "report_date": d,
+                "comm_long": 90.0,
+                "comm_short": 10.0,
+            }
+        )
     # Commodity C (code 003): balanced
     for d in dates:
-        records.append({
-            "market_code": "003",
-            "report_date": d,
-            "comm_long": 50.0,
-            "comm_short": 50.0,
-        })
+        records.append(
+            {
+                "market_code": "003",
+                "report_date": d,
+                "comm_long": 50.0,
+                "comm_short": 50.0,
+            }
+        )
     # Commodity D (code 004): slightly short
     for d in dates:
-        records.append({
-            "market_code": "004",
-            "report_date": d,
-            "comm_long": 30.0,
-            "comm_short": 70.0,
-        })
+        records.append(
+            {
+                "market_code": "004",
+                "report_date": d,
+                "comm_long": 30.0,
+                "comm_short": 70.0,
+            }
+        )
 
     cot_df = pd.DataFrame(records)
     etf_to_code = {"ETFA": "001", "ETFB": "002", "ETFC": "003", "ETFD": "004"}
 
-    weights = signals_commod.hedging_pressure_signal(
-        cot_df, etf_to_code, weeks=4, k=1, gross=1.0, long_only=False
-    )
+    weights = signals_commod.hedging_pressure_signal(cot_df, etf_to_code, weeks=4, k=1, gross=1.0, long_only=False)
     # k=1: ETFA has lowest HP -> long; ETFB has highest HP -> short
     assert "ETFA" in weights and weights["ETFA"] > 0
     assert "ETFB" in weights and weights["ETFB"] < 0
@@ -122,12 +127,15 @@ def test_commod_diversification_weights():
     ret_gld = np.random.normal(0.0003, 0.008, n)
     ret_dbc = np.random.normal(0.0002, 0.012, n)
 
-    df_closes = pd.DataFrame({
-        "SPY": 100.0 * np.exp(np.cumsum(ret_spy)),
-        "IEF": 100.0 * np.exp(np.cumsum(ret_ief)),
-        "GLD": 100.0 * np.exp(np.cumsum(ret_gld)),
-        "DBC": 100.0 * np.exp(np.cumsum(ret_dbc)),
-    }, index=dates)
+    df_closes = pd.DataFrame(
+        {
+            "SPY": 100.0 * np.exp(np.cumsum(ret_spy)),
+            "IEF": 100.0 * np.exp(np.cumsum(ret_ief)),
+            "GLD": 100.0 * np.exp(np.cumsum(ret_gld)),
+            "DBC": 100.0 * np.exp(np.cumsum(ret_dbc)),
+        },
+        index=dates,
+    )
 
     # Minvar
     w_minvar = signals_commod.commod_diversification_weights(df_closes, window=252, method="minvar")
@@ -174,10 +182,13 @@ def test_skewness_scores():
     r_pos_skew[20] = 0.15
     r_pos_skew[60] = 0.12
 
-    closes = pd.DataFrame({
-        "A": 100.0 * np.exp(np.cumsum(r_neg_skew)),
-        "B": 100.0 * np.exp(np.cumsum(r_pos_skew)),
-    }, index=dates)
+    closes = pd.DataFrame(
+        {
+            "A": 100.0 * np.exp(np.cumsum(r_neg_skew)),
+            "B": 100.0 * np.exp(np.cumsum(r_pos_skew)),
+        },
+        index=dates,
+    )
 
     scores = signals_commod.skewness_scores(closes, window=252)
     assert not scores.empty
@@ -192,10 +203,13 @@ def test_hedged_holding_weights():
     # Asset has beta ~ 1.5 vs mkt
     asset_ret = 1.5 * mkt + np.random.normal(0, 0.002, n)
 
-    closes = pd.DataFrame({
-        "XLK": 100.0 * np.exp(np.cumsum(asset_ret)),
-        "SPY": 100.0 * np.exp(np.cumsum(mkt)),
-    }, index=dates)
+    closes = pd.DataFrame(
+        {
+            "XLK": 100.0 * np.exp(np.cumsum(asset_ret)),
+            "SPY": 100.0 * np.exp(np.cumsum(mkt)),
+        },
+        index=dates,
+    )
 
     weights = signals_commod.hedged_holding_weights(closes, asset="XLK", hedge="SPY", window=63)
     assert weights["XLK"] == 1.0
@@ -206,11 +220,14 @@ def test_hedged_holding_weights():
 def test_contrarian_weights():
     dates = pd.date_range("2026-01-01", periods=10, freq="D")
     # A surged, B crashed, C stayed flat over last 5 bars
-    closes = pd.DataFrame({
-        "A": [100, 100, 100, 100, 100, 105, 110, 115, 120, 125],
-        "B": [100, 100, 100, 100, 100, 95, 90, 85, 80, 75],
-        "C": [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
-    }, index=dates)
+    closes = pd.DataFrame(
+        {
+            "A": [100, 100, 100, 100, 100, 105, 110, 115, 120, 125],
+            "B": [100, 100, 100, 100, 100, 95, 90, 85, 80, 75],
+            "C": [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
+        },
+        index=dates,
+    )
 
     # Insufficient bars (< window + 1)
     w_short = signals_commod.contrarian_weights(closes.iloc[:4], window=5, gross=2.0)
@@ -229,15 +246,16 @@ def test_trend_following_weights():
     # A trended up, B trended down
     ret_a = np.ones(300) * 0.001
     ret_b = np.ones(300) * -0.001
-    closes = pd.DataFrame({
-        "A": 100.0 * np.exp(np.cumsum(ret_a)),
-        "B": 100.0 * np.exp(np.cumsum(ret_b)),
-    }, index=dates)
-
-    w = signals_commod.trend_following_weights(
-        closes, window=252, vol_window=63, target_vol=0.4, max_gross=2.0
+    closes = pd.DataFrame(
+        {
+            "A": 100.0 * np.exp(np.cumsum(ret_a)),
+            "B": 100.0 * np.exp(np.cumsum(ret_b)),
+        },
+        index=dates,
     )
-    assert not w.get("A", 0.0) == 0.0
+
+    w = signals_commod.trend_following_weights(closes, window=252, vol_window=63, target_vol=0.4, max_gross=2.0)
+    assert w.get("A", 0.0) != 0.0
     assert w["A"] > 0.0
     assert w["B"] < 0.0
     assert sum(abs(x) for x in w.values()) <= 2.0001

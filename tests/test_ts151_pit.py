@@ -11,7 +11,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest
@@ -303,9 +302,7 @@ def test_verify_cot_market_names():
     cot.verify_cot_market_names(valid_records)
 
     # Mismatch record should raise ValueError
-    invalid_record = [
-        {"market_code": "088691", "market_name": "SILVER - COMMODITY EXCHANGE INC."}
-    ]
+    invalid_record = [{"market_code": "088691", "market_name": "SILVER - COMMODITY EXCHANGE INC."}]
     with pytest.raises(ValueError, match="CFTC market name mismatch for code 088691"):
         cot.verify_cot_market_names(invalid_record)
 
@@ -336,11 +333,7 @@ def test_upsert_cot_positions(mock_db_session):
     assert count2 == 1
 
     with mock_db_session() as session:
-        row = (
-            session.query(CotPosition)
-            .filter_by(market_code="999999", report_date=date(2026, 3, 3))
-            .first()
-        )
+        row = session.query(CotPosition).filter_by(market_code="999999", report_date=date(2026, 3, 3)).first()
         assert row is not None
         assert row.open_interest == 2000.0
         # Clean up

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Iterable
+from typing import Any, ClassVar
 
 from tradingbot.utils.ts151.base import Ctx, TS151Bot
 from tradingbot.utils.ts151.common import is_live_as_of

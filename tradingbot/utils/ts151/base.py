@@ -88,9 +88,7 @@ class TS151Bot(Bot):
         benchmarks = list(getattr(self, "BENCHMARKS", ()))
         self.BENCHMARKS = tuple(benchmarks)
 
-        tickers = list(
-            dict.fromkeys(self.universe_list + benchmarks + (["SHV"] if self.park_cash else []))
-        )
+        tickers = list(dict.fromkeys(self.universe_list + benchmarks + (["SHV"] if self.park_cash else [])))
 
         # Pre-populate instance attributes for environments where Bot.__init__ is mocked
         self.tickers = tickers
