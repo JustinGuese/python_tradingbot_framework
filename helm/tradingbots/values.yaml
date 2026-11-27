@@ -864,6 +864,372 @@ bots:
   schedule: "25 21 * * 1-5" # Daily 9:25 PM UTC Mon-Fri (after US close)
   suspend: false
 
+# =============================================================================
+# TS151 Trading Strategies (Kakushadze & Serur 2018) - Paper Bots & Data Jobs
+# All deployed with suspend: false (live paper execution)
+# =============================================================================
+
+- name: ts151_cotsnapshot
+  # §9.2 Data: CFTC Commitments of Traders weekly position report ingestion. UNPROVEN.
+  schedule: "30 6 * * 6"
+  suspend: false
+
+- name: ts151_mergerscan
+  # §3.16 Data: EDGAR tender offer and merger filing announcements scan. UNPROVEN.
+  schedule: "15 13-21 * * 1-5"
+  suspend: false
+
+- name: ts151_secfundamentalssnapshot
+  # §3 Data: SEC XBRL fundamentals ingestion (weekly backfill/refresh of S&P 500 & 100). UNPROVEN.
+  schedule: "0 6 * * 0"
+  suspend: false
+
+- name: ts151_alphacombobot
+  # §3.20: Alpha Combination. Paper, UNPROVEN.
+  schedule: "45 21 * * 1-5"
+  suspend: false
+
+- name: ts151_alpharotationbot
+  # §4.2: Alpha Rotation strategy bot. Paper, UNPROVEN.
+  schedule: "05 21 * * 1-5"
+  suspend: false
+
+- name: ts151_barbellsbot
+  # §5.3: Barbell Portfolio Bot (§5.3). Paper, UNPROVEN.
+  schedule: "05 21 * * 1-5"
+  suspend: false
+
+- name: ts151_bondcarrybot
+  # §5.11: Bond Carry and Roll-Down Bot (§5.11). Paper, UNPROVEN.
+  schedule: "06 21 * * 1-5"
+  suspend: false
+
+- name: ts151_bondvaluebot
+  # §5.10: Bond Value Bot (§5.10). Paper, UNPROVEN.
+  schedule: "06 21 * * 1-5"
+  suspend: false
+
+- name: ts151_breakevenbot
+  # §14.1: Inflation Breakeven Arbitrage Bot (§14.1). Paper, UNPROVEN.
+  schedule: "07 21 * * 1-5"
+  suspend: false
+
+- name: ts151_bulletsbot
+  # §5.2: Bullet Portfolio Bot (§5.2). Paper, UNPROVEN.
+  schedule: "07 21 * * 1-5"
+  suspend: false
+
+- name: ts151_channelbot
+  # §3.15: Channel (Donchian Mean Reversion). Paper, UNPROVEN.
+  schedule: "08 21 * * 1-5"
+  suspend: false
+
+- name: ts151_commoddiversificationbot
+  # §9.3: Commodity Diversification Bot (§9.3). Paper, UNPROVEN.
+  schedule: "08 21 * * 1-5"
+  suspend: false
+
+- name: ts151_commodvaluebot
+  # §9.4: Commodity Value Bot (§9.4). Paper, UNPROVEN.
+  schedule: "09 21 * * 1-5"
+  suspend: false
+
+- name: ts151_contrarianbot
+  # §10.3: Contrarian Bot (§10.3). Paper, UNPROVEN.
+  schedule: "09 21 * * 1-5"
+  suspend: false
+
+- name: ts151_convertiblearbbot
+  # §12.1: Convertible Arbitrage Bot (§12.1). Paper, UNPROVEN.
+  schedule: "10 21 * * 1-5"
+  suspend: false
+
+- name: ts151_cryptoannbot
+  # §18.2: Crypto ANN Bot (§18.2). Paper, UNPROVEN.
+  schedule: "10 0 * * *"
+  suspend: false
+
+- name: ts151_cryptosentimentbot
+  # §18.3: Crypto Sentiment Bot (§18.3). Paper, UNPROVEN.
+  schedule: "10 0 * * *"
+  suspend: false
+
+- name: ts151_curvespreadbot
+  # §5.13: Yield Curve Slope / Spread Bot (§5.13). Paper, UNPROVEN.
+  schedule: "10 21 * * 1-5"
+  suspend: false
+
+- name: ts151_ddbutterflybot
+  # §5.6: Dollar-Duration Butterfly Bot (§5.6). Paper, UNPROVEN.
+  schedule: "11 21 * * 1-5"
+  suspend: false
+
+- name: ts151_distressbot
+  # §15.3: Distressed Securities. Paper, UNPROVEN.
+  schedule: "46 21 * * 1-5"
+  suspend: false
+
+- name: ts151_distresseddebtbot
+  # §15.1: Distressed Debt Strategy Bot (§15.1). Paper, UNPROVEN.
+  schedule: "11 21 * * 1-5"
+  suspend: false
+
+- name: ts151_dollarcarrybot
+  # §8.3: Dollar Carry Trade strategy bot. Paper, UNPROVEN.
+  schedule: "12 21 * * 1-5"
+  suspend: false
+
+- name: ts151_earningsmomentumbot
+  # §3.2: Earnings Momentum (SUE). Paper, UNPROVEN.
+  schedule: "47 21 * * 1-5"
+  suspend: false
+
+- name: ts151_econannouncementbot
+  # §19.5: Economic Announcement Bot (§19.5). Paper, UNPROVEN.
+  schedule: "12 21 * * 1-5"
+  suspend: false
+
+- name: ts151_fiftyfiftybutterflybot
+  # §5.7: Fifty-Fifty Butterfly Bot (§5.7). Paper, UNPROVEN.
+  schedule: "13 21 * * 1-5"
+  suspend: false
+
+- name: ts151_fundamentalmacrobot
+  # §19.2: Fundamental Macro Bot (§19.2). Paper, UNPROVEN.
+  schedule: "13 21 * * 1-5"
+  suspend: false
+
+- name: ts151_fxcarrybot
+  # §8.2: FX Carry Trade strategy bot. Paper, UNPROVEN.
+  schedule: "14 21 * * 1-5"
+  suspend: false
+
+- name: ts151_fxmabot
+  # §8.1: FX Moving Average crossover strategy bot. Paper, UNPROVEN.
+  schedule: "14 21 * * 1-5"
+  suspend: false
+
+- name: ts151_fxmomcarrybot
+  # §8.4: FX Momentum + Carry Blend strategy bot. Paper, UNPROVEN.
+  schedule: "15 21 * * 1-5"
+  suspend: false
+
+- name: ts151_globalfixedincomebot
+  # §19.4: Global Fixed Income Bot (§19.4). Paper, UNPROVEN.
+  schedule: "15 21 * * 1-5"
+  suspend: false
+
+- name: ts151_globalinflationbot
+  # §19.3: Global Inflation Bot (§19.3). Paper, UNPROVEN.
+  schedule: "16 21 * * 1-5"
+  suspend: false
+
+- name: ts151_hedgedholdingbot
+  # §10.1: Hedged Holding Bot (§10.1). Paper, UNPROVEN.
+  schedule: "16 21 * * 1-5"
+  suspend: false
+
+- name: ts151_hedgingpressurebot
+  # §9.2: Hedging Pressure Bot (§9.2). Paper, UNPROVEN.
+  schedule: "17 21 * * 1-5"
+  suspend: false
+
+- name: ts151_ibsbot
+  # §4.4: Internal Bar Strength (IBS) bot. Paper, UNPROVEN.
+  schedule: "50 20 * * 1-5"
+  suspend: false
+
+- name: ts151_immunizationbot
+  # §5.5: Cash Flow Immunization Bot (§5.5). Paper, UNPROVEN.
+  schedule: "17 21 * * 1-5"
+  suspend: false
+
+- name: ts151_impliedvolatilitybot
+  # §3.5: Implied Volatility. Paper, UNPROVEN, forward-only.
+  schedule: "18 21 * * 1-5"
+  suspend: false
+
+- name: ts151_intraassetdivbot
+  # §16.3: Intra-Asset Diversification Bot (§16.3). Paper, UNPROVEN.
+  schedule: "18 21 * * 1-5"
+  suspend: false
+
+- name: ts151_knnbot
+  # §3.17: K-Nearest Neighbors (KNN). Paper, UNPROVEN.
+  schedule: "19 21 * * 1-5"
+  suspend: false
+
+- name: ts151_laddersbot
+  # §5.4: Ladder Portfolio Bot (§5.4). Paper, UNPROVEN.
+  schedule: "19 21 * * 1-5"
+  suspend: false
+
+- name: ts151_leveragedetfbot
+  # §4.5: Leveraged ETF Pairs strategy bot. Paper, UNPROVEN.
+  schedule: "20 21 * * 1-5"
+  suspend: false
+
+- name: ts151_lowriskbondbot
+  # §5.9: Low-Risk Bond Bot (§5.9). Paper, UNPROVEN.
+  schedule: "21 21 * * 1-5"
+  suspend: false
+
+- name: ts151_lowvolatilitybot
+  # §3.4: Low Volatility. Paper, UNPROVEN.
+  schedule: "48 21 * * 1-5"
+  suspend: false
+
+- name: ts151_mbsbot
+  # §11.7: MBS Arbitrage Bot (§11.7). Paper, UNPROVEN.
+  schedule: "22 21 * * 1-5"
+  suspend: false
+
+- name: ts151_meanreversionclusterbot
+  # §3.9: Mean Reversion with Industry Clusters. Paper, UNPROVEN.
+  schedule: "49 21 * * 1-5"
+  suspend: false
+
+- name: ts151_mergerarbbot
+  # §3.16: Merger Arbitrage. Paper, UNPROVEN.
+  schedule: "23 21 * * 1-5"
+  suspend: false
+
+- name: ts151_multiassettrendbot
+  # §4.6: Multi-asset Trend strategy bot. Paper, UNPROVEN.
+  schedule: "24 21 * * 1-5"
+  suspend: false
+
+- name: ts151_multifactorbot
+  # §3.6: Multifactor. Paper, UNPROVEN.
+  schedule: "50 21 * * 1-5"
+  suspend: false
+
+- name: ts151_munibot
+  # §13.1: Municipal Bond Spread Bot (§13.1). Paper, UNPROVEN.
+  schedule: "25 21 * * 1-5"
+  suspend: false
+
+- name: ts151_pairstradingbot
+  # §3.8: Pairs Trading. Paper, UNPROVEN.
+  schedule: "51 21 * * 1-5"
+  suspend: false
+
+- name: ts151_pricemomentumbot
+  # §3.1: Price Momentum. Paper, UNPROVEN.
+  schedule: "52 21 * * 1-5"
+  suspend: false
+
+- name: ts151_realestatediversitybot
+  # §16.2: Real Estate Diversity Bot (§16.2). Paper, UNPROVEN.
+  schedule: "26 21 * * 1-5"
+  suspend: false
+
+- name: ts151_realestateinflationbot
+  # §16.5: Real Estate Inflation Bot (§16.5). Paper, UNPROVEN.
+  schedule: "27 21 * * 1-5"
+  suspend: false
+
+- name: ts151_realestatemomentumbot
+  # §16.4: Real Estate Momentum Bot (§16.4). Paper, UNPROVEN.
+  schedule: "28 21 * * 1-5"
+  suspend: false
+
+- name: ts151_regressionbutterflybot
+  # §5.8: Regression-Weighted Butterfly Bot (§5.8). Paper, UNPROVEN.
+  schedule: "29 21 * * 1-5"
+  suspend: false
+
+- name: ts151_residualmomentumbot
+  # §3.7: Residual Momentum. Paper, UNPROVEN.
+  schedule: "53 21 * * 1-5"
+  suspend: false
+
+- name: ts151_rollingdownbot
+  # §5.12: Riding the Yield Curve (Rolling Down) Bot (§5.12). Paper, UNPROVEN.
+  schedule: "30 21 * * 1-5"
+  suspend: false
+
+- name: ts151_rollyieldbot
+  # §9.1: Roll Yield Bot (§9.1). Paper, UNPROVEN, forward-only.
+  schedule: "31 21 * * 1-5"
+  suspend: false
+
+- name: ts151_rsquaredbot
+  # §4.3: R-squared Rotation strategy bot. Paper, UNPROVEN.
+  schedule: "32 21 * * 1-5"
+  suspend: false
+
+- name: ts151_sectormomentumbot
+  # §4.1: Sector Momentum strategy bot. Paper, UNPROVEN.
+  schedule: "33 21 * * 1-5"
+  suspend: false
+
+- name: ts151_singlemabot
+  # §3.11: Single Moving Average. Paper, UNPROVEN.
+  schedule: "34 21 * * 1-5"
+  suspend: false
+
+- name: ts151_skewnessbot
+  # §9.5: Commodity Skewness Bot (§9.5). Paper, UNPROVEN.
+  schedule: "35 21 * * 1-5"
+  suspend: false
+
+- name: ts151_statarbbot
+  # §3.18: Statistical Arbitrage. Paper, UNPROVEN.
+  schedule: "36 21 * * 1-5"
+  suspend: false
+
+- name: ts151_supportresistancebot
+  # §3.14: Support and Resistance (Pivot Points). Paper, UNPROVEN.
+  schedule: "37 21 * * 1-5"
+  suspend: false
+
+- name: ts151_threemabot
+  # §3.13: Three Moving Averages. Paper, UNPROVEN.
+  schedule: "38 21 * * 1-5"
+  suspend: false
+
+- name: ts151_trendfollowingbot
+  # §10.4: Trend Following Bot (§10.4). Paper, UNPROVEN.
+  schedule: "39 21 * * 1-5"
+  suspend: false
+
+- name: ts151_twomabot
+  # §3.12: Two Moving Averages. Paper, UNPROVEN.
+  schedule: "40 21 * * 1-5"
+  suspend: false
+
+- name: ts151_valuebot
+  # §3.3: Value (Book-to-Price). Paper, UNPROVEN.
+  schedule: "54 21 * * 1-5"
+  suspend: false
+
+- name: ts151_varianceswapbot
+  # §7.6: Replicating Variance Swap / VRP strategy bot. Paper, UNPROVEN.
+  schedule: "41 21 * * 1-5"
+  suspend: false
+
+- name: ts151_vixbasisbot
+  # §7.2: VIX Basis / Term Structure strategy bot. Paper, UNPROVEN.
+  schedule: "42 21 * * 1-5"
+  suspend: false
+
+- name: ts151_volcarrybot
+  # §7.3: Hedged Volatility Carry strategy bot. Paper, UNPROVEN.
+  schedule: "43 21 * * 1-5"
+  suspend: false
+
+- name: ts151_voltargetbot
+  # §6.5: Volatility Targeting strategy bot. Paper, UNPROVEN.
+  schedule: "44 21 * * 1-5"
+  suspend: false
+
+- name: ts151_weightedregressionbot
+  # §3.10: Weighted Regression Mean Reversion. Paper, UNPROVEN.
+  schedule: "55 21 * * 1-5"
+  suspend: false
+
+
 # Background (both were unscheduled until 2026-11-19) — multiassetcarrybot and shortvolcarrybot are implemented,
 # tested, and have each been through one round of diagnosed-and-fixed design
 # errors. Both improved materially; neither cleared the bar, so neither is

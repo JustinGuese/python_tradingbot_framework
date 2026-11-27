@@ -1294,3 +1294,69 @@ def get_db_session() -> Generator[Session, None, None]:
         if session:
             with suppress(Exception):
                 session.close()
+
+
+# -----------------------------------------------------------------------------
+# TS151 Strategy Models (PLAN-ts151.md S0)
+# -----------------------------------------------------------------------------
+
+
+class SecFundamental(Base):
+    """SEC XBRL fundamental data facts for S&P constituents.
+
+    Composite primary key: (cik, tag, unit, period_end, filed, form).
+    """
+
+    __tablename__ = "ts151_sec_fundamentals"
+
+    cik: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tag: Mapped[str] = mapped_column(String, primary_key=True)
+    unit: Mapped[str] = mapped_column(String, primary_key=True)
+    period_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    filed: Mapped[date] = mapped_column(Date, primary_key=True, index=True)
+    form: Mapped[str] = mapped_column(String, primary_key=True)
+
+    ticker: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    fy: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fp: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class CotPosition(Base):
+    """CFTC Commitments of Traders (COT) legacy futures positions.
+
+    Composite primary key: (market_code, report_date).
+    """
+
+    __tablename__ = "ts151_cot_positions"
+
+    market_code: Mapped[str] = mapped_column(String, primary_key=True)
+    report_date: Mapped[date] = mapped_column(Date, primary_key=True)
+
+    market_name: Mapped[str] = mapped_column(String, nullable=False)
+    open_interest: Mapped[float] = mapped_column(Float, nullable=False)
+    comm_long: Mapped[float] = mapped_column(Float, nullable=False)
+    comm_short: Mapped[float] = mapped_column(Float, nullable=False)
+    noncomm_long: Mapped[float] = mapped_column(Float, nullable=False)
+    noncomm_short: Mapped[float] = mapped_column(Float, nullable=False)
+    nonrep_long: Mapped[float] = mapped_column(Float, nullable=False)
+    nonrep_short: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
+
+
+class MergerEvent(Base):
+    """EDGAR merger and tender offer filing announcements.
+
+    Primary key: accession number.
+    """
+
+    __tablename__ = "ts151_merger_events"
+
+    accession: Mapped[str] = mapped_column(String, primary_key=True)
+    cik: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticker: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    company_name: Mapped[str] = mapped_column(String, nullable=False)
+    form: Mapped[str] = mapped_column(String, nullable=False)
+    filed_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=_utcnow_naive)
